@@ -1,5 +1,6 @@
 #include "overlay.hpp"
 #include "gestures.hpp"
+#include "laser_setting.hpp"
 #include "panel_surface.hpp"
 
 #include <openvr.h>
@@ -50,7 +51,9 @@ struct Overlay::Impl {
     vr::VRActionSetHandle_t action_set = vr::k_ulInvalidActionSetHandle;
     std::array<vr::VRActionHandle_t, 6> actions{};
     std::filesystem::path settings_path;
+    std::filesystem::path laser_settings_path;
     Mount mount;
+    bool lasers_anytime = false, laser_change_failed = false;
     Config config;
     PanelSurface surface;
     Panel panel;
@@ -75,7 +78,9 @@ struct Overlay::Impl {
 
     Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested, bool persist)
         : settings_path(default_mount_settings_path()),
+          laser_settings_path(default_laser_settings_path()),
           mount(requested ? *requested : load_mount(settings_path)),
+          lasers_anytime(load_lasers_anytime(laser_settings_path)),
           config(load_config(default_config_path())),
           surface(resolve_font(assets, font.empty() ? config.font : font), mount, config.theme),
           persist_mount(persist) {
@@ -107,8 +112,14 @@ struct Overlay::Impl {
             overlay_check(overlay->CreateOverlay("local.frameyap.overlay.panel", "FrameYap", &handle), overlay, "CreateOverlay");
             overlay_check(overlay->SetOverlayWidthInMeters(handle, 0.85f), overlay, "SetOverlayWidthInMeters");
             overlay_check(overlay->SetOverlayInputMethod(handle, vr::VROverlayInputMethod_Mouse), overlay, "SetOverlayInputMethod");
-            // Let dashboard lasers reach our controls without forcing global
-            // laser-mouse mode over a running scene.
+            // Normal priority actions stay unchanged. This separate, explicit
+            // preference requests system-wide laser mouse mode only while the
+            // panel is visible; it may affect interaction with a running game.
+            if (lasers_anytime && overlay->SetOverlayFlag(handle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true) != vr::VROverlayError_None) {
+                lasers_anytime = false;
+                laser_change_failed = true;
+            }
+            surface.set_lasers_anytime(lasers_anytime);
             overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_VisibleInDashboard, true), overlay, "VisibleInDashboard");
             vr::HmdVector2_t mouse_scale{{float(W), float(H)}};
             overlay_check(overlay->SetOverlayMouseScale(handle, &mouse_scale), overlay, "SetOverlayMouseScale");
@@ -144,7 +155,8 @@ struct Overlay::Impl {
         }
         if (effective == Mount::World && applied_mount && *applied_mount != Mount::World)
             world_ready = false; // a fresh world fallback near the wearer, not an old room location
-        std::string note = save_failed ? "Preference could not be saved; using it for this session." : "";
+        std::string note = laser_change_failed ? "SteamVR declined the laser mode change." :
+                           save_failed ? "Preference could not be saved; using it for this session." : "";
         if (effective != mount) note = save_failed ? "Wrist untracked; world fallback. Preference not saved." :
                                                      "Wrist not tracked - using world space until it returns.";
         if (effective == Mount::World && !world_ready) {
@@ -273,8 +285,20 @@ struct Overlay::Impl {
                 last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter) ++pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime) ++pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
+                    if (event_result.lasers_anytime) {
+                        const bool enabled = *event_result.lasers_anytime;
+                        if (overlay->SetOverlayFlag(handle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible,
+                                                    enabled) == vr::VROverlayError_None) {
+                            lasers_anytime = enabled;
+                            laser_change_failed = false;
+                            surface.set_lasers_anytime(enabled);
+                            save_failed = persist_mount && !save_lasers_anytime(laser_settings_path, enabled);
+                        } else {
+                            laser_change_failed = true;
+                        }
+                    }
                     if (event_result.mount) {
                         mount = *event_result.mount;
                         save_failed = persist_mount && !save_mount(settings_path, mount);
@@ -335,7 +359,12 @@ void Overlay::draw(const Panel& panel) { impl_->draw(panel); }
 std::string Overlay::controls_status() {
     // Diagnostic only: distinguish SteamVR binding/activity from our stricter
     // pose/role gate. Raw legacy state is read-only and may be unavailable.
-    std::string result = "SteamVR update=" + std::to_string(int(impl_->action_update_error));
+    bool laser_flag = false;
+    const auto laser_error = impl_->overlay->GetOverlayFlag(impl_->handle,
+        vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, &laser_flag);
+    std::string result = "SteamVR update=" + std::to_string(int(impl_->action_update_error)) +
+        " dashboard=" + (impl_->overlay->IsDashboardVisible() ? "Y" : "N") +
+        " lasers-anytime=" + (laser_error == vr::VROverlayError_None ? (laser_flag ? "Y" : "N") : "n/a");
     for (size_t i = 0; i < 2; ++i) {
         const auto role = i == 0 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand;
         const auto device = impl_->system->GetTrackedDeviceIndexForControllerRole(role);

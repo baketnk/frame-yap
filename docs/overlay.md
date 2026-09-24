@@ -107,10 +107,25 @@ keeps the selection for the session and displays a warning. `--mount
 world|left-wrist|right-wrist|head` overrides the saved choice for one launch without
 writing it; `--head` remains an alias for `--mount head`.
 
+Settings also has **Lasers anytime** (default off). When enabled, FrameYap sets
+OpenVR's `VROverlayFlags_MakeOverlaysInteractiveIfVisible` on its panel. OpenVR
+requests system-wide laser mouse mode while the panel is visible, including
+with Steam's dashboard closed; it may change interaction with games. Turning
+it off removes that request. This is **not** the experimental overlay action
+priority override and does not promise pass-through of a dashboard-owned
+button or PTT delivery during dashboard focus. The choice is saved as `on` or
+`off` in `$XDG_CONFIG_HOME/frameyap/lasers-anytime` (default
+`~/.config/frameyap/lasers-anytime`) using a private atomic file replacement;
+missing, symlinked or invalid files mean off. A failed save keeps the new
+choice only for the running session and shows a warning. To turn it back on
+after disabling it with the dashboard closed, open the dashboard to use its
+laser on the Settings button. Controls-only checks can toggle it temporarily
+but do not save the preference. This has not yet been accepted in a headset.
+
 ### Hardware-free UI checks
 
-The default build tests mount parsing, persistence and pose geometry without any
-native dependencies. A FreeType-only opt-in build exercises the actual renderer,
+The default build tests mount parsing, laser preference persistence and pose
+geometry without any native dependencies. A FreeType-only opt-in build exercises the actual renderer,
 pointer gating, tab switches, pagination, recording state and redraw invalidation:
 
 ```sh
@@ -136,11 +151,13 @@ updates are flicker-free.
 
 `assets/actions.json` names six actions: left/right grip, PTT, cancel, insert,
 Enter. `bindings_frame_controller.json` maps right X click to hold-to-talk PTT;
-the grip bindings remain for optional remapping/diagnosis. Both grip actions
-were **inactive** during the dashboard controls check despite a loaded binding
-file; this does not prove whether right X will deliver until an on-device test.
-`bindings_knuckles.json` is an
-additional **Index/knuckles example only**. Collisions with scene actions require
+the grip bindings remain for optional remapping/diagnosis. In one dashboard
+probe grips were inactive; a later controls-only probe delivered repeated right
+X PTT BeginRecord/EndRecord callbacks. The wearer reports controller actions
+are usable with Steam's dashboard closed, not with the dashboard itself open.
+Neither probe used a microphone or established game-scene pass-through.
+`bindings_knuckles.json` is an additional **Index/knuckles example only**.
+Collisions with scene actions require
 separate on-device validation. Left grip double tap
 (releases <=250 ms, second press within 350 ms) requests explicit Enter only
 when enabled. Right grip: first short squeeze and release (<=250 ms), then

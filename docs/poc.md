@@ -7,6 +7,8 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
 
 - Opt-in OpenVR RGBA overlay with world-space default and selectable wrist/head
   mounts, status, recording timer, paginated UTF-8 preview and explicit controls.
+  A saved, default-off Lasers anytime setting requests system-wide laser mouse
+  mode while FrameYap is visible; it may affect games, and is not an input override.
 - Remappable SteamVR actions. The default Steam Frame binding maps right X
   (hold to record, release to transcribe) to the existing PTT action using the
   observed `frame_controller` profile. Grip bindings remain, but both grip

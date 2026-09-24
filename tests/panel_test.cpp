@@ -11,7 +11,9 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
     surface.pointer_down(cursor, x, y);
     return surface.pointer_up(cursor, x, y);
 }
-void no_action(const SurfaceEvent& event) { assert(!event.action && !event.mount && !event.recenter); }
+void no_action(const SurfaceEvent& event) {
+    assert(!event.action && !event.mount && !event.lasers_anytime && !event.recenter);
+}
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
     assert(out);
@@ -104,6 +106,12 @@ int main(int argc, char** argv) {
     assert(click(surface, 680, 332).mount == Mount::RightWrist);
     assert(click(surface, 680, 260).mount == Mount::Head);
     assert(click(surface, 180, 260).mount == Mount::World);
+    auto laser = click(surface, 680, 420);
+    assert(laser.lasers_anytime == true && !laser.action && !laser.mount);
+    surface.set_lasers_anytime(true); assert(surface.render(p));
+    laser = click(surface, 680, 420);
+    assert(laser.lasers_anytime == false && !laser.action && !laser.mount);
+    surface.set_lasers_anytime(false); assert(surface.render(p));
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     surface.set_placement_note("Wrist not tracked - using world space until it returns.");
     assert(surface.render(p)); assert(!surface.render(p));
@@ -114,6 +122,7 @@ int main(int argc, char** argv) {
     no_action(click(surface, 100, 160));
     no_action(surface.pointer_up(1, 680, 260));
     no_action(click(surface, 680, 260)); // mount controls not active on Review
+    no_action(click(surface, 680, 420)); // laser toggle only exists on Settings
 
     // Long UTF-8, newlines and malformed bytes are bounded, paginated and navigable.
     p.transcript.clear();

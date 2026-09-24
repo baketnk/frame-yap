@@ -11,6 +11,7 @@ namespace frameyap {
 struct SurfaceEvent {
     std::optional<UiAction> action;
     std::optional<Mount> mount;
+    std::optional<bool> lasers_anytime;
     bool recenter = false;
 };
 // One CPU RGBA canvas, independent of OpenVR. Settings replace the review area;
@@ -29,6 +30,7 @@ public:
     void pointer_move(unsigned cursor, float x, float y);
     void reset_pointers();
     void set_placement_note(std::string note);
+    void set_lasers_anytime(bool enabled);
     bool available(UiAction action) const;
 private:
     struct Impl;

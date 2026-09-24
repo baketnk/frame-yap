@@ -20,13 +20,16 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
 ## Controls
 
 - **Right X (default Frame binding):** hold to record; release to
-  transcribe. This PTT action is remappable through SteamVR bindings; delivery
-  in the dashboard still requires an on-device test.
+  transcribe. Repeated presses reached the controls-only diagnostic on Frame;
+  live mic capture through this shortcut still needs guided acceptance. This
+  PTT action is remappable through SteamVR bindings.
 - **Left grip (when active):** double-tap to explicitly send Enter. Never inferred from speech.
 - **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
   Review and settings share one Inconsolata/neon-framed surface. World-space by
   default; settings offer left wrist, right wrist and head mounting, plus recenter.
-  Dashboard lasers provide clickable controls without forcing global laser mode.
+  Dashboard lasers provide clickable controls. Settings → Lasers anytime is an
+  opt-in, default-off system-wide laser mode while the panel is visible; it may
+  affect games and is separate from experimental input overrides.
 - **Theme and controls:** optional `$XDG_CONFIG_HOME/frameyap/config.json` selects
   panel colors, a font path and Frame controller button mappings; missing fonts
   fall back to bundled Inconsolata. The installer creates/checks this file and

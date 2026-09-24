@@ -26,9 +26,9 @@ struct Rect {
     }
 };
 enum class Control { Review, Settings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
-                     World, Left, Right, Head, Recenter };
+                     World, Left, Right, Head, Recenter, LasersAnytime };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 14> buttons{{
+constexpr std::array<Button, 15> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{32, 406, 154, 44}, Control::Prev, "Previous"},
@@ -43,6 +43,7 @@ constexpr std::array<Button, 14> buttons{{
     {{32, 308, 454, 58}, Control::Left, "Left wrist"},
     {{514, 308, 454, 58}, Control::Right, "Right wrist"},
     {{32, 394, 300, 50}, Control::Recenter, "Recenter in front"},
+    {{514, 394, 454, 50}, Control::LasersAnytime, "Lasers anytime"},
 }};
 std::optional<UiAction> action(Control c) {
     switch (c) {
@@ -100,7 +101,7 @@ struct PanelSurface::Impl {
     Mount mount;
     Theme theme;
     Color background, card, ink, muted, cyan, pink;
-    bool settings = false, dirty = true;
+    bool settings = false, dirty = true, lasers_anytime = false;
     std::string placement_note;
     std::array<int, 2> pressed{{-1, -1}};
     std::vector<std::string> lines;
@@ -238,7 +239,7 @@ struct PanelSurface::Impl {
     }
     bool visible(Control c) const {
         if (c == Control::Prev || c == Control::Next) return !settings;
-        if (mounting(c) || c == Control::Recenter) return settings;
+        if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime) return settings;
         return true;
     }
     bool enabled(Control c) const {
@@ -294,11 +295,11 @@ struct PanelSurface::Impl {
                 text(detail[i], 32, 486 + int(i) * 30, 24, muted, 936);
             if (detail.size() > 2) text("[detail truncated]", 730, 546, 22, pink, 968);
         } else {
-            text("MOUNT THE MENU", 32, 224, 22, muted, 968);
-            text("World stays put. Recenter places it in front of you.", 354, 426, 22, muted, 968);
-            text(placement_note.empty() ? "Choose a mount. Preference is saved on this device." : placement_note,
-                 32, 486, 23, muted, 968);
-            text("Tracking lost? Wrist placement falls back to world space.", 32, 518, 23, muted, 968);
+            text("MOUNT AND INTERACTION", 32, 224, 22, muted, 968);
+            text("Lasers anytime enables system-wide laser mode while this panel is visible.", 32, 472, 20, muted, 968);
+            text(placement_note.empty() ? "May affect games. Default off; changes saved on this device." : placement_note,
+                 32, 509, 22, muted, 968);
+            text("If off, open the dashboard to click this setting again.", 32, 538, 20, muted, 968);
         }
         rect({32, 550, 936, 1}, mix(card, cyan, .17f));
         for (size_t i = 0; i < buttons.size(); ++i) {
@@ -306,7 +307,8 @@ struct PanelSurface::Impl {
             if (!visible(b.id)) continue;
             bool on = enabled(b.id);
             bool selected = (b.id == Control::Review && !settings) || (b.id == Control::Settings && settings) ||
-                            (mounting(b.id) && *mounting(b.id) == mount);
+                            (mounting(b.id) && *mounting(b.id) == mount) ||
+                            (b.id == Control::LasersAnytime && lasers_anytime);
             const Color fill = !on ? mix(background, card, .40f) :
                                selected ? mix(card, cyan, .14f) : card;
             const Color accent = b.id == Control::Record && panel.recording ? pink : cyan;
@@ -318,6 +320,9 @@ struct PanelSurface::Impl {
             const auto label = b.id == Control::Record && panel.recording ? "Stop" : b.label;
             text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, 27, on ? ink : mix(background, muted, .48f), b.r.x + b.r.w - 8);
             if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
+            if (b.id == Control::LasersAnytime)
+                text(lasers_anytime ? "ON" : "OFF", b.r.x + b.r.w - 66, b.r.y + 34, 22,
+                     lasers_anytime ? cyan : muted, b.r.x + b.r.w - 12);
         }
         dirty = false;
         return true;
@@ -347,6 +352,7 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
     else if (auto a = action(c)) result.action = a;
     else if (auto m = mounting(c)) { impl_->mount = *m; result.mount = *m; impl_->reset(); impl_->dirty = true; }
     else if (c == Control::Recenter) { result.recenter = true; impl_->reset(); }
+    else if (c == Control::LasersAnytime) result.lasers_anytime = !impl_->lasers_anytime;
     else if (c == Control::Review || c == Control::Settings) { impl_->settings = c == Control::Settings; impl_->reset(); impl_->dirty = true; }
     else if (c == Control::Prev) { --impl_->page; impl_->dirty = true; }
     else if (c == Control::Next) { ++impl_->page; impl_->dirty = true; }
@@ -355,5 +361,12 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
 void PanelSurface::reset_pointers() { impl_->reset(); }
 void PanelSurface::set_placement_note(std::string note) {
     if (impl_->placement_note != note) { impl_->placement_note = std::move(note); impl_->dirty = true; }
+}
+void PanelSurface::set_lasers_anytime(bool enabled) {
+    if (impl_->lasers_anytime != enabled) {
+        impl_->lasers_anytime = enabled;
+        impl_->reset();
+        impl_->dirty = true;
+    }
 }
 } // namespace frameyap
