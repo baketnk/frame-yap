@@ -31,9 +31,17 @@ prefix. ARM64/glibc packaging is not a claim of compatibility with arbitrary Lin
 
 ```sh
 python3 scripts/package-release.py --stage /path/to/stage --output /existing/output \
-  --version v0.1.0-poc --arch linux-aarch64 \
+  --version 2026-09-24T162712Z-g417f81c --arch linux-aarch64 \
   --model-revision fad622f25f303105c20d70e201bcc477c88b620c --external-runtime
 ```
+
+Use the actual binary's UTC build stamp (`frameyap --version`) for the archive
+tag, not this illustrative timestamp. CMake generates `YYYY-MM-DDTHHMMSSZ`
+at configuration time (plus `-gSHORTSHA` for a Git checkout and `-dirty` for
+uncommitted tracked changes); producers may pin `-DFRAMEYAP_VERSION=...` to
+embed a vetted release stamp. A timestamp distinguishes same-day archives;
+the installer still refuses a reused tag whose contents have changed. Historic
+`v0.1.0-poc*` local artifacts remain valid for reinstall/rollback.
 
 `--external-runtime` refuses a runtime directory and records
 `runtime: external-authorized-python` in `release.json`. The installer explicitly
@@ -71,9 +79,22 @@ same version is refused. External model provisioning is always deliberate.
 
 The installed launcher defaults to `--run`. For a native-only package, supply
 `FRAMEYAP_PYTHON=/absolute/authorized/python` and `FRAMEYAP_MODEL=/absolute/model`,
-or override `--python`/`--model` on an explicit `--run`. No pip/bootstrap/fallback
-is invoked by the launcher. Missing runtime means visible failure, not recording.
-Environment configuration is not automatically persisted for SteamVR autolaunch.
+or override `--python`/`--model` on an explicit `--run`. For menu launches, create
+`$XDG_CONFIG_HOME/frameyap/paths.conf` (default `~/.config/frameyap/paths.conf`):
+
+```text
+python=/absolute/path/to/independently-authorized/runtime/bin/python3
+model=/absolute/path/to/pinned/local/model
+```
+
+The launcher reads these as **literal absolute paths**, not shell code, and does
+not follow a symlink to the config file. Environment variables override either
+setting for an explicit launch. This user-owned config survives upgrade/uninstall;
+the installer does not populate it or bundle an unauthorized runtime. No
+pip/bootstrap/model download or fallback is invoked by the launcher. Without
+paths, the native-only artifact cannot perform voice inference; its default
+runtime and model locations do not exist. A new installer accepts only the exact
+previous managed launcher bytes for migration; a modified launcher is refused.
 
 Without any ASR runtime, these checks work directly through the installed launcher:
 
@@ -128,10 +149,11 @@ exit; no owned process remained. This establishes a basic menu-driven launch on
 that device, **not** that OpenVR registration alone creates a Steam shortcut or
 that the new desktop entry was the sole discovery path. The manifest points to
 `~/.local/bin/frameyap`, which starts `--run` if launched. A native-only install
-without a model or authorized runtime should show an **Unavailable** overlay
-rather than record or run inference. Only perform this check on that native-only
-installation: verify that `current/runtime/bin/python3` and `current/model` are
-absent first, and do not press Record, Insert or Enter.
+without configured model/runtime cannot transcribe; it should show **Unavailable**
+(possibly after a brief Warming transition), rather than record or infer.
+Only perform this check on an unconfigured native-only installation: verify
+that `current/runtime/bin/python3` and `current/model` are absent and no
+user-local paths are configured; do not press Record, Insert or Enter.
 The installer also provides a desktop entry; where Steam's UI supports adding a
 non-Steam app, the user may select that entry or browse to the installed launcher.
 Shortcut discovery/persistence after a normal restart is not yet verified. Do
@@ -150,8 +172,9 @@ not hand-edit Steam's shortcut database.
 This check does not validate microphone capture, transcription, controller input,
 text delivery or cold SteamVR startup. With a configured inference runtime, the
 menu launch attempts to load the model; defer that test until runtime licensing is
-resolved. If an environment/configuration unexpectedly supplies a runtime/model,
-do not perform this check.
+resolved or independent authorization is established. If an
+environment/configuration unexpectedly supplies a runtime/model, do not perform
+this inert launcher check.
 
 Before uninstall, explicitly `frameyap --unregister /absolute/manifest/path` and
 verify success, then run `sh install.sh --uninstall --unregistered`. The latter is

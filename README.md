@@ -48,6 +48,8 @@ ctest --test-dir build --output-on-failure
 Default build has no hardware backends. It never downloads packages/models or
 initializes SteamVR, a microphone or input injection. Native dependencies and
 explicit launch/check commands are documented in [the POC guide](docs/poc.md).
+`--version` uses an ISO-like UTC build timestamp (with Git hash when available),
+not a numbered release; use that same tag when packaging the binary.
 
 ## Installation
 
@@ -66,6 +68,10 @@ Autolaunch is opt-in. An installed desktop entry can be selected manually as a
 non-Steam shortcut. A basic launch from Steam's Non-Steam section opened the
 panel on one Frame; registration alone did not show an entry in the first checked
 dashboard menu. See [packaging and lifecycle](docs/packaging.md).
+For a native-only install, menu-driven inference needs a separately authorized
+Python runtime and pinned model. Configure their absolute paths in
+`~/.config/frameyap/paths.conf` as described in the packaging guide; they are
+never fetched or bundled implicitly.
 
 A pinned GitHub one-command route is implemented in `install.sh --version TAG`,
 but **do not advertise or run it as a working public installation until a vetted
