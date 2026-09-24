@@ -200,6 +200,16 @@ Config load_config(const std::filesystem::path& path) {
         } else if (key == "auto_insert") {
             if (!value.is_bool) throw std::runtime_error("Config auto_insert must be a boolean");
             config.auto_insert = value.value == "true";
+        } else if (key == "clock_24h") {
+            if (!value.is_bool) throw std::runtime_error("Config clock_24h must be a boolean");
+            config.clock_24h = value.value == "true";
+        } else if (key == "date_format") {
+            if (!value.is_string) throw std::runtime_error("Config date_format must be a string");
+            if (value.value == "off") config.date_format = DateFormat::Off;
+            else if (value.value == "mdy") config.date_format = DateFormat::MonthDayYear;
+            else if (value.value == "dmy") config.date_format = DateFormat::DayMonthYear;
+            else if (value.value == "iso") config.date_format = DateFormat::Iso;
+            else throw std::runtime_error("Config date_format must be off, mdy, dmy or iso");
         } else if (key == "input_priority") {
             if (!value.is_string || (value.value != "normal" && value.value != "experimental"))
                 throw std::runtime_error("Config input_priority must be normal or experimental");
@@ -254,7 +264,8 @@ Config load_config(const std::filesystem::path& path) {
     return config;
 }
 namespace {
-bool save_bool_option(const std::filesystem::path& path, std::string_view key, bool enabled) noexcept {
+bool save_option(const std::filesystem::path& path, std::string_view key,
+                 std::string_view value, bool string_value) noexcept {
     try {
         if (path.empty() || !path.is_absolute() || std::filesystem::is_symlink(path)) return false;
         const bool existing = std::filesystem::exists(path);
@@ -264,15 +275,15 @@ bool save_bool_option(const std::filesystem::path& path, std::string_view key, b
         Parser parser{bytes};
         auto root = parser.parse(); parser.ws();
         if (!root.is_object || parser.pos != bytes.size()) return false;
-        const std::string value = enabled ? "true" : "false";
+        const std::string encoded = string_value ? "\"" + std::string(value) + "\"" : std::string(value);
         auto it = root.object.find(std::string(key));
         if (it != root.object.end()) {
-            if (!it->second.is_bool) return false;
+            if (it->second.is_string != string_value || (!string_value && !it->second.is_bool)) return false;
             if (it->second.value == value) return true;
-            bytes.replace(it->second.start, it->second.end - it->second.start, value);
+            bytes.replace(it->second.start, it->second.end - it->second.start, encoded);
         } else {
             bytes.insert(root.end - 1, std::string(root.object.empty() ? "" : ",") +
-                "\"" + std::string(key) + "\":" + value);
+                "\"" + std::string(key) + "\":" + encoded);
         }
         // The native reader rejects files >=4097 bytes, even if the JSON is valid.
         if (bytes.size() > 4096) return false;
@@ -285,12 +296,27 @@ bool save_bool_option(const std::filesystem::path& path, std::string_view key, b
         return false;
     }
 }
+bool save_bool_option(const std::filesystem::path& path, std::string_view key, bool enabled) noexcept {
+    return save_option(path, key, enabled ? "true" : "false", false);
+}
 } // namespace
 bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "advanced_debug", enabled);
 }
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "auto_insert", enabled);
+}
+bool save_clock_24h(const std::filesystem::path& path, bool enabled) noexcept {
+    return save_bool_option(path, "clock_24h", enabled);
+}
+bool save_date_format(const std::filesystem::path& path, DateFormat format) noexcept {
+    switch (format) {
+    case DateFormat::Off: return save_option(path, "date_format", "off", true);
+    case DateFormat::MonthDayYear: return save_option(path, "date_format", "mdy", true);
+    case DateFormat::DayMonthYear: return save_option(path, "date_format", "dmy", true);
+    case DateFormat::Iso: return save_option(path, "date_format", "iso", true);
+    }
+    return false;
 }
 std::string resolve_font(const std::string& assets, const std::string& requested) {
     const auto bundled = std::filesystem::path(assets) / "fonts/Inconsolata-Regular.ttf";

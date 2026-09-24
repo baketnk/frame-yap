@@ -28,7 +28,8 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   **Left grip (when active):** double-tap for the same explicit Enter action.
   Nothing submits automatically. Auto Insert is opt-in and off by default.
 - **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
-  Review and settings share one Inconsolata/neon-framed surface.
+  Review and settings share one Inconsolata/neon-framed surface. The header
+  shows local time/date; Settings selects 12/24-hour time and date format/off.
   Drag the thin bar below the panel to move it in its plane; drag the external
   lower-right corner bracket to scale it (world, head or wrist). Both sit in
   transparent margins, like Steam's window handles. Scaling keeps the upper-left

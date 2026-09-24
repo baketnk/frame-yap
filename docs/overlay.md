@@ -51,6 +51,12 @@ requires an on-device comparison. The
 [Vulkan deployment record](evidence/vulkan-overlay-2026-09-24.md) documents the
 native installation and offscreen GPU checks separately from headset acceptance.
 
+The header shows local time and date instead of the former on-device/review
+and current-mount labels. It updates when the displayed minute or date changes,
+not every frame. Settings toggles 12/24-hour time and cycles date Off →
+MM/DD/YYYY → DD/MM/YYYY → YYYY-MM-DD → Off. These only affect display;
+mount choices remain in Settings.
+
 The complete transcript preview is paginated by glyph width and four-line
 height; Previous and Next navigate it without changing the source transcript.
 Long status/detail messages show a prefix with a visible truncation marker.
@@ -99,6 +105,8 @@ installer creates one with defaults on first install. Copy the shipped
   "input_priority": "normal",
   "advanced_debug": false,
   "auto_insert": false,
+  "clock_24h": false,
+  "date_format": "mdy",
   "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
   "theme": {
     "background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
@@ -115,6 +123,12 @@ installer creates one with defaults on first install. Copy the shipped
   }
 }
 ```
+
+`clock_24h` is a boolean (default `false`); `date_format` is `off`, `mdy`
+(default), `dmy`, or `iso`. The Settings buttons update these preferences
+immediately and save them to the user config when persistence is enabled.
+A failed save warns and leaves the selection active for this run. Time uses
+the device's local timezone; these controls do not change system time.
 
 Each theme color is `#RRGGBB`; omitted colors keep the default. `font` is a
 TTF/OTF file path (not a family name); a missing file uses the bundled font.

@@ -1,5 +1,6 @@
 #include "panel_surface.hpp"
 #include <cassert>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -13,7 +14,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
 }
 void no_action(const SurfaceEvent& event) {
     assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
-           !event.recenter && !event.open_bindings);
+           !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -31,6 +32,11 @@ int main(int argc, char** argv) {
     assert(surface.render(p));
     assert(surface.pixels().size() == size_t(PanelSurface::width * PanelSurface::height * 4));
     assert(!surface.render(p));
+    surface.set_clock_time(std::time_t{1704211440}); // local clock changes only when rendered minute changes
+    assert(surface.render(p));
+    assert(!surface.render(p));
+    surface.set_clock_time(std::time_t{1704211500});
+    assert(surface.render(p));
     surface.reset_pointers();
     assert(!surface.render(p)); // repeated inactive-input resets do not force uploads
     assert(surface.pixels()[3] == 0); // rounded outer corner is transparent
@@ -175,6 +181,18 @@ int main(int argc, char** argv) {
     debug = click(surface, 680, 474);
     assert(debug.advanced_debug == false);
     surface.set_advanced_debug(false); assert(surface.render(p));
+    auto clock = click(surface, 200, 528);
+    assert(clock.clock_24h == true && !clock.action);
+    assert(!surface.render(p)); // setting request waits for caller's accepted value
+    surface.set_clock_24h(true); assert(surface.render(p));
+    assert(click(surface, 200, 528).clock_24h == false);
+    surface.set_clock_24h(false); assert(surface.render(p));
+    for (DateFormat format : {DateFormat::DayMonthYear, DateFormat::Iso, DateFormat::Off, DateFormat::MonthDayYear}) {
+        auto date = click(surface, 680, 528);
+        assert(date.date_format == format && !date.action);
+        surface.set_date_format(format);
+        assert(surface.render(p));
+    }
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     surface.set_placement_note("Wrist not tracked - using world space until it returns.");
     assert(surface.render(p)); assert(!surface.render(p));
@@ -188,6 +206,8 @@ int main(int argc, char** argv) {
     no_action(click(surface, 680, 420)); // laser toggle only exists on Settings
     no_action(click(surface, 680, 474)); // debug toggle only exists on Settings
     no_action(click(surface, 200, 474)); // auto insert only exists on Settings
+    no_action(click(surface, 200, 528)); // clock/date controls only exist on Settings
+    no_action(click(surface, 680, 528));
 
     // Bindings opens SteamVR directly, from either tab, without replacing review.
     surface.pointer_down(1, 480, 610);

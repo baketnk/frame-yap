@@ -129,6 +129,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["input_priority"], "normal")
         self.assertIs(fixed["advanced_debug"], False)
         self.assertIs(fixed["auto_insert"], False)
+        self.assertIs(fixed["clock_24h"], False)
+        self.assertEqual(fixed["date_format"], "mdy")
         self.assertEqual(fixed["wrist"], installer.CONFIG_DEFAULTS["wrist"])
         backups = list(config.parent.glob("config.json.backup-*"))
         self.assertEqual(len(backups), 1)
@@ -136,6 +138,8 @@ class InstallTests(unittest.TestCase):
         fixed["input_priority"] = "experimental"
         fixed["advanced_debug"] = True
         fixed["auto_insert"] = True
+        fixed["clock_24h"] = True
+        fixed["date_format"] = "iso"
         fixed["buttons"]["enter"] = ""  # intentional disabling survives upgrades
         fixed["wrist"]["y"] = 0.2
         compact = json.dumps(fixed, separators=(",", ":")).encode()
@@ -144,6 +148,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(config.read_bytes(), compact)
         self.assertIs(json.loads(config.read_text())["advanced_debug"], True)
         self.assertIs(json.loads(config.read_text())["auto_insert"], True)
+        self.assertIs(json.loads(config.read_text())["clock_24h"], True)
+        self.assertEqual(json.loads(config.read_text())["date_format"], "iso")
         self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), 1)
         fixed["advanced_debug"] = False
         compact_off = json.dumps(fixed, separators=(",", ":")).encode()

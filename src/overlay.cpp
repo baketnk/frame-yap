@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <ctime>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -179,6 +180,8 @@ struct Overlay::Impl {
             surface.set_lasers_anytime(lasers_anytime);
             surface.set_advanced_debug(config.advanced_debug);
             surface.set_auto_insert(config.auto_insert);
+            surface.set_clock_24h(config.clock_24h);
+            surface.set_date_format(config.date_format);
             overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_VisibleInDashboard, true), overlay, "VisibleInDashboard");
             vr::HmdVector2_t mouse_scale{{float(W), float(H)}};
             overlay_check(overlay->SetOverlayMouseScale(handle, &mouse_scale), overlay, "SetOverlayMouseScale");
@@ -360,6 +363,7 @@ struct Overlay::Impl {
     bool available(UiAction action) const { return surface.available(action); }
     void draw(const Panel& p) {
         panel = p;
+        surface.set_clock_time(std::time(nullptr));
         if (surface.render(p)) {
             gpu_texture->upload(surface.pixels());
             auto texture = gpu_texture->texture();
@@ -473,8 +477,22 @@ struct Overlay::Impl {
                 last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.advanced_debug || event_result.auto_insert) ++pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.advanced_debug || event_result.auto_insert || event_result.clock_24h || event_result.date_format) ++pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
+                    if (event_result.clock_24h) {
+                        config.clock_24h = *event_result.clock_24h;
+                        save_failed = persist_mount && !save_clock_24h(default_config_path(), config.clock_24h);
+                        surface.set_clock_24h(config.clock_24h);
+                        reset_input(result);
+                        return result;
+                    }
+                    if (event_result.date_format) {
+                        config.date_format = *event_result.date_format;
+                        save_failed = persist_mount && !save_date_format(default_config_path(), config.date_format);
+                        surface.set_date_format(config.date_format);
+                        reset_input(result);
+                        return result;
+                    }
                     if (event_result.auto_insert) {
                         config.auto_insert = *event_result.auto_insert;
                         auto_save_failed = persist_mount && !save_auto_insert(default_config_path(), config.auto_insert);

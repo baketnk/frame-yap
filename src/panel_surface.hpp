@@ -2,6 +2,7 @@
 #include "overlay.hpp"
 #include "config.hpp"
 #include "panel_drag.hpp"
+#include <ctime>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,6 +15,8 @@ struct SurfaceEvent {
     std::optional<bool> lasers_anytime;
     std::optional<bool> advanced_debug;
     std::optional<bool> auto_insert;
+    std::optional<bool> clock_24h;
+    std::optional<DateFormat> date_format;
     bool recenter = false;
     bool open_bindings = false;
 };
@@ -41,6 +44,9 @@ public:
     void set_lasers_anytime(bool enabled);
     void set_advanced_debug(bool enabled);
     void set_auto_insert(bool enabled);
+    void set_clock_24h(bool enabled);
+    void set_date_format(DateFormat format);
+    void set_clock_time(std::time_t now);
     void set_binding_note(std::string note);
     bool available(UiAction action) const;
 private:

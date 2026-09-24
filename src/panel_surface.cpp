@@ -1,4 +1,5 @@
 #include "panel_surface.hpp"
+#include "panel_clock.hpp"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <algorithm>
@@ -28,10 +29,11 @@ struct Rect {
     }
 };
 enum class Control { Review, Settings, Bindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
-                     World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert };
+                     World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
+                     Clock24h, Date };
 enum class Tab { Review, Settings };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 18> buttons{{
+constexpr std::array<Button, 20> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
@@ -50,6 +52,8 @@ constexpr std::array<Button, 18> buttons{{
     {{514, 394, 454, 50}, Control::LasersAnytime, "Lasers anytime"},
     {{32, 452, 454, 48}, Control::AutoInsert, "Auto insert"},
     {{514, 452, 454, 48}, Control::AdvancedDebug, "Advanced debug"},
+    {{32, 506, 454, 42}, Control::Clock24h, "Clock"},
+    {{514, 506, 454, 42}, Control::Date, "Date"},
 }};
 std::optional<UiAction> action(Control c) {
     switch (c) {
@@ -69,15 +73,6 @@ std::optional<Mount> mounting(Control c) {
     case Control::Head: return Mount::Head;
     default: return {};
     }
-}
-std::string_view mount_label(Mount m) {
-    switch (m) {
-    case Mount::World: return "World space";
-    case Mount::LeftWrist: return "Left wrist";
-    case Mount::RightWrist: return "Right wrist";
-    case Mount::Head: return "Head";
-    }
-    return "World space";
 }
 // Invalid bytes become visible replacement glyphs, never control commands.
 uint32_t next_codepoint(std::string_view s, size_t& i) {
@@ -109,6 +104,10 @@ struct PanelSurface::Impl {
     Color background, card, ink, muted, cyan, pink;
     Tab tab = Tab::Review;
     bool dirty = true, lasers_anytime = false, advanced_debug = false, auto_insert = false;
+    bool clock_24h = false;
+    DateFormat date_format = DateFormat::MonthDayYear;
+    std::time_t clock_time = std::time(nullptr);
+    ClockLabel displayed_clock;
     std::string placement_note, binding_note;
     std::array<int, 2> pressed{{-1, -1}};
     int drag_cursor = -1;
@@ -254,7 +253,8 @@ struct PanelSurface::Impl {
     bool visible(Control c) const {
         if (c == Control::Prev || c == Control::Next) return tab == Tab::Review;
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
-            c == Control::AdvancedDebug || c == Control::AutoInsert) return tab == Tab::Settings;
+            c == Control::AdvancedDebug || c == Control::AutoInsert ||
+            c == Control::Clock24h || c == Control::Date) return tab == Tab::Settings;
         return true;
     }
     bool enabled(Control c) const {
@@ -286,13 +286,16 @@ struct PanelSurface::Impl {
         if (p.status != panel.status || p.detail != panel.detail || p.enabled != panel.enabled || p.recording != panel.recording)
             dirty = true;
         panel = p;
+        auto label = panel_clock(clock_time, clock_24h, date_format);
+        if (label.time != displayed_clock.time || label.date != displayed_clock.date) dirty = true;
         if (!dirty) return false;
+        displayed_clock = std::move(label);
         std::fill(pixels.begin(), pixels.end(), 0);
         rect({0, 0, CW, CH}, background);
         frame();
         text("FrameYap", 32, 61, 40, ink, 300);
-        text(auto_insert ? "ON-DEVICE / AUTO INSERT OPT-IN" : "ON-DEVICE / REVIEW FIRST", 280, 58, 22, muted, 720);
-        text(mount_label(mount), 756, 58, 24, cyan, 968);
+        text(displayed_clock.time, 475, 58, 28, ink, 735);
+        if (!displayed_clock.date.empty()) text(displayed_clock.date, 756, 58, 24, cyan, 968);
         rounded({32, 78, 936, 48}, 13, mix(background, card, .7f),
                 panel.recording ? mix(card, pink, .36f) : mix(card, cyan, .22f),
                 panel.recording ? .16f : 0.f);
@@ -313,10 +316,9 @@ struct PanelSurface::Impl {
             if (detail.size() > 2) text("[detail truncated]", 730, 546, 22, pink, 968);
             if (!binding_note.empty()) text(binding_note, 32, 203, 20, muted, 968);
         } else {
-            text("MOUNT AND INTERACTION", 32, 224, 22, muted, 968);
-            text("Auto insert requires stable X focus; never Enter. Debug logs may contain speech.", 32, 520, 20, pink, 968);
-            text(placement_note.empty() ? "Debug restarts worker; lasers may affect games. No saved audio clips." : placement_note,
-                 32, 540, 20, muted, 968);
+            text("Auto insert needs stable X focus; debug logs may contain speech.", 32, 204, 18, pink, 968);
+            text(placement_note.empty() ? "No automatic Enter; changing debug restarts the worker." : placement_note,
+                 32, 225, 18, muted, 968);
         }
         rect({32, 550, 936, 1}, mix(card, cyan, .17f));
         for (size_t i = 0; i < buttons.size(); ++i) {
@@ -337,8 +339,13 @@ struct PanelSurface::Impl {
             rounded(b.r, std::min(16, b.r.h / 3), fill,
                     !on ? mix(card, muted, .13f) : highlighted ? accent : mix(card, muted, .38f),
                     highlighted ? .23f : 0.f, highlighted ? 2 : 1);
-            const auto label = b.id == Control::Record && panel.recording ? "Stop" : b.label;
-            text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, 27, on ? ink : mix(background, muted, .48f), b.r.x + b.r.w - 8);
+            const std::string label = b.id == Control::Record && panel.recording ? "Stop" :
+                b.id == Control::Clock24h ? (clock_24h ? "Clock: 24 hour" : "Clock: 12 hour") :
+                b.id == Control::Date ? (date_format == DateFormat::Off ? "Date: Off" :
+                    date_format == DateFormat::MonthDayYear ? "Date: MM/DD/YYYY" :
+                    date_format == DateFormat::DayMonthYear ? "Date: DD/MM/YYYY" : "Date: YYYY-MM-DD") : b.label;
+            text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, b.id == Control::Date ? 23 : 27,
+                 on ? ink : mix(background, muted, .48f), b.r.x + b.r.w - 8);
             if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
             if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug || b.id == Control::AutoInsert) {
                 bool active = b.id == Control::LasersAnytime ? lasers_anytime :
@@ -405,6 +412,8 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
     else if (c == Control::LasersAnytime) result.lasers_anytime = !impl_->lasers_anytime;
     else if (c == Control::AdvancedDebug) result.advanced_debug = !impl_->advanced_debug;
     else if (c == Control::AutoInsert) result.auto_insert = !impl_->auto_insert;
+    else if (c == Control::Clock24h) result.clock_24h = !impl_->clock_24h;
+    else if (c == Control::Date) result.date_format = static_cast<DateFormat>((static_cast<int>(impl_->date_format) + 1) % 4);
     else if (c == Control::Bindings) { result.open_bindings = true; impl_->reset(); }
     else if (c == Control::Review || c == Control::Settings) {
         impl_->tab = c == Control::Review ? Tab::Review : Tab::Settings;
@@ -441,5 +450,18 @@ void PanelSurface::set_auto_insert(bool enabled) {
         impl_->reset();
         impl_->dirty = true;
     }
+}
+void PanelSurface::set_clock_24h(bool enabled) {
+    if (impl_->clock_24h != enabled) {
+        impl_->clock_24h = enabled; impl_->reset(); impl_->dirty = true;
+    }
+}
+void PanelSurface::set_date_format(DateFormat format) {
+    if (impl_->date_format != format) {
+        impl_->date_format = format; impl_->reset(); impl_->dirty = true;
+    }
+}
+void PanelSurface::set_clock_time(std::time_t now) {
+    impl_->clock_time = now;
 }
 } // namespace frameyap

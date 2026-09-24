@@ -1,4 +1,5 @@
 #include "config.hpp"
+#include "panel_clock.hpp"
 #include <cassert>
 #include <cstdlib>
 #include <filesystem>
@@ -14,6 +15,17 @@ template<class Fn> void fails(Fn fn) { bool raised = false; try { fn(); } catch 
 }
 int main(int argc, char** argv) {
     assert(argc == 2);
+    ::setenv("TZ", "UTC", 1); tzset();
+    std::tm instant{};
+    instant.tm_year = 124; instant.tm_mon = 0; instant.tm_mday = 2;
+    instant.tm_hour = 15; instant.tm_min = 4;
+    auto at = std::mktime(&instant);
+    assert(panel_clock(at, false, DateFormat::MonthDayYear).time == "03:04 PM");
+    assert(panel_clock(at, false, DateFormat::MonthDayYear).date == "01/02/2024");
+    assert(panel_clock(at, true, DateFormat::DayMonthYear).time == "15:04");
+    assert(panel_clock(at, true, DateFormat::DayMonthYear).date == "02/01/2024");
+    assert(panel_clock(at, true, DateFormat::Iso).date == "2024-01-02");
+    assert(panel_clock(at, true, DateFormat::Off).date.empty());
     const auto dir = std::filesystem::temp_directory_path() / ("frameyap-config-test-" + std::to_string(::getpid()));
     std::filesystem::create_directories(dir);
     ::setenv("XDG_CONFIG_HOME", dir.c_str(), 1);
@@ -30,6 +42,8 @@ int main(int argc, char** argv) {
     assert(!load_config(path).experimental_input_priority);
     assert(!load_config(path).advanced_debug);
     assert(!load_config(path).auto_insert);
+    assert(!load_config(path).clock_24h);
+    assert(load_config(path).date_format == DateFormat::MonthDayYear);
     assert(load_config(path).wrist.width == .30f);
     auto example = load_config(std::filesystem::path(argv[1]) / "config.example.json");
     assert(example.buttons.at("ptt") == "/user/hand/right/input/x");
@@ -37,6 +51,7 @@ int main(int argc, char** argv) {
     assert(!example.experimental_input_priority);
     assert(!example.advanced_debug);
     assert(!example.auto_insert);
+    assert(!example.clock_24h && example.date_format == DateFormat::MonthDayYear);
     assert(example.wrist.y == .18f && example.wrist.z == .089f);
     std::filesystem::create_directories(path.parent_path());
     assert(save_advanced_debug(path, true));
@@ -48,6 +63,12 @@ int main(int argc, char** argv) {
     assert(load_config(path).auto_insert);
     assert(save_auto_insert(path, false));
     assert(!load_config(path).auto_insert);
+    assert(save_clock_24h(path, true) && load_config(path).clock_24h);
+    assert(save_date_format(path, DateFormat::Iso) && load_config(path).date_format == DateFormat::Iso);
+    assert(save_date_format(path, DateFormat::Off) && load_config(path).date_format == DateFormat::Off);
+    assert(save_date_format(path, DateFormat::DayMonthYear) && load_config(path).date_format == DateFormat::DayMonthYear);
+    assert(save_date_format(path, DateFormat::MonthDayYear));
+    assert(save_clock_24h(path, false));
     for (const auto* invalid : {R"({"advanced_debug":"true"})", R"({"advanced_debug":0})",
                                R"({"advanced_debug":null})", R"({"advanced_debug":[]})"}) {
         put(path, invalid);
@@ -86,6 +107,16 @@ int main(int argc, char** argv) {
     assert(experimental.experimental_input_priority && experimental.advanced_debug);
     // A priority request must preserve the user's existing action manifest/bindings.
     assert(action_manifest(argv[1], experimental) == std::filesystem::absolute(std::filesystem::path(argv[1]) / "actions.json"));
+    for (const auto* invalid : {R"({"clock_24h":"true"})", R"({"date_format":true})",
+                               R"({"date_format":"us"})"}) {
+        put(path, invalid); fails([&] { load_config(path); });
+        assert(!save_clock_24h(path, true));
+        assert(!save_date_format(path, DateFormat::Iso));
+        assert(get(path) == invalid);
+    }
+    put(path, R"({"date_format":"off","font":"kept"})");
+    assert(save_date_format(path, DateFormat::Iso));
+    assert(get(path) == R"({"date_format":"iso","font":"kept"})");
     put(path, R"({"auto_insert":"on"})");
     fails([&] { load_config(path); });
     assert(!save_auto_insert(path, true));

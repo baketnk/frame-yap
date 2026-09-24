@@ -3,6 +3,8 @@
   "input_priority": "normal",
   "advanced_debug": false,
   "auto_insert": false,
+  "clock_24h": false,
+  "date_format": "mdy",
   "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
   "theme": {
     "background": "#0c101b",
