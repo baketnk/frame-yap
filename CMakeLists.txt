@@ -56,6 +56,7 @@ if(FRAMEYAP_NATIVE)
     message(FATAL_ERROR "Native POC supports Linux only")
   endif()
   find_package(PkgConfig REQUIRED)
+  find_package(Vulkan REQUIRED)
   pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3>=3.2)
   # SDL's .pc can inject its producer-prefix RPATH. Let CMake manage build
   # RPATH and install only our relative path, never a developer environment.
@@ -83,10 +84,10 @@ if(FRAMEYAP_NATIVE)
   add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/gamescope-input-method.c"
     COMMAND "${WAYLAND_SCANNER}" private-code "${PROTOCOL}" "${CMAKE_CURRENT_BINARY_DIR}/gamescope-input-method.c"
     DEPENDS "${PROTOCOL}" VERBATIM)
-  target_sources(frameyap PRIVATE src/runtime.cpp src/overlay.cpp src/audio.cpp src/text_input.cpp
+  target_sources(frameyap PRIVATE src/runtime.cpp src/overlay.cpp src/overlay_texture.cpp src/audio.cpp src/text_input.cpp
     "${CMAKE_CURRENT_BINARY_DIR}/gamescope-input-method.c" "${CMAKE_CURRENT_BINARY_DIR}/gamescope-input-method-client.h")
   target_include_directories(frameyap PRIVATE "${OPENVR_INCLUDE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
-  target_link_libraries(frameyap PRIVATE frameyap_worker frameyap_mount frameyap_panel PkgConfig::SDL3 PkgConfig::WAYLAND "${OPENVR_LIBRARY}")
+  target_link_libraries(frameyap PRIVATE frameyap_worker frameyap_mount frameyap_panel PkgConfig::SDL3 PkgConfig::WAYLAND Vulkan::Vulkan "${OPENVR_LIBRARY}")
   target_compile_definitions(frameyap PRIVATE FRAMEYAP_NATIVE=1)
   set_target_properties(frameyap PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
 endif()
@@ -134,6 +135,15 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
   add_test(NAME frameyap.gestures COMMAND frameyap_gestures_test)
   find_package(Python3 3.10 COMPONENTS Interpreter)
   if(FRAMEYAP_NATIVE)
+    add_executable(frameyap_overlay_texture_test tests/overlay_texture_test.cpp src/overlay_texture.cpp)
+    target_include_directories(frameyap_overlay_texture_test PRIVATE src "${OPENVR_INCLUDE_DIR}" "${Vulkan_INCLUDE_DIRS}")
+    target_compile_options(frameyap_overlay_texture_test PRIVATE -UNDEBUG)
+    # Test-provided Vulkan symbols; no GPU, loader or OpenVR initialization.
+    add_test(NAME frameyap.overlay_texture COMMAND frameyap_overlay_texture_test)
+    add_executable(frameyap_texture_check EXCLUDE_FROM_ALL tests/overlay_texture_gpu_check.cpp src/overlay_texture.cpp)
+    target_include_directories(frameyap_texture_check PRIVATE src "${OPENVR_INCLUDE_DIR}")
+    target_link_libraries(frameyap_texture_check PRIVATE Vulkan::Vulkan)
+    # Explicit build and --run only; never register a hardware check with CTest.
     pkg_check_modules(WAYLAND_SERVER IMPORTED_TARGET wayland-server)
     if(WAYLAND_SERVER_FOUND)
       find_package(Threads REQUIRED)

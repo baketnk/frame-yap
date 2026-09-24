@@ -1,4 +1,5 @@
 #include "overlay.hpp"
+#include "overlay_texture.hpp"
 #include "gestures.hpp"
 #include "laser_setting.hpp"
 #include "panel_surface.hpp"
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -41,6 +43,19 @@ std::filesystem::path absolute_file(const std::filesystem::path& p) {
     if (!std::filesystem::is_regular_file(result)) throw std::runtime_error("Missing file: " + result.string());
     return result;
 }
+template<class Query> std::vector<std::string> vulkan_extensions(Query query) {
+    const auto size = query(nullptr, 0);
+    if (!size) return {};
+    if (size > 65536) throw std::runtime_error("OpenVR Vulkan extension list is too large");
+    std::vector<char> buffer(size, '\0');
+    const auto written = query(buffer.data(), size);
+    if (!written || written > size || buffer[written - 1] != '\0')
+        throw std::runtime_error("OpenVR Vulkan extension list changed or is invalid");
+    std::istringstream words(std::string(buffer.data(), written - 1));
+    std::vector<std::string> result;
+    for (std::string name; words >> name;) result.push_back(std::move(name));
+    return result;
+}
 } // namespace
 
 struct Overlay::Impl {
@@ -48,6 +63,7 @@ struct Overlay::Impl {
     vr::IVROverlay* overlay = nullptr;
     vr::IVRInput* input = nullptr;
     vr::VROverlayHandle_t handle = vr::k_ulOverlayHandleInvalid;
+    std::unique_ptr<OverlayTexture> gpu_texture;
     vr::VRActionSetHandle_t action_set = vr::k_ulInvalidActionSetHandle;
     std::array<vr::VRActionHandle_t, 6> actions{};
     std::filesystem::path settings_path;
@@ -71,7 +87,7 @@ struct Overlay::Impl {
     bool persist_mount = true;
     vr::EVRInputError action_update_error = vr::VRInputError_None;
     unsigned pointer_downs = 0, pointer_ups = 0, pointer_actions = 0, pointer_resets = 0;
-    unsigned raw_uploads = 0, show_calls = 0, hide_calls = 0;
+    unsigned texture_uploads = 0, show_calls = 0, hide_calls = 0;
     unsigned overlay_shown_events = 0, overlay_hidden_events = 0, image_loaded_events = 0, image_failed_events = 0;
     unsigned overlay_focus_events = 0, global_focus_events = 0, input_focus_captured_events = 0;
     std::string last_pointer_event = "none";
@@ -95,6 +111,21 @@ struct Overlay::Impl {
             overlay = vr::VROverlay();
             input = vr::VRInput();
             if (!overlay || !input) throw std::runtime_error("OpenVR overlay/input interface unavailable");
+            auto* compositor = vr::VRCompositor();
+            if (!compositor) throw std::runtime_error("OpenVR Vulkan compositor interface unavailable");
+            const auto extensions = vulkan_extensions([&](char* out, uint32_t size) {
+                return compositor->GetVulkanInstanceExtensionsRequired(out, size);
+            });
+            gpu_texture = std::make_unique<OverlayTexture>(W, H, extensions,
+                [&](VkInstance instance) {
+                    uint64_t physical = 0;
+                    system->GetOutputDevice(&physical, vr::TextureType_Vulkan, instance);
+                    return reinterpret_cast<VkPhysicalDevice>(physical);
+                }, [&](VkPhysicalDevice physical) {
+                    return vulkan_extensions([&](char* out, uint32_t size) {
+                        return compositor->GetVulkanDeviceExtensionsRequired(physical, out, size);
+                    });
+                });
             // The manifest launches a shell launcher, then execs this binary.
             // Associate manually launched instances with our registered app key too.
             auto* applications = vr::VRApplications();
@@ -136,6 +167,9 @@ struct Overlay::Impl {
             handle = vr::k_ulOverlayHandleInvalid;
         }
         if (system) { vr::VR_Shutdown(); system = nullptr; overlay = nullptr; input = nullptr; }
+        // OpenVR retains client-side resources for submitted Vulkan images.
+        // Its shutdown must finish before their device/instance are destroyed.
+        gpu_texture.reset();
     }
     void visibility() {
         const bool wanted = placed && has_texture;
@@ -198,9 +232,10 @@ struct Overlay::Impl {
     void draw(const Panel& p) {
         panel = p;
         if (surface.render(p)) {
-            // OpenVR's API takes void*, but does not modify the submitted RGBA bytes.
-            overlay_check(overlay->SetOverlayRaw(handle, const_cast<unsigned char*>(surface.pixels().data()), W, H, 4), overlay, "SetOverlayRaw");
-            ++raw_uploads;
+            gpu_texture->upload(surface.pixels());
+            auto texture = gpu_texture->texture();
+            overlay_check(overlay->SetOverlayTexture(handle, &texture), overlay, "SetOverlayTexture (Vulkan)");
+            ++texture_uploads;
             has_texture = true;
         }
         visibility();
@@ -399,7 +434,7 @@ std::string Overlay::pointer_status() const {
     return "Pointer down=" + std::to_string(impl_->pointer_downs) + " up=" + std::to_string(impl_->pointer_ups) +
            " hits=" + std::to_string(impl_->pointer_actions) + " resets=" + std::to_string(impl_->pointer_resets) +
            " last=" + impl_->last_pointer_event +
-           "\nOverlay raw=" + std::to_string(impl_->raw_uploads) +
+           "\nOverlay renderer=Vulkan textureUploads=" + std::to_string(impl_->texture_uploads) +
            " showCalls=" + std::to_string(impl_->show_calls) + " hideCalls=" + std::to_string(impl_->hide_calls) +
            " shownEvents=" + std::to_string(impl_->overlay_shown_events) +
            " hiddenEvents=" + std::to_string(impl_->overlay_hidden_events) +

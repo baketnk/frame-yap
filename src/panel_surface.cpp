@@ -335,8 +335,8 @@ bool PanelSurface::render(const Panel& p) { return impl_->render(p); }
 const std::vector<unsigned char>& PanelSurface::pixels() const { return impl_->pixels; }
 bool PanelSurface::available(UiAction a) const { return impl_->available(a); }
 void PanelSurface::pointer_move(unsigned, float, float) {
-    // Hit-test on down/up only. SetOverlayRaw can flicker in SteamVR when each
-    // laser hover frame causes another full RGBA upload.
+    // Hit-test on down/up only; laser movement does not change panel content
+    // and does not require a GPU texture upload.
 }
 void PanelSurface::pointer_down(unsigned cursor, float x, float y) {
     if (cursor >= impl_->pressed.size()) return;

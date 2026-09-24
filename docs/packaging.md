@@ -25,8 +25,9 @@ For the current **external-runtime** POC, `scripts/stage-native-poc.py --help`
 documents explicit inputs. It invokes `cmake --install` on an existing native build,
 copies SDL/OpenVR and an explicitly licensed font, and retains notices. It does
 not build, download, run the app, or copy a proprietary ASR runtime. The native
-POC relies on Frame's system Wayland, FreeType, libstdc++ and glibc; audit `ldd`
-on the installed binary. SDL/OpenVR resolve inside its own `lib/`, not a producer
+POC relies on Frame's system Vulkan loader/driver, Wayland, FreeType, libstdc++
+and glibc; audit `ldd` on the installed binary.
+SDL/OpenVR resolve inside its own `lib/`, not a producer
 prefix. ARM64/glibc packaging is not a claim of compatibility with arbitrary Linux.
 
 ```sh

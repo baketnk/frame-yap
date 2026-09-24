@@ -89,9 +89,10 @@ panel. A small overlay-specific RAII owner in this repository should manage Open
 handles, input manifest and shutdown. No dependency on external application
 libraries, assets, build trees or Python environments.
 
-Start with one small RGBA panel updated only on UI changes and a bounded recording
-indicator cadence. `SetOverlayRaw` is the simplest proof route; measure upload
-cost before selecting a persistent Vulkan `SetOverlayTexture` path. No stereo
+Use one small RGBA panel updated only on UI changes and a bounded recording
+indicator cadence. The native implementation uploads the CPU-rasterized panel to
+a persistent Vulkan image and uses `SetOverlayTexture`; the initial
+`SetOverlayRaw` proof path has been replaced. No stereo
 eye targets or per-eye scene rendering. Keep tracking in compositor transforms,
 not an application-rendered hand-pose animation loop. Do not promise a particular
 GPU cost until measured.

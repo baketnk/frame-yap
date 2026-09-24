@@ -2,7 +2,7 @@
 """Stage a native-only POC from an explicit native build and licensed files.
 
 No downloads, compiler invocation, proprietary ASR runtime, registration or launch.
-System Wayland/FreeType/libstdc++/glibc remain platform prerequisites.
+System Vulkan loader/driver, Wayland/FreeType/libstdc++/glibc remain platform prerequisites.
 """
 import argparse
 from pathlib import Path
@@ -41,7 +41,7 @@ def main():
     shutil.copyfile(args.sdl_library, dest / "lib/libSDL3.so.0", follow_symlinks=True)
     shutil.copyfile(args.font, dest / "fonts/font.ttf")
     notices = ["FrameYap native-only POC. No ASR runtime or model is included.\n",
-               "Original FrameYap code: MIT. System Wayland/FreeType/libstdc++/glibc are not bundled.\n",
+               "Original FrameYap code: MIT. System Vulkan/Wayland/FreeType/libstdc++/glibc are not bundled.\n",
                "Bundled libraries: Valve OpenVR and unmodified SDL3; font license included below.\n",
                "This package does not grant any rights to kestrel-kernels or provide a functioning ASR environment.\n"]
     for label, file in (("FrameYap", root / "LICENSE"), ("OpenVR", args.openvr_license),

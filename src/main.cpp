@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
                         auto pointer = overlay.pointer_status();
                         if (pointer != pointer_status) { pointer_status = pointer; std::cout << pointer_status << std::endl; }
                         // Keep the canvas fixed for action clicks: otherwise the
-                        // changing counters cause SetOverlayRaw on every down/up.
+                        // changing counters would upload a texture on every down/up.
                         // Tab/placement changes still redraw the correct controls.
                         overlay.draw(check_panel);
                         std::this_thread::sleep_for(std::chrono::milliseconds(10));

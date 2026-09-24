@@ -71,6 +71,7 @@ separately scoped and independently licensed implementation—not a silent model
 ## Developer native build
 
 Requirements: Linux, CMake/C++20, SDL3 >=3.2, Wayland client + scanner, FreeType,
+Vulkan headers/loader (plus the system GPU driver at runtime),
 and a deliberately provisioned standalone OpenVR **v2.15.6** SDK. No CMake fetches.
 
 ```sh

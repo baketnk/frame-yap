@@ -9,7 +9,8 @@ normal build or test.
 
 ## Rendering and controls
 
-Explicit development dependencies: Valve OpenVR SDK v2.15.6 and FreeType 2.
+Explicit development dependencies: Valve OpenVR SDK v2.15.6, Vulkan headers/loader
+and FreeType 2. The native runtime needs a compatible system Vulkan driver.
 Configure/build must not fetch them. The default font is the bundled Inconsolata
 Regular, also used by kouseki; its OFL and extraction provenance are included in
 [third-party notes](third-party.md). `--font FILE` overrides the JSON selection.
@@ -18,18 +19,34 @@ Sans face if present. Glyph coverage depends on the selected face; full CJK
 coverage is not claimed.
 
 `src/panel_surface.*` renders **one 1000×680 RGBA canvas** for review, settings,
-status and controls. One OpenVR handle receives it with `SetOverlayRaw`; tabs do
-not create extra overlays or render targets. The rounded mint-to-blue perimeter,
+status and controls. `src/overlay_texture.*` uploads this CPU canvas into one
+persistent Vulkan RGBA8 image and submits it with `SetOverlayTexture`. The image,
+staging allocation and command buffer are reused; tabs do not create extra
+overlays or render targets. The rounded mint-to-blue perimeter,
 shallow curved accent, and dark cards borrow kouseki's VR visual language. Rounded
 preview, status and control surfaces use independently rasterized antialiased edges
 and restrained baked neon halos rather than GPU bloom. The recording indicator and
 selected controls remain distinguishable by their labels, not color alone. Rounded
 control hit areas exclude their clipped corners.
 Rendering/uploads occur only for changed content, page or settings; laser hover
-and button down/up are hit-tested without a raw-texture upload, to reduce
-compositor flicker reported during hover. Static frames are reused.
+and button down/up are hit-tested without an upload. Static frames are reused.
 The caller may call `draw(Panel)` at 10 ms intervals. Tracking transforms do
 not require repainting the canvas.
+
+The Vulkan instance/device enable the extensions requested by the running
+SteamVR runtime and use its selected physical device and a graphics queue.
+There is no desktop window, swapchain, SDL video dependency or raw-upload
+fallback. Updates wait for the dedicated queue's previous upload and OpenVR
+transfer before reusing staging memory. Image barriers finish in
+`TRANSFER_SRC_OPTIMAL`, as required by
+[OpenVR's Vulkan contract](https://github.com/ValveSoftware/openvr/wiki/Vulkan).
+The queue is used on the overlay thread; GPU resources outlive `VR_Shutdown`.
+The device selection, texture description and persistent panel-upload patterns
+were compared with kouseki's `openvr_session.cpp` and `vulkan_renderer.cpp` at
+`738569f4c41ff4c8fc9edd5bfff9c861957ea39e`; FrameYap owns this implementation.
+GPU setup/submission errors stop startup or the run with an explicit error.
+This replaces the raw-upload rendering path; headset flicker acceptance still
+requires an on-device comparison.
 
 The complete transcript preview is paginated by glyph width and four-line
 height; Previous and Next navigate it without changing the source transcript.
@@ -144,10 +161,23 @@ recentring and readability still require a separately authorized headset check.
 The opt-in native `--check-controls` probe logs pointer counters and action
 callbacks to the terminal rather than repainting them on the panel. Its canvas
 stays static for Record/Cancel/Insert/Enter clicks so those clicks can be checked
-without diagnostic `SetOverlayRaw` traffic. Switching tabs or mount still updates
-the visible panel. This isolates click-induced compositor flicker from full raw
-texture replacements; it does not establish that ordinary state-changing UI
-updates are flicker-free.
+without diagnostic texture uploads. Switching tabs or mount still updates
+the visible panel. Diagnostics identify `renderer=Vulkan` and count
+`textureUploads`; raw/file `ImageLoaded` events are not GPU upload completions.
+The native CTest suite tests persistent image reuse, queued transfer ordering,
+coherent/noncoherent staging memory and error cleanup against Vulkan fakes;
+it does not initialize the Vulkan loader, a GPU or OpenVR for that test.
+
+An optional offscreen check exercises the real Vulkan backend with eight
+synthetic RGBA patterns, verifying exact readback and image reuse. It needs a
+GPU/driver, is excluded from normal builds and CTest, and requires `--run`:
+
+```sh
+cmake --build build-native --target frameyap_texture_check
+./build-native/frameyap_texture_check --run
+```
+
+It does not initialize OpenVR or establish compositor/headset acceptance.
 
 `assets/actions.json` names six actions: left/right grip, PTT, cancel, insert,
 Enter. `bindings_frame_controller.json` maps right X click to hold-to-talk PTT;
