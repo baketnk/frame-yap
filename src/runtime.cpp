@@ -74,20 +74,33 @@ int run(const Options& options) {
         try {
             if (auto reply = worker.poll()) {
                 if (reply->id == session.id() && session.state() == State::Transcribing) {
-                    if (!reply->error.empty()) throw std::runtime_error(reply->error);
-                    session.reply(reply->id, reply->text);
-                    detail = session.text().empty() ? "No speech recognized; try again." : "Focus your destination, then Insert. Cancel discards.";
+                    if (!reply->error.empty()) {
+                        // E is a request-local error. The child still owns its
+                        // loaded model and can accept the next utterance.
+                        session.fail(); detail = reply->error + "; model ready. Record to retry.";
+                    } else {
+                        session.reply(reply->id, reply->text);
+                        detail = session.text().empty() ? "No speech recognized; try again." : "Focus your destination, then Insert. Cancel discards.";
+                    }
                 }
             }
             if (worker.ready()) session.ready();
-            if (audio.recording() && audio.poll()) stop_record();
         } catch (const std::exception& e) {
             audio.cancel(); worker.stop();
             if (session.state() != State::Review && session.state() != State::Queued) session.fail();
             detail = e.what(); // Preserve an already-correlated preview if the worker dies.
         }
+        try {
+            if (audio.recording() && audio.poll()) stop_record();
+        } catch (const std::exception& e) {
+            // A microphone failure is not a model failure. Release the device,
+            // retain the loaded worker, and allow Record to retry capture.
+            audio.cancel(); session.fail(); detail = e.what();
+        }
         // Drawing precedes input polling: Enter is disabled until Ready is visible.
-        Panel panel{state_label(session.state()), session.text(), detail,
+        const auto status = session.state() == State::Error && worker.ready()
+            ? "Retry available - local model still loaded" : state_label(session.state());
+        Panel panel{status, session.text(), detail,
                     session.state() != State::Error && session.state() != State::Warming && session.state() != State::Transcribing,
                     session.state() == State::Recording,
                     session.state() != State::Warming && session.state() != State::Transcribing && session.state() != State::Review};
@@ -106,8 +119,10 @@ int run(const Options& options) {
                 case UiAction::Cancel: {
                     auto state = session.state();
                     audio.cancel(); session.cancel(); detail = "Discarded. Microphone closed.";
-                    if (state == State::Warming || state == State::Transcribing || state == State::Error) {
+                    if (state == State::Warming || state == State::Transcribing) {
                         worker.stop(); session.fail(); detail = "Cancelled. Record to reload local worker.";
+                    } else if (state == State::Error && !worker.ready()) {
+                        session.fail(); detail = "Worker unavailable. Record to reload local worker.";
                     }
                     break;
                 }
@@ -131,9 +146,11 @@ int run(const Options& options) {
                     break;
                 }
             } catch (const std::exception& e) {
-                // Input lease failures preserve preview; capture failures release mic.
+                // Input lease failures preserve preview. Capture failures close
+                // only the microphone; submit failures stop their own child if
+                // the IPC stream was partially written.
                 if (session.state() == State::Recording || session.state() == State::Transcribing) {
-                    audio.cancel(); worker.stop(); session.fail();
+                    audio.cancel(); session.fail();
                 }
                 detail = e.what();
             }

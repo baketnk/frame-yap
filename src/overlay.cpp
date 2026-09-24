@@ -64,11 +64,14 @@ struct Overlay::Impl {
     std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> poses{};
     bool grip_capture = false, ptt_capture = false;
     bool focus = true;
+    bool persist_mount = true;
+    vr::EVRInputError action_update_error = vr::VRInputError_None;
 
-    Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested)
+    Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested, bool persist)
         : settings_path(default_mount_settings_path()),
           mount(requested ? *requested : load_mount(settings_path)),
-          surface(font.empty() ? (std::filesystem::path(assets) / "fonts/Inconsolata-Regular.ttf").string() : font, mount) {
+          surface(font.empty() ? (std::filesystem::path(assets) / "fonts/Inconsolata-Regular.ttf").string() : font, mount),
+          persist_mount(persist) {
         const auto action_path = absolute_file(std::filesystem::path(assets) / "actions.json");
         absolute_file(std::filesystem::path(assets) / "bindings_knuckles.json");
         try {
@@ -234,10 +237,11 @@ struct Overlay::Impl {
                 focus = true; reset_input(result); break;
             case vr::VREvent_OverlayGamepadFocusLost:
             case vr::VREvent_OverlayFocusChanged:
-                // Pointer/gamepad overlay focus is not OS keyboard focus or action
-                // activity. Cancel the old gesture, then require neutral rearm;
-                // do not permanently latch global grip actions off.
-                reset_input(result); break;
+                // Dashboard laser/gamepad focus can change between the two grip
+                // squeezes. It is not action activity or controller tracking loss:
+                // invalidate pointer presses, but leave a physical grip gesture
+                // armed. Hidden overlays and true OpenVR input capture still reset.
+                surface.reset_pointers(); break;
             case vr::VREvent_MouseMove:
                 surface.pointer_move(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
                 break;
@@ -251,7 +255,7 @@ struct Overlay::Impl {
                     if (event_result.action) result.push_back(*event_result.action);
                     if (event_result.mount) {
                         mount = *event_result.mount;
-                        save_failed = !save_mount(settings_path, mount);
+                        save_failed = persist_mount && !save_mount(settings_path, mount);
                         world_ready = false;
                         applied_mount.reset();
                     }
@@ -266,7 +270,8 @@ struct Overlay::Impl {
         set.ulActionSet = action_set;
         set.ulRestrictedToDevice = vr::k_ulInvalidInputValueHandle;
         set.nPriority = 0; // normal priority; no experimental scene-input overrides
-        if (input->UpdateActionState(&set, sizeof(set), 1) != vr::VRInputError_None) {
+        action_update_error = input->UpdateActionState(&set, sizeof(set), 1);
+        if (action_update_error != vr::VRInputError_None) {
             reset_input(result); return result;
         }
         auto [la, ld] = digital(0);
@@ -300,15 +305,35 @@ struct Overlay::Impl {
     }
 };
 
-Overlay::Overlay(const std::string& assets, const std::string& font, std::optional<Mount> mount)
-    : impl_(std::make_unique<Impl>(assets, font, mount)) {}
+Overlay::Overlay(const std::string& assets, const std::string& font, std::optional<Mount> mount, bool persist_mount)
+    : impl_(std::make_unique<Impl>(assets, font, mount, persist_mount)) {}
 Overlay::~Overlay() = default;
 std::vector<UiAction> Overlay::poll() { return impl_->poll(); }
 void Overlay::draw(const Panel& panel) { impl_->draw(panel); }
 std::string Overlay::controls_status() {
-    auto left = impl_->digital(0), right = impl_->digital(1);
-    return std::string("Grip actions tracked/active: left=") + (left.first ? "yes" : "no") +
-           " right=" + (right.first ? "yes" : "no");
+    // Diagnostic only: distinguish SteamVR binding/activity from our stricter
+    // pose/role gate. Raw legacy state is read-only and may be unavailable.
+    std::string result = "SteamVR update=" + std::to_string(int(impl_->action_update_error));
+    for (size_t i = 0; i < 2; ++i) {
+        const auto role = i == 0 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand;
+        const auto device = impl_->system->GetTrackedDeviceIndexForControllerRole(role);
+        const bool tracked = device < impl_->poses.size() && impl_->poses[device].bPoseIsValid &&
+                             impl_->system->IsTrackedDeviceConnected(device);
+        vr::InputDigitalActionData_t data{};
+        const auto error = impl_->input->GetDigitalActionData(impl_->actions[i], &data, sizeof(data), vr::k_ulInvalidInputValueHandle);
+        vr::InputOriginInfo_t origin{};
+        const bool origin_ok = error == vr::VRInputError_None && data.activeOrigin != vr::k_ulInvalidInputValueHandle &&
+            impl_->input->GetOriginTrackedDeviceInfo(data.activeOrigin, &origin, sizeof(origin)) == vr::VRInputError_None &&
+            origin.trackedDeviceIndex == device;
+        vr::VRControllerState_t raw{};
+        const bool raw_ok = device < impl_->poses.size() && impl_->system->GetControllerState(device, &raw, sizeof(raw));
+        result += std::string(i == 0 ? "\nLeft:" : "\nRight:") +
+            " err=" + std::to_string(int(error)) + " bound=" + (data.bActive ? "Y" : "N") +
+            " down=" + (data.bState ? "Y" : "N") + " pose=" + (tracked ? "Y" : "N") +
+            " origin=" + (origin_ok ? "Y" : "N") +
+            " raw=" + (raw_ok ? ((raw.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_Grip)) ? "down" : "up") : "n/a");
+    }
+    return result;
 }
 
 int registration(const std::string& manifest, bool remove, bool autostart) {

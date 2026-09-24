@@ -8,13 +8,19 @@
 
 namespace frameyap {
 namespace { void check(bool result) { if (!result) throw std::runtime_error(std::string("Microphone: ") + SDL_GetError()); } }
-Audio::~Audio() { cancel(); }
+Audio::~Audio() {
+    cancel();
+    if (initialized_) SDL_QuitSubSystem(SDL_INIT_AUDIO);
+}
 void Audio::start() {
     if (stream_) throw std::runtime_error("Already recording");
-    check(SDL_InitSubSystem(SDL_INIT_AUDIO)); initialized_ = true;
+    // Keep SDL's audio backend initialized across utterances, but own the
+    // recording device only while actually capturing. Reinitializing PipeWire
+    // after every clip can fail even though the local model remains healthy.
+    if (!initialized_) { check(SDL_InitSubSystem(SDL_INIT_AUDIO)); initialized_ = true; }
     SDL_AudioSpec spec{SDL_AUDIO_F32, 1, 16000};
     stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_RECORDING, &spec, nullptr, nullptr);
-    if (!stream_) { cancel(); check(false); }
+    if (!stream_) throw std::runtime_error(std::string("Microphone: ") + SDL_GetError());
     pcm_.clear(); pcm_.reserve(320000);
     started_ = last_data_ = std::chrono::steady_clock::now();
     try { check(SDL_ResumeAudioStreamDevice(stream_)); }
@@ -51,20 +57,20 @@ bool Audio::poll() {
 }
 std::vector<float> Audio::finish() {
     if (!stream_) return {};
-    check(SDL_PauseAudioStreamDevice(stream_));
-    check(SDL_FlushAudioStream(stream_));
-    drain();
-    auto result = std::move(pcm_);
-    cancel();
-    return result;
+    try {
+        check(SDL_PauseAudioStreamDevice(stream_));
+        check(SDL_FlushAudioStream(stream_));
+        drain();
+        auto result = std::move(pcm_);
+        cancel();
+        return result;
+    } catch (...) { cancel(); throw; }
 }
 void Audio::cancel() {
     if (stream_) SDL_DestroyAudioStream(stream_);
     stream_ = nullptr;
     // Best effort clearing of the owned buffer; no persistent recording/logging.
     std::fill(pcm_.begin(), pcm_.end(), 0.0f); pcm_.clear();
-    if (initialized_) SDL_QuitSubSystem(SDL_INIT_AUDIO);
-    initialized_ = false;
 }
 int Audio::seconds() const {
     return stream_ ? int(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started_).count()) : 0;

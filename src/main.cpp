@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
             if (options.assets.empty()) throw std::runtime_error("--assets required");
             if (mode == "--check-overlay" || mode == "--check-controls") {
                 frameyap::InstanceLock lock;
-                frameyap::Overlay overlay(options.assets, options.font, options.mount);
+                frameyap::Overlay overlay(options.assets, options.font, options.mount, false);
                 overlay.draw({"FrameYap five-second visual check", "No audio captured. No text or Enter delivered.", "Controls inactive during this check.", false, false});
                 for (vr::TrackedDeviceIndex_t i = 0; i < vr::k_unMaxTrackedDeviceCount; ++i) {
                     if (vr::VRSystem()->GetTrackedDeviceClass(i) != vr::TrackedDeviceClass_Controller) continue;
@@ -89,17 +89,32 @@ int main(int argc, char** argv) {
                     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(30);
                     std::string status;
                     bool held = false;
+                    std::string last_action = "Press panel controls or tap then hold right grip. No mic or typing.";
+                    auto action_name = [](frameyap::UiAction action) {
+                        switch (action) {
+                        case frameyap::UiAction::BeginRecord: return "BeginRecord";
+                        case frameyap::UiAction::EndRecord: return "EndRecord";
+                        case frameyap::UiAction::Record: return "Record";
+                        case frameyap::UiAction::Cancel: return "Cancel";
+                        case frameyap::UiAction::Insert: return "Insert";
+                        case frameyap::UiAction::Enter: return "Enter";
+                        case frameyap::UiAction::Quit: return "Quit";
+                        case frameyap::UiAction::Toggle: return "Toggle";
+                        }
+                        return "Unknown";
+                    };
                     while (std::chrono::steady_clock::now() < end) {
-                        overlay.draw({"Controls check ONLY - no mic or typing", "Tap then hold right grip; double-tap left grip.",
-                                      held ? "HOLD gesture recognized. Release to finish." : "Try grips or click buttons. Auto-closes after 30 seconds.", true, held});
                         for (auto action : overlay.poll()) {
                             if (action == frameyap::UiAction::Quit) return 0;
                             if (action == frameyap::UiAction::BeginRecord) held = true;
                             if (action == frameyap::UiAction::EndRecord || action == frameyap::UiAction::Cancel) held = false;
-                            std::cout << "Control action=" << static_cast<int>(action) << " (diagnostic only)" << std::endl;
+                            last_action = std::string(action_name(action)) + " received; diagnostic only.";
+                            std::cout << last_action << std::endl;
                         }
                         auto next = overlay.controls_status();
                         if (next != status) { status = next; std::cout << status << std::endl; }
+                        overlay.draw({"Controls ONLY - " + std::string(held ? "HOLD recognized" : "no microphone or typing"),
+                                      status, last_action, true, held});
                         std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     }
                 } else {

@@ -17,7 +17,8 @@ struct Panel {
 };
 class Overlay {
 public:
-    Overlay(const std::string& assets, const std::string& font = {}, std::optional<Mount> mount = {});
+    Overlay(const std::string& assets, const std::string& font = {}, std::optional<Mount> mount = {},
+            bool persist_mount = true);
     ~Overlay();
     Overlay(const Overlay&) = delete;
     Overlay& operator=(const Overlay&) = delete;

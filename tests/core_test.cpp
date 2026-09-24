@@ -27,5 +27,11 @@ int main() {
     CHECK(s.record()); CHECK(s.finish(16000)); CHECK(s.reply(s.id(), ""));
     CHECK(s.state() == State::Ready); CHECK(!s.take_insert());
     CHECK(s.record()); CHECK(s.finish(16000)); s.fail(); CHECK(!s.reply(s.id(), "bad"));
+    // Request-local model or microphone errors can leave the worker loaded:
+    // discard the failed session and record again without a new warmup state.
+    s.cancel(); CHECK(s.state() == State::Ready);
+    CHECK(s.record()); CHECK(s.finish(16000)); CHECK(s.reply(s.id(), "again"));
+    CHECK(s.take_insert() == "again"); CHECK(s.record());
+    s.fail(); s.cancel(); CHECK(s.record());
     std::cout << "core checks passed\n";
 }

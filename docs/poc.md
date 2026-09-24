@@ -5,8 +5,8 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
 
 ## Implemented
 
-- Opt-in OpenVR RGBA overlay with head/left-hand placement, status, recording timer,
-  paginated UTF-8 preview, Record/Cancel/Insert/Enter/Quit controls.
+- Opt-in OpenVR RGBA overlay with world-space default and selectable wrist/head
+  mounts, status, recording timer, paginated UTF-8 preview and explicit controls.
 - Remappable SteamVR actions. Default Steam Frame grip bindings use the observed
   `frame_controller` profile. Right: short tap, then hold the second squeeze to
   record; release to transcribe. Left: two short taps request explicit Enter.
@@ -17,7 +17,10 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
   still transmit your voice: this app does **not** mute VRChat or any other app.
 - Persistent local Redux worker, correlated bounded pipes, private tmpfs clips,
   cancellation/reaping and deadlines; exact pinned model SHA-256 verification.
-  Model imports are lazy and loading is offline. No cloud/desktop fallback.
+  Model imports are lazy and loading is offline. Normal repeats, request-local
+  transcription failures and microphone failures retain the loaded model;
+  microphone device streams close outside capture. A cancelled in-flight request
+  or broken worker protocol may require reloading. No cloud/desktop fallback.
 - Gamescope IME v2 generated bindings, per-action short-lived lease, unavailable
   handling, UTF-8/control validation and explicit separate Submit action for Enter.
 - Idempotent user-local release-archive installer: SHA-256, safe extraction,
@@ -81,14 +84,17 @@ That is a producer workflow, not an end-user compiler requirement.
 
 ```sh
 ./build-native/frameyap --check-input --socket gamescope-0
-./build-native/frameyap --check-overlay --assets "$PWD/assets" --font /path/font.ttf --head
-./build-native/frameyap --check-controls --assets "$PWD/assets" --font /path/font.ttf --head
+./build-native/frameyap --check-overlay --assets "$PWD/assets" --mount world
+./build-native/frameyap --check-controls --assets "$PWD/assets" --mount world
 ```
 
 The first acquires/releases an IME without text/actions. The second displays a
 five-second inert panel. The third displays a 30-second diagnostic panel and
-reports gestures, **without microphone or input injection**. Active action handles
-are not proof that gestures were delivered. Checks must be explicitly launched
+reports pointer actions, SteamVR action activity, tracking and read-only legacy
+grip state, **without microphone or input injection**. Mount clicks in check
+modes do not save a preference. A SteamVR error code or inactive grip means the
+gesture cannot be accepted; raw grip reads do not authorize a fallback binding.
+Action handles alone are not proof that gestures were delivered. Checks must be explicitly launched
 while the user expects the panel. Normal CLI/help/version remain inert.
 
 The ARM64 OpenVR loader's default `/data/work/openvrpaths.vrpath` failed on the

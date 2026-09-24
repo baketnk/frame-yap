@@ -43,6 +43,7 @@ def fake_child():
         time.sleep(130)
         return
     worker.send_frame(1, b"Y")
+    requests = 0
     while True:
         msg = worker.read_frame(0)
         if msg is None:
@@ -52,6 +53,7 @@ def fake_child():
             time.sleep(70)
             continue
         assert len(msg) == 9 and msg[:1] == b"T"
+        requests += 1
         clip = Path(args.clip_dir) / "clip.raw"
         assert clip.stat().st_size == 3200 * 4
         ident = msg[1:9]
@@ -59,6 +61,9 @@ def fake_child():
             ident = struct.pack("<Q", struct.unpack("<Q", ident)[0] + 1)
         if args.model == "oversized-frame":
             os.write(1, struct.pack("<I", 65537))
+            continue
+        if args.model == "request-error" and requests == 1:
+            worker.send_frame(1, b"E", ident + b"transcription failed")
             continue
         text = b"a" * 4097 if args.model == "long" else "héllo 世界".encode()
         worker.send_frame(1, b"R", ident + text)

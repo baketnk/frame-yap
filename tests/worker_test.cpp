@@ -55,6 +55,15 @@ int main(int argc, char** argv) {
             (void)entry;
             throw std::runtime_error("private directory leaked");
         }
+        worker.start(argv[1], argv[2], "request-error", 2);
+        until([&] { worker.poll(); return worker.ready(); });
+        worker.submit(200, clip);
+        until([&] { reply = worker.poll(); return reply.has_value(); });
+        assert(reply->id == 200 && reply->error == "transcription failed" && worker.ready());
+        worker.submit(201, clip); // A request-local failure must not unload Redux.
+        until([&] { reply = worker.poll(); return reply.has_value(); });
+        assert(reply->id == 201 && reply->text == "héllo 世界" && worker.ready());
+        worker.stop();
         worker.start(argv[1], argv[2], "fail", 2);
         bool failed = false;
         until([&] {
