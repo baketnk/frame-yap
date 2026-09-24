@@ -173,10 +173,12 @@ rather than placing a menu at the world origin. A tracking-origin reset requests
 a fresh placement. Settings → Recenter in front deliberately resamples the pose.
 
 Settings offers World space, Left wrist, Right wrist and Head on that same canvas.
-World/head width is 0.85 m; wrist width defaults to 0.30 m. Both wrists use
+World/head width is 0.85 m; wrist width defaults to 0.30 m. The left wrist uses
 VR Workspace's fallback watch-face axes: panel-right points toward the fingers
 (controller -Z), panel-up points out of the back of the hand (controller +Y),
-and panel-front points toward controller +X. Its controller-relative center is
+and panel-front points toward controller +X. The right wrist reverses panel-right
+and panel-front (controller +Z and -X), keeping panel-up unchanged so it faces
+inward with upright, unmirrored text. The controller-relative center is
 (0, 0.18, 0.089) m, approximating the compact HUD's surface center: its
 0.12 m wrist lift, 0.09 m bottom anchor and ~0.03 m panel-center correction;
 Z combines the fallback 0.054 m wrist calibration and 0.035 m finger-back offset. This copies placement geometry, not

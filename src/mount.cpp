@@ -78,6 +78,12 @@ Matrix34 relative_mount_pose(Mount mount, const WristPlacement& wrist) {
         pose[0] = {0.f, s, c, c * wrist.x + s * wrist.y};
         pose[1] = {0.f, c, -s, -s * wrist.x + c * wrist.y};
         pose[2] = {-1.f, 0.f, 0.f, wrist.z};
+        if (mount == Mount::RightWrist) {
+            // The wearer views the right wrist from the opposite side. Rotate
+            // 180 degrees about panel-up, not a reflection or upside-down roll:
+            // both right and front reverse, while up and center stay unchanged.
+            for (auto& row : pose) { row[0] = -row[0]; row[2] = -row[2]; }
+        }
         break;
     }
     case Mount::World: break;

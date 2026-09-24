@@ -66,7 +66,13 @@ int main() {
     check_basis(head, 1, 0, 0, 1);
     CHECK(near(head[0][3], 0)); CHECK(near(head[1][3], -.16f)); CHECK(near(head[2][3], -1.05f));
     const auto left = relative_mount_pose(Mount::LeftWrist), right = relative_mount_pose(Mount::RightWrist);
-    CHECK(left == right); // VR Workspace fallback calibration uses the same controller-local axes for both hands.
+    check_basis(right, 0, 1, -1, 0); // right wrist faces inward, not away from wearer
+    for (int r = 0; r < 3; ++r) {
+        CHECK(near(right[r][3], left[r][3])); // position and up unchanged
+        CHECK(near(right[r][1], left[r][1]));
+        CHECK(near(right[r][0], -left[r][0]));
+        CHECK(near(right[r][2], -left[r][2]));
+    }
     CHECK(near(left[0][0], 0)); CHECK(near(left[1][0], 0)); CHECK(near(left[2][0], -1));
     CHECK(near(left[0][1], 0)); CHECK(near(left[1][1], 1)); CHECK(near(left[2][1], 0));
     CHECK(near(left[0][2], 1)); CHECK(near(left[1][2], 0)); CHECK(near(left[2][2], 0));
@@ -74,7 +80,23 @@ int main() {
     WristPlacement tuned{.02f, .1f, .07f, .25f, 90.f};
     const auto rotated = relative_mount_pose(Mount::RightWrist, tuned);
     CHECK(near(rotated[0][1], 1)); CHECK(near(rotated[1][1], 0));
-    CHECK(near(rotated[0][2], 0)); CHECK(near(rotated[1][2], -1));
+    CHECK(near(rotated[0][2], 0)); CHECK(near(rotated[1][2], 1));
+    // Every roll remains an orthonormal, positive-determinant rotation: no mirror.
+    for (float roll : {-180.f, -90.f, -35.f, 0.f, 90.f, 180.f}) {
+        tuned.roll_degrees = roll;
+        for (auto hand : {Mount::LeftWrist, Mount::RightWrist}) {
+            const auto m = relative_mount_pose(hand, tuned);
+            for (int a = 0; a < 3; ++a) for (int b = 0; b < 3; ++b) {
+                float dot = 0;
+                for (int r = 0; r < 3; ++r) dot += m[r][a] * m[r][b];
+                CHECK(near(dot, a == b ? 1.f : 0.f));
+            }
+            for (int r = 0; r < 3; ++r) {
+                const int a = (r + 1) % 3, b = (r + 2) % 3;
+                CHECK(near(m[a][0] * m[b][1] - m[b][0] * m[a][1], m[r][2]));
+            }
+        }
+    }
     CHECK(near(rotated[0][3], .1f)); CHECK(near(rotated[1][3], -.02f));
     CHECK(near(rotated[2][3], .07f)); CHECK(near(mount_width(Mount::RightWrist, tuned), .25f));
     CHECK(relative_mount_pose(Mount::Head, tuned) == head);
