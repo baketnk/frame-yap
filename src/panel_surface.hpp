@@ -1,6 +1,7 @@
 #pragma once
 #include "overlay.hpp"
 #include "config.hpp"
+#include "panel_drag.hpp"
 #include <memory>
 #include <optional>
 #include <string>
@@ -20,17 +21,21 @@ struct SurfaceEvent {
 // status and safety controls remain on the same surface.
 class PanelSurface {
 public:
-    static constexpr int width = 1000, height = 680;
+    struct Bounds { int x, y, w, h; };
+    static constexpr int width = 1080, height = 780;
+    static constexpr Bounds body{0, 0, 1000, 680};
+    static constexpr Bounds grab{370, 698, 260, 52};
+    static constexpr Bounds scale{996, 680, 68, 68};
     PanelSurface(const std::string& font, Mount mount, Theme theme = {});
     ~PanelSurface();
     PanelSurface(const PanelSurface&) = delete;
     PanelSurface& operator=(const PanelSurface&) = delete;
     bool render(const Panel& panel);
     const std::vector<unsigned char>& pixels() const;
-    void pointer_down(unsigned cursor, float x, float y);
+    // Handles capture one cursor and never authorize a UI action on release.
+    std::optional<PanelDragKind> pointer_down(unsigned cursor, float x, float y);
     SurfaceEvent pointer_up(unsigned cursor, float x, float y);
-    // Returns a relative physical-width change while dragging the resize grip.
-    std::optional<float> pointer_move(unsigned cursor, float x, float y);
+    bool dragging(unsigned cursor) const;
     void reset_pointers();
     void set_placement_note(std::string note);
     void set_lasers_anytime(bool enabled);

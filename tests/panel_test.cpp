@@ -61,19 +61,34 @@ int main(int argc, char** argv) {
     no_action(click(surface, std::numeric_limits<float>::quiet_NaN(), 610));
     no_action(click(surface, -1, 610));
     no_action(click(surface, 1000, 680));
-    // Lower-right grip scales without activating the nearby Quit button or
-    // uploading new pixels. Other cursors cannot hijack an active drag.
-    surface.pointer_down(0, 951, 656);
-    assert(!surface.pointer_move(1, 970, 650));
-    auto factor = surface.pointer_move(0, 971, 641);
-    assert(factor && *factor > 1.f);
+    // Outside handles capture one cursor, invalidate all previous approvals,
+    // and never activate Quit/Record on release. No repaint during manipulation.
+    assert(surface.pointer_down(0, 1028, 712) == PanelDragKind::Scale);
+    assert(surface.dragging(0) && !surface.dragging(1));
+    assert(!surface.pointer_down(1, 500, 724));
+    no_action(surface.pointer_up(1, 1028, 712));
+    assert(surface.dragging(0));
     no_action(surface.pointer_up(0, 900, 610));
-    assert(!surface.pointer_move(0, 975, 640));
+    assert(!surface.dragging(0));
     assert(!surface.render(p));
-    surface.pointer_down(0, 951, 656);
+    surface.pointer_down(1, 100, 610);
+    assert(surface.pointer_down(0, 500, 724) == PanelDragKind::Grab);
+    no_action(surface.pointer_up(1, 100, 610));
+    no_action(surface.pointer_up(0, 100, 610));
+    no_action(surface.pointer_up(1, 100, 610));
+    assert(surface.pointer_down(0, 1028, 712) == PanelDragKind::Scale);
     surface.reset_pointers();
-    assert(!surface.pointer_move(0, 971, 641));
-    no_action(surface.pointer_up(0, 951, 656));
+    assert(!surface.dragging(0));
+    no_action(surface.pointer_up(0, 1028, 712));
+    no_action(click(surface, 951, 656)); // retired inset grip
+    no_action(click(surface, 800, 724)); // empty transparent margin
+    assert(!surface.pointer_down(0, 996, 680)); // clipped handle corner
+    const auto alpha = [&](int x, int y) { return surface.pixels()[(y * PanelSurface::width + x) * 4 + 3]; };
+    assert(alpha(500, 723) == 255 && alpha(1040, 705) == 255);
+    assert(alpha(800, 724) == 0 && alpha(1050, 760) == 0);
+    assert(alpha(500, 690) == 0 && alpha(1030, 704) == 0);
+    // Antialiased handle edges carry real alpha, not RGB hidden at alpha zero.
+    assert(alpha(401, 721) > 0 && alpha(401, 721) < 255);
 
     p.enabled = true;
     p.record_available = false;
@@ -207,10 +222,9 @@ int main(int argc, char** argv) {
     assert(surface.pixels() == replaced);
     p.status = std::string(4096, 's'); p.detail = std::string(4096, 'd');
     assert(surface.render(p)); assert(!surface.render(p));
-    // Laser motion and a press do not re-upload raw pixels. A completed
-    // action still reaches the caller; meaningful panel changes redraw.
-    surface.pointer_move(0, 900, 610); assert(!surface.render(p));
-    surface.pointer_move(0, 900, 610); assert(!surface.render(p));
+    // A press does not re-upload pixels. A completed action still reaches the
+    // caller; meaningful panel changes redraw.
+    assert(!surface.render(p));
     surface.pointer_down(0, 900, 610); assert(!surface.render(p));
     assert(surface.pointer_up(0, 900, 610).action == UiAction::Quit);
     assert(!surface.render(p));

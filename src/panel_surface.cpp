@@ -13,7 +13,7 @@ namespace frameyap {
 namespace {
 constexpr int W = PanelSurface::width, H = PanelSurface::height;
 using Color = Rgba;
-constexpr int grip_x = 927, grip_y = 646, grip_w = 51, grip_h = 29;
+constexpr int CW = PanelSurface::body.w, CH = PanelSurface::body.h;
 float rounded_distance(float px, float py, int x, int y, int w, int h, float radius) {
     const float dx = std::abs(px - (x + w / 2.f)) - (w / 2.f - radius);
     const float dy = std::abs(py - (y + h / 2.f)) - (h / 2.f - radius);
@@ -111,8 +111,7 @@ struct PanelSurface::Impl {
     bool dirty = true, lasers_anytime = false, advanced_debug = false, auto_insert = false;
     std::string placement_note, binding_note;
     std::array<int, 2> pressed{{-1, -1}};
-    int resize_cursor = -1;
-    float resize_x = 0.f, resize_y = 0.f;
+    int drag_cursor = -1;
     std::vector<std::string> lines;
     size_t page = 0;
     static constexpr size_t lines_per_page = 4;
@@ -144,8 +143,14 @@ struct PanelSurface::Impl {
     }
     void blend(int x, int y, Color color, float amount) {
         auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
+        // Straight-alpha source-over, including strokes in the transparent margin.
+        const float alpha = amount * color[3] / 255.f;
+        const float old_alpha = dst[3] / 255.f;
+        const float out_alpha = alpha + old_alpha * (1.f - alpha);
+        if (out_alpha <= 0.f) return;
         for (int k = 0; k < 3; ++k)
-            dst[k] = static_cast<unsigned char>(dst[k] * (1.f - amount) + color[k] * amount);
+            dst[k] = static_cast<unsigned char>((dst[k] * old_alpha * (1.f - alpha) + color[k] * alpha) / out_alpha);
+        dst[3] = static_cast<unsigned char>(255.f * out_alpha);
     }
     void rounded(Rect r, int radius, Color fill, Color edge, float glow = 0.f, int stroke = 1) {
         // Distance-field antialiasing and restrained baked glow. No second texture or GPU pass.
@@ -166,12 +171,12 @@ struct PanelSurface::Impl {
     void frame() {
         // Independently rasterized version of kouseki's HUD visual language:
         // rounded mint-to-blue perimeter and a second shallow curved accent.
-        for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
-            if (x > 34 && x < W - 34 && y > 34 && y < H - 34) continue;
-            const float distance = rounded_distance(x, y, 10, 10, W - 20, H - 20, 18.f);
+        for (int y = 0; y < CH; ++y) for (int x = 0; x < CW; ++x) {
+            if (x > 34 && x < CW - 34 && y > 34 && y < CH - 34) continue;
+            const float distance = rounded_distance(x, y, 10, 10, CW - 20, CH - 20, 18.f);
             const float edge = std::abs(distance);
             const float strength = edge <= 1.f ? 1.f : .30f * std::max(0.f, 1.f - (edge - 1.f) / 6.f);
-            const float t = float(x) / W;
+            const float t = float(x) / CW;
             Color gradient{};
             for (int k = 0; k < 3; ++k)
                 gradient[k] = static_cast<unsigned char>(theme.frame_start[k] * (1.f - t) + theme.frame_end[k] * t);
@@ -180,9 +185,9 @@ struct PanelSurface::Impl {
             for (int k = 0; k < 3; ++k) dst[k] = static_cast<unsigned char>(background[k] + (gradient[k] - background[k]) * strength);
             dst[3] = distance <= 1.f ? 255 : static_cast<unsigned char>(255 * std::max(0.f, 1.f - (distance - 1.f) / 6.f));
         }
-        for (int x = 32; x < W - 32; ++x) {
-            const float t = float(x - 32) / (W - 64);
-            const int y = H - 21 - int(5 * std::sin(t * 3.14159265f));
+        for (int x = 32; x < CW - 32; ++x) {
+            const float t = float(x - 32) / (CW - 64);
+            const int y = CH - 21 - int(5 * std::sin(t * 3.14159265f));
             Color gradient{};
             for (int k = 0; k < 3; ++k)
                 gradient[k] = static_cast<unsigned char>(theme.frame_start[k] * (1.f - t) + theme.frame_end[k] * t);
@@ -266,7 +271,7 @@ struct PanelSurface::Impl {
     }
     void reset() {
         pressed.fill(-1);
-        resize_cursor = -1;
+        drag_cursor = -1;
     }
     bool render(const Panel& p) {
         if (p.recording != panel.recording || p.enabled != panel.enabled ||
@@ -282,7 +287,8 @@ struct PanelSurface::Impl {
             dirty = true;
         panel = p;
         if (!dirty) return false;
-        rect({0, 0, W, H}, background);
+        std::fill(pixels.begin(), pixels.end(), 0);
+        rect({0, 0, CW, CH}, background);
         frame();
         text("FrameYap", 32, 61, 40, ink, 300);
         text(auto_insert ? "ON-DEVICE / AUTO INSERT OPT-IN" : "ON-DEVICE / REVIEW FIRST", 280, 58, 22, muted, 720);
@@ -341,11 +347,12 @@ struct PanelSurface::Impl {
                      active ? cyan : muted, b.r.x + b.r.w - 12);
             }
         }
-        // Separate from the Quit hitbox. The three diagonal marks remain
-        // visible on both tabs, slightly inset from the lower-right corner.
-        for (int n = 0; n < 3; ++n)
-            for (int i = 0; i < 13 + 5 * n; ++i)
-                rect({956 - i, 657 + 5 * n + i / 3, 2, 2}, cyan);
+        // Screenshot-inspired grab underline and outside corner bracket. No
+        // opaque toolbar backing; broad hit targets surround the slender strokes.
+        const Color handle = theme.frame_end;
+        rounded({400, 721, 200, 6}, 3, handle, handle);
+        rounded({1008, 721, 36, 6}, 3, handle, handle);
+        rounded({1038, 691, 6, 36}, 3, handle, handle);
         dirty = false;
         return true;
     }
@@ -356,30 +363,27 @@ PanelSurface::~PanelSurface() = default;
 bool PanelSurface::render(const Panel& p) { return impl_->render(p); }
 const std::vector<unsigned char>& PanelSurface::pixels() const { return impl_->pixels; }
 bool PanelSurface::available(UiAction a) const { return impl_->available(a); }
-std::optional<float> PanelSurface::pointer_move(unsigned cursor, float x, float y) {
-    if (cursor >= impl_->pressed.size() || int(cursor) != impl_->resize_cursor ||
-        !std::isfinite(x) || !std::isfinite(y)) return {};
-    // OpenVR supplies coordinates on the *current* panel. Work incrementally
-    // so resizing never depends on a stale down-position after a width change.
-    const float delta = (x - impl_->resize_x) / W - (y - impl_->resize_y) / H;
-    impl_->resize_x = x; impl_->resize_y = y;
-    return std::clamp(1.f + delta, .9f, 1.1f);
+bool PanelSurface::dragging(unsigned cursor) const {
+    return cursor < impl_->pressed.size() && int(cursor) == impl_->drag_cursor;
 }
-void PanelSurface::pointer_down(unsigned cursor, float x, float y) {
-    if (cursor >= impl_->pressed.size()) return;
-    if (impl_->resize_cursor < 0 && std::isfinite(x) && std::isfinite(y) &&
-        x >= grip_x && x < grip_x + grip_w && y >= grip_y && y < grip_y + grip_h) {
-        impl_->resize_cursor = int(cursor);
-        impl_->resize_x = x; impl_->resize_y = y;
-        impl_->pressed[cursor] = -1;
-        return;
+std::optional<PanelDragKind> PanelSurface::pointer_down(unsigned cursor, float x, float y) {
+    if (cursor >= impl_->pressed.size() || impl_->drag_cursor >= 0) return {};
+    const auto contains = [&](Bounds b) { return Rect{b.x, b.y, b.w, b.h}.contains(x, y); };
+    if (contains(grab) || contains(scale)) {
+        impl_->reset(); // other cursor's prior approval cannot survive relocation
+        impl_->drag_cursor = int(cursor);
+        return contains(grab) ? PanelDragKind::Grab : PanelDragKind::Scale;
     }
     impl_->pressed[cursor] = impl_->hit(x, y);
+    return {};
 }
 SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
     SurfaceEvent result;
     if (cursor >= impl_->pressed.size()) return result;
-    if (impl_->resize_cursor == int(cursor)) { impl_->resize_cursor = -1; return result; }
+    if (impl_->drag_cursor >= 0) {
+        if (impl_->drag_cursor == int(cursor)) impl_->reset();
+        return result;
+    }
     int index = std::exchange(impl_->pressed[cursor], -1);
     if (index < 0 || impl_->hit(x, y) != index) return result;
     auto c = buttons[index].id;

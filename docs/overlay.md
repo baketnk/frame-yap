@@ -18,8 +18,9 @@ A missing selected font falls back to bundled Inconsolata, then a system DejaVu
 Sans face if present. Glyph coverage depends on the selected face; full CJK
 coverage is not claimed.
 
-`src/panel_surface.*` renders **one 1000×680 RGBA canvas** for review, settings,
-status and controls. `src/overlay_texture.*` uploads this CPU canvas into one
+`src/panel_surface.*` renders **one 1080×780 RGBA canvas** containing a 1000×680
+main panel for review, settings, status and controls, plus transparent right/bottom
+margins for a thin grab underline and an external L-shaped scale handle. `src/overlay_texture.*` uploads this CPU canvas into one
 persistent Vulkan RGBA8 image and submits it with `SetOverlayTexture`. The image,
 staging allocation and command buffer are reused; tabs do not create extra
 overlays or render targets. The rounded mint-to-blue perimeter,
@@ -203,12 +204,33 @@ a fresh placement. Settings → Recenter in front deliberately resamples the pos
 
 Settings offers World space, Left wrist, Right wrist and Head on that same canvas.
 World/head width is 0.85 m; wrist width defaults to 0.30 m. All mounts have
-the same lower-right resize grip: drag it to scale the panel
-between half and twice its configured width. The original upper-left corner
-remains fixed relative to the chosen mount, rather than scaling about the
-center. The physical resize is session-only; switching mounts retains the
-scale factor, while restart restores configured defaults. Grip behavior and
-comfort still need an opt-in on-headset check. The left wrist uses
+a thin grab bar below the main panel and an L-shaped scale bracket outside its
+lower-right corner, visually modeled on the user's Steam terminal-window screenshot.
+These are original FrameYap controls, not Steam private UI components. RGBA alpha
+leaves their surrounding area transparent; an explicit OpenVR intersection mask
+excludes empty margins from laser hit testing (the slender strokes have larger hit
+targets). The extra canvas area does not shrink the main panel's physical width.
+
+Hold the laser's primary click on the bar and move to translate the panel **in its
+plane**; this does not change depth or orientation. Drag the corner bracket to scale
+between half and twice the configured width. The original upper-left corner remains
+fixed relative to the chosen mount. Both work on either tab and all mounts. Movement
+is bounded to two meters per axis; mount changes/recenter clear movement, while mount
+changes retain the size factor. Restart restores configured position/size defaults.
+
+A drag freezes its initial plane and calibrates a ray from the source controller to
+the initial hit. Subsequent tracked poses determine translation/scale, even beyond
+the original texture bounds; changing overlay coordinates never feed back into the
+drag. For head/wrist mounts, geometry stays in the anchor-device coordinate frame.
+The event's controller is used, with the primary dashboard device as the single-cursor
+fallback when the event omits it. No guessed controller or desktop pointer fallback.
+Release, changed UI authorization, tracking loss, hidden overlay, relocation, invalid
+ray geometry or a 15-second safety limit cancels the drag. If legacy trigger state is
+observable on press, release is also checked through that state, including outside
+the texture. Otherwise the drag cancels as soon as this overlay stops being the
+hover target, rather than waiting for a potentially missing outside MouseButtonUp. Other pointer approvals and bound actions cannot fire during a drag.
+Source-device reporting, out-of-bounds release, mask behavior and comfort still need
+on-headset acceptance. The left wrist uses
 VR Workspace's fallback watch-face axes: panel-right points toward the fingers
 (controller -Z), panel-up points out of the back of the hand (controller +Y),
 and panel-front points toward controller +X. The right wrist reverses panel-right
@@ -258,8 +280,10 @@ coexistence remains unverified.
 
 ### Hardware-free UI checks
 
-The default build tests mount parsing, laser preference persistence and pose
-geometry without any native dependencies. A FreeType-only opt-in build exercises the actual renderer,
+The default build tests mount parsing, laser preference persistence, pose geometry
+and captured-ray grab/scale math without any native dependencies. Drag tests cover
+stationary stability, independent axes, rotated/relative mounts, out-of-bounds hits,
+invalid rays and no feedback from prior updates. A FreeType-only opt-in build exercises the actual renderer,
 pointer gating, tab switches, pagination, recording state and redraw invalidation:
 
 ```sh

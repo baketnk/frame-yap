@@ -34,6 +34,19 @@ void configure_registry() {
         ::setenv("VR_PATHREG_OVERRIDE", registry.c_str(), 0);
 }
 constexpr int W = PanelSurface::width, H = PanelSurface::height;
+constexpr int CW = PanelSurface::body.w, CH = PanelSurface::body.h;
+Matrix34 matrix(const vr::HmdMatrix34_t& value) {
+    Matrix34 result{};
+    for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) result[r][c] = value.m[r][c];
+    return result;
+}
+Matrix34 relative_to(const Matrix34& pose, const Matrix34& parent) {
+    Matrix34 result{}; // inverse rigid parent * pose
+    for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c)
+        for (int k = 0; k < 3; ++k)
+            result[r][c] += parent[k][r] * (pose[k][c] - (c == 3 ? parent[k][3] : 0.f));
+    return result;
+}
 constexpr std::array<const char*, 6> action_names{{"left_grip", "right_grip", "ptt", "cancel", "insert", "enter"}};
 void overlay_check(vr::EVROverlayError err, vr::IVROverlay* api, const char* op) {
     if (err != vr::VROverlayError_None)
@@ -78,6 +91,15 @@ struct Overlay::Impl {
     bool world_ready = false, placed = false, has_texture = false, shown = false;
     float size_scale = 1.f;
     bool size_changed = false;
+    float move_x = 0.f, move_y = 0.f;
+    Matrix34 canvas_pose{};
+    PanelDrag drag;
+    PanelDragKind drag_kind = PanelDragKind::Grab;
+    unsigned drag_cursor = 0;
+    vr::TrackedDeviceIndex_t drag_device = vr::k_unTrackedDeviceIndexInvalid;
+    bool drag_trigger_observed = false;
+    float drag_scale = 1.f, drag_x = 0.f, drag_y = 0.f;
+    std::chrono::steady_clock::time_point drag_started{};
     vr::HmdMatrix34_t world_transform{};
     std::optional<Mount> applied_mount;
     vr::TrackedDeviceIndex_t anchor = vr::k_unTrackedDeviceIndexInvalid;
@@ -157,6 +179,16 @@ struct Overlay::Impl {
             overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_VisibleInDashboard, true), overlay, "VisibleInDashboard");
             vr::HmdVector2_t mouse_scale{{float(W), float(H)}};
             overlay_check(overlay->SetOverlayMouseScale(handle, &mouse_scale), overlay, "SetOverlayMouseScale");
+            // Alpha is visual, not an input mask. Exclude the empty margins from
+            // laser intersection rather than blocking neighboring windows there.
+            std::array<vr::VROverlayIntersectionMaskPrimitive_t, 3> mask{};
+            const std::array<PanelSurface::Bounds, 3> regions{{{10, 10, CW - 20, CH - 20}, PanelSurface::grab, PanelSurface::scale}};
+            for (size_t i = 0; i < mask.size(); ++i) {
+                const auto b = regions[i];
+                mask[i].m_nPrimitiveType = vr::OverlayIntersectionPrimitiveType_Rectangle;
+                mask[i].m_Primitive.m_Rectangle = {float(b.x), float(H - b.y - b.h), float(b.w), float(b.h)};
+            }
+            overlay_check(overlay->SetOverlayIntersectionMask(handle, mask.data(), uint32_t(mask.size())), overlay, "SetOverlayIntersectionMask");
             system->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses.data(), uint32_t(poses.size()));
             place();
             draw(Panel{"Disabled", "", "Record to start local worker", false, false});
@@ -216,32 +248,97 @@ struct Overlay::Impl {
         }
         surface.set_placement_note(note);
         if (applied_mount != effective || (effective != Mount::World && anchor != target) || size_changed) {
-            if (!size_changed || applied_mount != effective || anchor != target)
-                surface.reset_pointers(); // a release on a relocated surface cannot activate an old press
+            if (applied_mount != effective || anchor != target) {
+                surface.reset_pointers(); drag.reset();
+                move_x = move_y = 0.f;
+            }
             const float base_width = mount_width(effective, config.wrist);
-            if (effective == Mount::World) {
-                Matrix34 pose{};
-                for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) pose[r][c] = world_transform.m[r][c];
-                pose = resized_mount_pose(pose, base_width, size_scale, float(H) / W);
-                vr::HmdMatrix34_t transform{};
-                for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = pose[r][c];
+            auto pose = effective == Mount::World ? matrix(world_transform) : relative_mount_pose(effective, config.wrist);
+            pose = resized_mount_pose(pose, base_width, size_scale, float(CH) / CW);
+            // Keep the original content width/center; transparent right/bottom
+            // margins extend the canvas, not the main panel's physical size.
+            const float meters_per_pixel = base_width * size_scale / CW;
+            const float dx = move_x + (W - CW) * .5f * meters_per_pixel;
+            const float dy = move_y - (H - CH) * .5f * meters_per_pixel;
+            for (int r = 0; r < 3; ++r) pose[r][3] += pose[r][0] * dx + pose[r][1] * dy;
+            canvas_pose = pose;
+            vr::HmdMatrix34_t transform{};
+            for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = pose[r][c];
+            if (effective == Mount::World)
                 overlay_check(overlay->SetOverlayTransformAbsolute(handle, vr::TrackingUniverseStanding, &transform), overlay,
                               "SetOverlayTransformAbsolute");
-            } else {
-                const auto pose = resized_mount_pose(relative_mount_pose(effective, config.wrist),
-                                                     base_width, size_scale, float(H) / W);
-                vr::HmdMatrix34_t transform{};
-                for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = pose[r][c];
+            else
                 overlay_check(overlay->SetOverlayTransformTrackedDeviceRelative(handle, target, &transform), overlay,
                               "SetOverlayTransformTrackedDeviceRelative");
-            }
-            overlay_check(overlay->SetOverlayWidthInMeters(handle, base_width * size_scale), overlay, "SetOverlayWidthInMeters");
+            overlay_check(overlay->SetOverlayWidthInMeters(handle, base_width * size_scale * W / CW), overlay, "SetOverlayWidthInMeters");
             applied_mount = effective;
             anchor = target;
             size_changed = false;
         }
         placed = true;
         visibility();
+    }
+    bool tracked(vr::TrackedDeviceIndex_t device) const {
+        return device < poses.size() && poses[device].bPoseIsValid && poses[device].bDeviceIsConnected;
+    }
+    std::optional<Matrix34> drag_source() const {
+        if (!tracked(drag_device) || !applied_mount) return {};
+        auto pose = matrix(poses[drag_device].mDeviceToAbsoluteTracking);
+        if (*applied_mount != Mount::World) {
+            if (!tracked(anchor)) return {};
+            pose = relative_to(pose, matrix(poses[anchor].mDeviceToAbsoluteTracking));
+        }
+        return pose;
+    }
+    void begin_drag(PanelDragKind kind, const vr::VREvent_t& event) {
+        drag_device = event.trackedDeviceIndex;
+        drag_cursor = event.data.mouse.cursorIndex;
+        // Single-cursor overlay: some runtime mouse events omit the source.
+        // The dashboard's primary device is the only supported fallback, never
+        // a guessed left/right hand or a source chosen by proximity.
+        if (drag_cursor == 0 && (drag_device == vr::k_unTrackedDeviceIndexInvalid ||
+                                 drag_device == vr::k_unTrackedDeviceIndex_Hmd))
+            drag_device = overlay->GetPrimaryDashboardDevice();
+        drag_kind = kind;
+        const auto source = drag_source();
+        const float w = applied_mount ? mount_width(*applied_mount, config.wrist) * size_scale * W / CW : 0.f;
+        if (!source || system->GetTrackedDeviceClass(drag_device) != vr::TrackedDeviceClass_Controller ||
+            !drag.begin(kind, canvas_pose, w, w * H / W, event.data.mouse.x / W,
+                        1.f - event.data.mouse.y / H, *source)) {
+            surface.reset_pointers(); drag.reset();
+            last_pointer_event = "drag source unavailable";
+            return;
+        }
+        drag_scale = size_scale; drag_x = move_x; drag_y = move_y;
+        drag_started = std::chrono::steady_clock::now();
+        vr::VRControllerState_t state{};
+        drag_trigger_observed = system->GetControllerState(drag_device, &state, sizeof(state)) &&
+            (state.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger));
+        last_pointer_event = std::string(kind == PanelDragKind::Grab ? "grab" : "scale") +
+            " device=" + std::to_string(drag_device) + " trigger-watch=" + (drag_trigger_observed ? "Y" : "N");
+    }
+    void update_drag() {
+        if (!drag.active()) return;
+        const auto source = drag_source();
+        vr::VRControllerState_t state{};
+        const bool trigger_released = drag_trigger_observed &&
+            (!system->GetControllerState(drag_device, &state, sizeof(state)) ||
+             !(state.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger)));
+        // Without a readable release watchdog, never keep manipulating after
+        // the pointer leaves our hit region: an outside MouseUp is not assured.
+        const bool lost_unwatched_pointer = !drag_trigger_observed && !overlay->IsHoverTargetOverlay(handle);
+        if (!surface.dragging(drag_cursor) || !shown || !focus || !source || trigger_released || lost_unwatched_pointer ||
+            std::chrono::steady_clock::now() - drag_started > std::chrono::seconds(15)) {
+            surface.reset_pointers(); drag.reset(); return;
+        }
+        const auto change = drag.update(*source);
+        if (!change) { surface.reset_pointers(); drag.reset(); return; }
+        const float scale = drag_kind == PanelDragKind::Scale ? std::clamp(drag_scale * change->factor, .5f, 2.f) : size_scale;
+        const float x = drag_kind == PanelDragKind::Grab ? std::clamp(drag_x + change->dx, -2.f, 2.f) : move_x;
+        const float y = drag_kind == PanelDragKind::Grab ? std::clamp(drag_y + change->dy, -2.f, 2.f) : move_y;
+        if (scale != size_scale || x != move_x || y != move_y) {
+            size_scale = scale; move_x = x; move_y = y; size_changed = true;
+        }
     }
     bool available(UiAction action) const { return surface.available(action); }
     void draw(const Panel& p) {
@@ -344,17 +441,15 @@ struct Overlay::Impl {
                 // a release must still hit the same enabled control.
                 last_pointer_event = "overlay focus changed"; break;
             case vr::VREvent_MouseMove:
-                if (auto factor = surface.pointer_move(event.data.mouse.cursorIndex, event.data.mouse.x,
-                                                       H - event.data.mouse.y)) {
-                    const float next = std::clamp(size_scale * *factor, .5f, 2.f);
-                    if (next != size_scale) { size_scale = next; size_changed = true; }
-                }
+                // Manipulation uses the captured controller ray, not coordinates
+                // fed back from a changing overlay or a batch of stale mouse hits.
                 break;
             case vr::VREvent_MouseButtonDown:
                 ++pointer_downs;
                 last_pointer_event = "down button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left)
-                    surface.pointer_down(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
+                    if (auto kind = surface.pointer_down(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y))
+                        begin_drag(*kind, event);
                 break;
             case vr::VREvent_MouseButtonUp:
                 ++pointer_ups;
@@ -412,7 +507,17 @@ struct Overlay::Impl {
             default: break;
             }
         }
+        update_drag();
         place();
+        if (drag.active()) {
+            // A controller used to manipulate the panel must not also authorize
+            // Record/Insert/Enter. Require neutral rearm after the drag ends.
+            left.reset(); right.reset();
+            if (grip_capture || ptt_capture) result.push_back(UiAction::Cancel);
+            grip_capture = ptt_capture = false;
+            for (auto& edge : edges) edge.reset();
+            return result;
+        }
         vr::VRActiveActionSet_t set{};
         set.ulActionSet = action_set;
         set.ulRestrictedToDevice = vr::k_ulInvalidInputValueHandle;
