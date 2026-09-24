@@ -60,7 +60,10 @@ This is the **local-artifact command shape**, not an available public download.
 Installation is user-local, retains rollback, refuses active-app upgrades and
 foreign files, and does not launch or register automatically. Registration uses
 OpenVR application key `local.frameyap.overlay`, not a Steam store AppID.
-Autolaunch is opt-in. See [packaging and lifecycle](docs/packaging.md).
+Autolaunch is opt-in. An installed desktop entry can be selected manually as a
+non-Steam shortcut. A basic launch from Steam's Non-Steam section opened the
+panel on one Frame; registration alone did not show an entry in the first checked
+dashboard menu. See [packaging and lifecycle](docs/packaging.md).
 
 A pinned GitHub one-command route is implemented in `install.sh --version TAG`,
 but **do not advertise or run it as a working public installation until a vetted

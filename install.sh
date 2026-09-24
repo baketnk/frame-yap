@@ -230,6 +230,18 @@ def desired_manifest(launcher):
             "strings": {"en_us": {"name": "FrameYap"}}}]}
 
 
+def desktop_path(root):
+    return root.parent / "applications/frameyap.desktop"
+
+
+def desired_desktop(launcher):
+    # Desktop Entry Exec quotes are not shell quotes; escape reserved characters.
+    executable = (str(launcher).replace("\\", "\\\\").replace('"', '\\"')
+                  .replace("$", "\\$").replace("`", "\\`").replace("%", "%%"))
+    return ("[Desktop Entry]\nType=Application\nName=FrameYap\n"
+            f'Exec="{executable}"\nTerminal=false\nCategories=Utility;\n').encode()
+
+
 def check_owned_file(path, expected):
     if path.is_symlink():
         fail(f"refusing foreign symlink: {path}")
@@ -246,14 +258,18 @@ def check_wrappers(root, launcher):
     desired = (json.dumps(desired_manifest(launcher), sort_keys=True, indent=2) + "\n").encode()
     check_owned_file(launcher, desired_launcher(root))
     check_owned_file(manifest, desired)
+    check_owned_file(desktop_path(root), desired_desktop(launcher))
     return manifest, desired
 
 
 def install_files(root, installed, launcher):
     owned_dir(launcher.parent)
     manifest, desired = check_wrappers(root, launcher)
+    desktop = desktop_path(root)
+    owned_dir(desktop.parent)
     atomic_write(launcher, desired_launcher(root), 0o755)
     atomic_write(manifest, desired)
+    atomic_write(desktop, desired_desktop(launcher))
 
 
 def receipt(path):
@@ -372,6 +388,8 @@ def uninstall(root, launcher):
     desired = (json.dumps(desired_manifest(launcher), sort_keys=True, indent=2) + "\n").encode()
     check_owned_file(manifest, desired)
     check_owned_file(launcher, desired_launcher(root))
+    desktop = desktop_path(root)
+    check_owned_file(desktop, desired_desktop(launcher))
     versions = root / "versions"
     if versions.exists():
         if versions.is_symlink():
@@ -398,6 +416,8 @@ def uninstall(root, launcher):
         launcher.unlink()
     if manifest.exists():
         manifest.unlink()
+    if desktop.exists():
+        desktop.unlink()
     print("FrameYap removed; config and saved models preserved. OpenVR unregister acknowledgement was required.")
 
 

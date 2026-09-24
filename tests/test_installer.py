@@ -77,6 +77,9 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(manifest["applications"][0]["binary_path_linux"], str(launcher))
         self.assertEqual(manifest["applications"][0]["binary_path_linux_arm"], str(launcher))
         self.assertNotIn("binary_path", manifest["applications"][0])
+        desktop = self.data / "applications/frameyap.desktop"
+        self.assertIn(f'Exec="{launcher}"', desktop.read_text())
+        self.assertIn("Terminal=false", desktop.read_text())
         (root / "config-untouched").write_text("keep")
         self.install("v1", a1, h1)
         (self.stage / "bin/frameyap").write_text("next binary")
@@ -101,6 +104,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "saved-models/v1/weights.bin").exists())
         self.assertTrue((root / "saved-models/v2/weights.bin").exists())
         self.assertFalse(launcher.exists())
+        self.assertFalse(desktop.exists())
 
     def test_digest_and_same_version_mismatch_leave_previous(self):
         a, h = self.package("v1")
@@ -153,6 +157,20 @@ class InstallTests(unittest.TestCase):
             self.install("v2", a2, h2)
         self.assertEqual(os.readlink(self.data / "frameyap/current"), "versions/v1")
         self.assertFalse((self.data / "frameyap/versions/v2").exists())
+
+    def test_foreign_desktop_entry_is_preserved(self):
+        a, h = self.package("v1")
+        desktop = self.data / "applications/frameyap.desktop"
+        desktop.parent.mkdir(parents=True)
+        desktop.write_text("foreign shortcut\n")
+        with self.assertRaisesRegex(ValueError, "foreign file"):
+            self.install("v1", a, h)
+        self.assertEqual(desktop.read_text(), "foreign shortcut\n")
+        self.assertFalse((self.data / "frameyap/current").exists())
+
+    def test_desktop_exec_escapes_field_codes(self):
+        entry = installer.desired_desktop(Path('/home/steam%user/.local/bin/frameyap')).decode()
+        self.assertIn('Exec="/home/steam%%user/.local/bin/frameyap"', entry)
 
     def test_traversal_and_link_archives_rejected(self):
         a, h = self.package("v1")
