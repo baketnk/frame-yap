@@ -67,6 +67,9 @@ struct Overlay::Impl {
     bool persist_mount = true;
     vr::EVRInputError action_update_error = vr::VRInputError_None;
     unsigned pointer_downs = 0, pointer_ups = 0, pointer_actions = 0, pointer_resets = 0;
+    unsigned raw_uploads = 0, show_calls = 0, hide_calls = 0;
+    unsigned overlay_shown_events = 0, overlay_hidden_events = 0, image_loaded_events = 0, image_failed_events = 0;
+    unsigned overlay_focus_events = 0, global_focus_events = 0, input_focus_captured_events = 0;
     std::string last_pointer_event = "none";
 
     Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested, bool persist)
@@ -125,6 +128,7 @@ struct Overlay::Impl {
         const bool wanted = placed && has_texture;
         if (wanted == shown) return;
         overlay_check(wanted ? overlay->ShowOverlay(handle) : overlay->HideOverlay(handle), overlay, "Overlay visibility");
+        if (wanted) ++show_calls; else ++hide_calls;
         shown = wanted;
     }
     void place() {
@@ -182,6 +186,7 @@ struct Overlay::Impl {
         if (surface.render(p)) {
             // OpenVR's API takes void*, but does not modify the submitted RGBA bytes.
             overlay_check(overlay->SetOverlayRaw(handle, const_cast<unsigned char*>(surface.pixels().data()), W, H, 4), overlay, "SetOverlayRaw");
+            ++raw_uploads;
             has_texture = true;
         }
         visibility();
@@ -221,6 +226,8 @@ struct Overlay::Impl {
         vr::VREvent_t event{};
         while (system->PollNextEvent(&event, sizeof(event))) {
             if (event.eventType == vr::VREvent_Quit) result.push_back(UiAction::Quit);
+            if (event.eventType == vr::VREvent_OverlayFocusChanged) ++global_focus_events;
+            if (event.eventType == vr::VREvent_InputFocusCaptured) ++input_focus_captured_events;
             if (event.eventType == vr::VREvent_SeatedZeroPoseReset || event.eventType == vr::VREvent_ChaperoneUniverseHasChanged) {
                 world_ready = false; applied_mount.reset(); surface.reset_pointers();
             }
@@ -232,15 +239,20 @@ struct Overlay::Impl {
             case vr::VREvent_Quit: case vr::VREvent_OverlayClosed:
                 result.push_back(UiAction::Quit); break;
             case vr::VREvent_OverlayHidden:
+                ++overlay_hidden_events;
                 focus = false; reset_input(result);
                 if (panel.recording) result.push_back(UiAction::Cancel);
                 break;
             case vr::VREvent_OverlayShown:
+                ++overlay_shown_events;
                 focus = true; reset_input(result); break;
+            case vr::VREvent_ImageLoaded: ++image_loaded_events; break;
+            case vr::VREvent_ImageFailed: ++image_failed_events; break;
             case vr::VREvent_OverlayGamepadFocusLost:
                 surface.reset_pointers(); ++pointer_resets;
                 last_pointer_event = "gamepad focus lost"; break;
             case vr::VREvent_OverlayFocusChanged:
+                ++overlay_focus_events;
                 // This global focus notification also fires when the dashboard
                 // laser enters our overlay. Do not erase a press between down/up;
                 // a release must still hit the same enabled control.
@@ -355,7 +367,16 @@ std::string Overlay::controls_status() {
 std::string Overlay::pointer_status() const {
     return "Pointer down=" + std::to_string(impl_->pointer_downs) + " up=" + std::to_string(impl_->pointer_ups) +
            " hits=" + std::to_string(impl_->pointer_actions) + " resets=" + std::to_string(impl_->pointer_resets) +
-           " last=" + impl_->last_pointer_event;
+           " last=" + impl_->last_pointer_event +
+           "\nOverlay raw=" + std::to_string(impl_->raw_uploads) +
+           " showCalls=" + std::to_string(impl_->show_calls) + " hideCalls=" + std::to_string(impl_->hide_calls) +
+           " shownEvents=" + std::to_string(impl_->overlay_shown_events) +
+           " hiddenEvents=" + std::to_string(impl_->overlay_hidden_events) +
+           " imageLoaded=" + std::to_string(impl_->image_loaded_events) +
+           " imageFailed=" + std::to_string(impl_->image_failed_events) +
+           " overlayFocus=" + std::to_string(impl_->overlay_focus_events) +
+           " globalFocus=" + std::to_string(impl_->global_focus_events) +
+           " inputCaptured=" + std::to_string(impl_->input_focus_captured_events);
 }
 
 int registration(const std::string& manifest, bool remove, bool autostart) {
