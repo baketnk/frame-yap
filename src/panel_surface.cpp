@@ -11,10 +11,7 @@
 namespace frameyap {
 namespace {
 constexpr int W = PanelSurface::width, H = PanelSurface::height;
-using Color = std::array<unsigned char, 4>;
-constexpr Color background{12, 16, 27, 255}, card{20, 28, 43, 255};
-constexpr Color ink{230, 240, 249, 255}, muted{151, 173, 193, 255};
-constexpr Color cyan{31, 240, 164, 255}, pink{255, 110, 135, 255};
+using Color = Rgba;
 float rounded_distance(float px, float py, int x, int y, int w, int h, float radius) {
     const float dx = std::abs(px - (x + w / 2.f)) - (w / 2.f - radius);
     const float dy = std::abs(py - (y + h / 2.f)) - (h / 2.f - radius);
@@ -101,6 +98,8 @@ struct PanelSurface::Impl {
     std::vector<unsigned char> pixels = std::vector<unsigned char>(W * H * 4);
     Panel panel;
     Mount mount;
+    Theme theme;
+    Color background, card, ink, muted, cyan, pink;
     bool settings = false, dirty = true;
     std::string placement_note;
     std::array<int, 2> pressed{{-1, -1}};
@@ -108,7 +107,9 @@ struct PanelSurface::Impl {
     size_t page = 0;
     static constexpr size_t lines_per_page = 4;
 
-    Impl(const std::string& font, Mount m) : mount(m) {
+    Impl(const std::string& font, Mount m, Theme t)
+        : mount(m), theme(t), background(t.background), card(t.card), ink(t.ink), muted(t.muted),
+          cyan(t.accent), pink(t.warning) {
         if (FT_Init_FreeType(&library)) throw std::runtime_error("FreeType initialization failed");
         if (FT_New_Face(library, font.c_str(), 0, &face)) {
             FT_Done_FreeType(library);
@@ -118,6 +119,13 @@ struct PanelSurface::Impl {
     ~Impl() { FT_Done_Face(face); FT_Done_FreeType(library); }
     void size(unsigned px) {
         if (FT_Set_Pixel_Sizes(face, 0, px)) throw std::runtime_error("Could not size panel font");
+    }
+    Color mix(Color a, Color b, float t) const {
+        Color result{};
+        for (int k = 0; k < 3; ++k)
+            result[k] = static_cast<unsigned char>(a[k] * (1.f - t) + b[k] * t);
+        result[3] = 255;
+        return result;
     }
     void rect(Rect r, Color c) {
         for (int y = std::max(r.y, 0); y < std::min(H, r.y + r.h); ++y)
@@ -154,8 +162,10 @@ struct PanelSurface::Impl {
             const float edge = std::abs(distance);
             const float strength = edge <= 1.f ? 1.f : .30f * std::max(0.f, 1.f - (edge - 1.f) / 6.f);
             const float t = float(x) / W;
-            const Color gradient{31, static_cast<unsigned char>(255 - 143 * t),
-                                    static_cast<unsigned char>(145 + 110 * t), 255};
+            Color gradient{};
+            for (int k = 0; k < 3; ++k)
+                gradient[k] = static_cast<unsigned char>(theme.frame_start[k] * (1.f - t) + theme.frame_end[k] * t);
+            gradient[3] = 255;
             auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
             for (int k = 0; k < 3; ++k) dst[k] = static_cast<unsigned char>(background[k] + (gradient[k] - background[k]) * strength);
             dst[3] = distance <= 1.f ? 255 : static_cast<unsigned char>(255 * std::max(0.f, 1.f - (distance - 1.f) / 6.f));
@@ -163,8 +173,11 @@ struct PanelSurface::Impl {
         for (int x = 32; x < W - 32; ++x) {
             const float t = float(x - 32) / (W - 64);
             const int y = H - 21 - int(5 * std::sin(t * 3.14159265f));
-            rect({x, y, 1, 1}, {31, static_cast<unsigned char>(175 - 75 * t),
-                                  static_cast<unsigned char>(115 + 80 * t), 255});
+            Color gradient{};
+            for (int k = 0; k < 3; ++k)
+                gradient[k] = static_cast<unsigned char>(theme.frame_start[k] * (1.f - t) + theme.frame_end[k] * t);
+            gradient[3] = 255;
+            rect({x, y, 1, 1}, gradient);
         }
     }
     int advance(uint32_t cp) {
@@ -262,8 +275,8 @@ struct PanelSurface::Impl {
         text("FrameYap", 32, 61, 40, ink, 300);
         text("ON-DEVICE / REVIEW FIRST", 280, 58, 22, muted, 720);
         text(mount_label(mount), 756, 58, 24, cyan, 968);
-        rounded({32, 78, 936, 48}, 13, {18, 31, 44, 255},
-                panel.recording ? Color{115, 64, 83, 255} : Color{45, 82, 98, 255},
+        rounded({32, 78, 936, 48}, 13, mix(background, card, .7f),
+                panel.recording ? mix(card, pink, .36f) : mix(card, cyan, .22f),
                 panel.recording ? .16f : 0.f);
         rounded({46, 95, 13, 13}, 6, panel.recording ? pink : cyan,
                 panel.recording ? pink : cyan, panel.recording ? .40f : .20f);
@@ -271,7 +284,7 @@ struct PanelSurface::Impl {
         text(status.front(), 70, 109, 27, ink, 844);
         if (status.size() > 1) text("[...]", 864, 109, 23, muted, 968);
         if (!settings) {
-            rounded({32, 212, 936, 178}, 16, {22, 34, 49, 255}, {53, 103, 122, 255}, .18f);
+            rounded({32, 212, 936, 178}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
             for (size_t i = 0; i < lines_per_page && page * lines_per_page + i < lines.size(); ++i)
                 text(lines[page * lines_per_page + i], 48, 246 + int(i) * 40, 32,
                      panel.transcript.empty() ? muted : ink, 952);
@@ -287,30 +300,31 @@ struct PanelSurface::Impl {
                  32, 486, 23, muted, 968);
             text("Tracking lost? Wrist placement falls back to world space.", 32, 518, 23, muted, 968);
         }
-        rect({32, 550, 936, 1}, {39, 65, 80, 255});
+        rect({32, 550, 936, 1}, mix(card, cyan, .17f));
         for (size_t i = 0; i < buttons.size(); ++i) {
             const auto& b = buttons[i];
             if (!visible(b.id)) continue;
             bool on = enabled(b.id);
             bool selected = (b.id == Control::Review && !settings) || (b.id == Control::Settings && settings) ||
                             (mounting(b.id) && *mounting(b.id) == mount);
-            const Color fill = !on ? Color{17, 23, 33, 255} :
-                               selected ? Color{26, 55, 68, 255} : card;
+            const Color fill = !on ? mix(background, card, .40f) :
+                               selected ? mix(card, cyan, .14f) : card;
             const Color accent = b.id == Control::Record && panel.recording ? pink : cyan;
             const bool highlighted = on && (selected || b.id == Control::Record ||
                                              (b.id == Control::Insert && panel.transcript.size()));
             rounded(b.r, std::min(16, b.r.h / 3), fill,
-                    !on ? Color{35, 46, 59, 255} : highlighted ? accent : Color{67, 93, 112, 255},
+                    !on ? mix(card, muted, .13f) : highlighted ? accent : mix(card, muted, .38f),
                     highlighted ? .23f : 0.f, highlighted ? 2 : 1);
             const auto label = b.id == Control::Record && panel.recording ? "Stop" : b.label;
-            text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, 27, on ? ink : Color{81, 96, 113, 255}, b.r.x + b.r.w - 8);
+            text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, 27, on ? ink : mix(background, muted, .48f), b.r.x + b.r.w - 8);
             if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
         }
         dirty = false;
         return true;
     }
 };
-PanelSurface::PanelSurface(const std::string& font, Mount mount) : impl_(std::make_unique<Impl>(font, mount)) {}
+PanelSurface::PanelSurface(const std::string& font, Mount mount, Theme theme)
+    : impl_(std::make_unique<Impl>(font, mount, theme)) {}
 PanelSurface::~PanelSurface() = default;
 bool PanelSurface::render(const Panel& p) { return impl_->render(p); }
 const std::vector<unsigned char>& PanelSurface::pixels() const { return impl_->pixels; }

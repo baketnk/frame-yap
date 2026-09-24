@@ -27,6 +27,10 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   Review and settings share one Inconsolata/neon-framed surface. World-space by
   default; settings offer left wrist, right wrist and head mounting, plus recenter.
   Dashboard lasers provide clickable controls without forcing global laser mode.
+- **Theme and controls:** optional `$XDG_CONFIG_HOME/frameyap/config.json` selects
+  panel colors, a font path and Frame controller button mappings; missing fonts
+  fall back to bundled Inconsolata. The installer creates/checks this file and
+  backs it up before repairs. See [overlay configuration](docs/overlay.md#user-theme-and-controller-configuration).
 - **Review-first:** focus your destination, then press Insert. No automatic insertion
   or submission. Maximum clip 20 seconds; accidental taps under 200 ms are discarded.
 - Other apps may still hear/transmit your voice. FrameYap does not mute them.

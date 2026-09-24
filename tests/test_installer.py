@@ -39,7 +39,8 @@ class InstallTests(unittest.TestCase):
             path.write_bytes((name + " fixture\n").encode())
         for name in ("bin/frameyap", "runtime/bin/python3", "runtime/bin/helper", "lib/libtest.so"):
             (self.stage / name).chmod(0o755)
-        self.env = patch.dict(os.environ, {"HOME": str(self.home), "XDG_DATA_HOME": str(self.data)})
+        self.env = patch.dict(os.environ, {"HOME": str(self.home), "XDG_DATA_HOME": str(self.data),
+                                         "XDG_CONFIG_HOME": str(self.home / ".config")})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.host = patch.object(installer, "check_host")
@@ -69,6 +70,10 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(os.readlink(root / "current"), "versions/v1")
         launcher = self.home / ".local/bin/frameyap"
         self.assertIn("--run", launcher.read_text())
+        self.assertNotIn("--font", launcher.read_text())  # run/check modes honor config font
+        config = self.home / ".config/frameyap/config.json"
+        self.assertEqual(json.loads(config.read_text()), installer.CONFIG_DEFAULTS)
+        self.assertEqual(list(config.parent.glob("config.json.backup-*")), [])
         self.assertIn("PYTHONDONTWRITEBYTECODE=1", launcher.read_text())
         self.assertTrue(os.access(root / "versions/v1/runtime/bin/helper", os.X_OK))
         self.assertTrue(os.access(root / "versions/v1/lib/libtest.so", os.X_OK))
@@ -105,6 +110,55 @@ class InstallTests(unittest.TestCase):
         self.assertTrue((root / "saved-models/v2/weights.bin").exists())
         self.assertFalse(launcher.exists())
         self.assertFalse(desktop.exists())
+
+    def test_config_install_repairs_and_preserves_original(self):
+        archive, digest = self.package("v1")
+        config = self.home / ".config/frameyap/config.json"
+        config.parent.mkdir(parents=True)
+        original = b'{"font":"/system/face.ttf","theme":{"ink":"#F1f2F3"},"buttons":{"ptt":"/user/hand/left/input/y"}}\n'
+        config.write_bytes(original)
+        self.install("v1", archive, digest)
+        fixed = json.loads(config.read_text())
+        self.assertEqual(fixed["font"], "/system/face.ttf")
+        self.assertEqual(fixed["theme"]["ink"], "#F1f2F3")
+        self.assertEqual(fixed["buttons"]["ptt"], "/user/hand/left/input/y")
+        self.assertEqual(fixed["theme"]["card"], installer.CONFIG_DEFAULTS["theme"]["card"])
+        self.assertEqual(fixed["buttons"]["cancel"], "")
+        backups = list(config.parent.glob("config.json.backup-*"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), original)
+        compact = json.dumps(fixed, separators=(",", ":")).encode()
+        config.write_bytes(compact)
+        self.install("v1", archive, digest)
+        self.assertEqual(config.read_bytes(), compact)
+        self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), 1)
+        original = b'{"font":"/system/face.ttf","theme":{"ink":"bad","retired":"#123456"},"buttons":{"ptt":"/user/hand/left/input/grip"},"old_option":4}'
+        config.write_bytes(original)
+        self.install("v1", archive, digest)
+        fixed = json.loads(config.read_text())
+        self.assertEqual(fixed["font"], "/system/face.ttf")
+        self.assertEqual(fixed["theme"]["ink"], installer.CONFIG_DEFAULTS["theme"]["ink"])
+        self.assertEqual(fixed["buttons"], installer.CONFIG_DEFAULTS["buttons"])  # colliding paths reset
+        self.assertNotIn("old_option", fixed)
+        self.assertEqual(sorted(p.read_bytes() for p in config.parent.glob("config.json.backup-*")), sorted([backups[0].read_bytes(), original]))
+        original = b'{"font":"one","font":"two"'
+        config.write_bytes(original)
+        self.install("v1", archive, digest)
+        self.assertEqual(json.loads(config.read_text()), installer.CONFIG_DEFAULTS)
+        self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+        config.write_text(json.dumps({"font": "/" + "x" * 3800}))
+        self.install("v1", archive, digest)
+        self.assertEqual(json.loads(config.read_text())["font"], "")
+        self.assertTrue(all(len(p.read_bytes()) > 0 for p in config.parent.glob("config.json.backup-*")))
+        config.write_bytes(b"x" * 65537)
+        with self.assertRaisesRegex(ValueError, "too large"):
+            self.install("v1", archive, digest)
+        self.assertEqual(config.stat().st_size, 65537)
+        config.unlink()
+        config.symlink_to(self.stage / "model/weights.bin")
+        with self.assertRaisesRegex(ValueError, "foreign config path"):
+            self.install("v1", archive, digest)
+        self.assertTrue(config.is_symlink())
 
     def test_digest_and_same_version_mismatch_leave_previous(self):
         a, h = self.package("v1")
@@ -306,7 +360,7 @@ class InstallTests(unittest.TestCase):
         self.install("external", a, h)
         self.assertEqual(launcher.read_bytes(), installer.desired_launcher(root))
         config = self.home / ".config/frameyap/paths.conf"
-        config.parent.mkdir(parents=True)
+        config.parent.mkdir(parents=True, exist_ok=True)
         config.write_text("# Literal paths, not shell code\npython=/opt/approved python/bin/python3\n"
                           "model=/opt/$(printf not-executed)/local model\n")
         run = subprocess.run([str(launcher)], capture_output=True, text=True, check=True)

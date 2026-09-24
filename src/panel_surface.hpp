@@ -1,5 +1,6 @@
 #pragma once
 #include "overlay.hpp"
+#include "config.hpp"
 #include <array>
 #include <memory>
 #include <optional>
@@ -17,7 +18,7 @@ struct SurfaceEvent {
 class PanelSurface {
 public:
     static constexpr int width = 1000, height = 680;
-    PanelSurface(const std::string& font, Mount mount);
+    PanelSurface(const std::string& font, Mount mount, Theme theme = {});
     ~PanelSurface();
     PanelSurface(const PanelSurface&) = delete;
     PanelSurface& operator=(const PanelSurface&) = delete;

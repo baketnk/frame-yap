@@ -32,6 +32,14 @@ int main(int argc, char** argv) {
     assert(!surface.render(p)); // repeated inactive-input resets do not force uploads
     assert(surface.pixels()[3] == 0); // rounded outer corner is transparent
     assert(surface.pixels()[(40 * PanelSurface::width + 40) * 4 + 3] == 255);
+    Theme custom;
+    custom.background = {75, 30, 100, 255};
+    custom.accent = {245, 110, 15, 255};
+    PanelSurface themed(argv[1], Mount::World, custom);
+    assert(themed.render(p));
+    const auto pixel = size_t((190 * PanelSurface::width + 500) * 4);
+    assert(themed.pixels()[pixel] == 75 && themed.pixels()[pixel + 1] == 30 && themed.pixels()[pixel + 2] == 100);
+    assert(surface.pixels()[pixel] != themed.pixels()[pixel]);
     // Disabled controls never emit insertion/submission. Retry/Cancel remain available.
     no_action(click(surface, 480, 610)); no_action(click(surface, 680, 610));
     no_action(click(surface, 32, 574)); // clipped visual corners are not invisible hit targets

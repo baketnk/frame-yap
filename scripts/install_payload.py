@@ -20,6 +20,17 @@ ARCHIVE_LIMIT = 12 * 1024**3
 MEMBER_LIMIT = 50000
 VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
 DIGEST_RE = re.compile(r"[a-fA-F0-9]{64}\Z")
+CONFIG_DEFAULTS = {
+    "font": "",
+    "theme": {"background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
+              "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
+              "frame_start": "#1fff91", "frame_end": "#1f70ff"},
+    "buttons": {"left_grip": "/user/hand/left/input/grip",
+                "right_grip": "/user/hand/right/input/grip",
+                "ptt": "/user/hand/right/input/x", "cancel": "", "insert": "", "enter": ""},
+}
+COLOR_RE = re.compile(r"#[0-9a-fA-F]{6}\Z")
+BUTTON_RE = re.compile(r"/user/hand/(left|right)/input/[A-Za-z0-9_]+\Z")
 
 
 def fail(message):
@@ -42,6 +53,78 @@ def atomic_write(path, content, mode=0o600):
     finally:
         if os.path.exists(name):
             os.unlink(name)
+
+
+def config_path():
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".config"
+    return base / "frameyap/config.json"
+
+
+def unique_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            fail(f"duplicate JSON config key: {key}")
+        result[key] = value
+    return result
+
+
+def normalized_config(data):
+    # Invalid individual values reset to defaults. Unknown/retired properties
+    # are removed; the exact original bytes are backed up before any rewrite.
+    if not isinstance(data, dict):
+        data = {}
+    fixed = {"font": data.get("font") if isinstance(data.get("font"), str) else ""}
+    for section in ("theme", "buttons"):
+        source = data.get(section)
+        source = source if isinstance(source, dict) else {}
+        fixed[section] = {}
+        for name, default in CONFIG_DEFAULTS[section].items():
+            value = source.get(name, default)
+            valid = (isinstance(value, str) and (COLOR_RE.fullmatch(value) if section == "theme"
+                     else (not value or BUTTON_RE.fullmatch(value))))
+            fixed[section][name] = value if valid else default
+    paths = [value for value in fixed["buttons"].values() if value]
+    if len(paths) != len(set(paths)):
+        fixed["buttons"] = CONFIG_DEFAULTS["buttons"].copy()
+    size = lambda: len((json.dumps(fixed, indent=2, sort_keys=True) + "\n").encode())
+    if size() > 4096:
+        fixed["font"] = ""
+    if size() > 4096:
+        fixed["buttons"] = CONFIG_DEFAULTS["buttons"].copy()
+    return fixed
+
+
+def repair_user_config():
+    path = config_path()
+    owned_dir(path.parent.parent)
+    owned_dir(path.parent)
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        fail(f"refusing foreign config path: {path}")
+    original = None
+    parsed = None
+    if path.exists():
+        if path.stat().st_size > 65536:
+            fail(f"config too large to safely back up: {path}")
+        original = path.read_bytes()
+        try:
+            if len(original) > 4096:  # native config reader has the same bound
+                fail("config exceeds native 4096-byte limit")
+            parsed = json.loads(original.decode("utf-8"), object_pairs_hook=unique_pairs)
+        except (ValueError, UnicodeError):
+            pass
+    fixed = normalized_config(parsed)
+    if original is not None and parsed == fixed:
+        return  # Keep valid user formatting, permissions and custom values.
+    if original is not None:
+        fd, backup = tempfile.mkstemp(prefix="config.json.backup-", dir=path.parent)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(original)
+            stream.flush()
+            os.fsync(stream.fileno())
+        print(f"Preserved previous FrameYap config at {backup}")
+    json_atomic(path, fixed)
 
 
 def owned_dir(path):
@@ -189,13 +272,13 @@ def select(root, link, target):
         temp.unlink(missing_ok=True)
 
 
-def desired_launcher(root, legacy=False):
+def desired_launcher(root, legacy=False, pinned_font=False):
     import shlex
     q = lambda path: shlex.quote(str(path))
-    font = root / "current/fonts/font.ttf"
     base = root / "current"
-    flags = ["--assets", base / "assets", "--font", font,
-             "--worker", base / "python/frameyap/worker.py"]
+    flags = ["--assets", base / "assets", "--worker", base / "python/frameyap/worker.py"]
+    if pinned_font or legacy:
+        flags[2:2] = ["--font", base / "fonts/font.ttf"]  # exact previously managed launchers
     args = " ".join(q(item) for item in flags)
     # Parse two literal absolute paths, never source/eval this user-owned file.
     # Environment overrides remain useful for a one-off explicit launch.
@@ -214,6 +297,7 @@ def desired_launcher(root, legacy=False):
                       '${CONFIG_PYTHON:-' + q(base / "runtime/bin/python3") + '}')
     model_default = (q(base / "model") if legacy else
                      '${CONFIG_MODEL:-' + q(base / "model") + '}')
+    check_font = ' --font ' + q(base / "fonts/font.ttf") if legacy or pinned_font else ''
     return ("#!/bin/sh\n" + MARKER + 'export PYTHONDONTWRITEBYTECODE=1\n'
             + f'export FRAMEYAP_INSTALL_ROOT={q(root)}\n'
             + f'export LD_LIBRARY_PATH={q(base / "lib")}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\n'
@@ -225,7 +309,7 @@ def desired_launcher(root, legacy=False):
             + '  --run)\n'
             + '    if [ -n "${GAMESCOPE_SOCKET:-}" ]; then set -- "$@" --socket "$GAMESCOPE_SOCKET"; fi\n'
             + f"    shift; exec {q(base / 'bin/frameyap')} --run {args} --python \"$PYTHON\" --model \"$MODEL\" \"$@\";;\n"
-            + f"  --check-overlay|--check-controls) mode=$1; shift; exec {q(base / 'bin/frameyap')} \"$mode\" --assets {q(base / 'assets')} --font {q(font)} \"$@\";;\n"
+            + f"  --check-overlay|--check-controls) mode=$1; shift; exec {q(base / 'bin/frameyap')} \"$mode\" --assets {q(base / 'assets')}{check_font} \"$@\";;\n"
             + f"  *) exec {q(base / 'bin/frameyap')} \"$@\";;\n"
             + 'esac\n').encode()
 
@@ -263,8 +347,9 @@ def check_owned_file(path, expected, alternatives=()):
 def check_wrappers(root, launcher):
     manifest = root / "frameyap.vrmanifest"
     desired = (json.dumps(desired_manifest(launcher), sort_keys=True, indent=2) + "\n").encode()
-    # Accept only the exact earlier managed script for migration.
-    check_owned_file(launcher, desired_launcher(root), (desired_launcher(root, legacy=True),))
+    # Accept only exact earlier managed scripts for migration.
+    check_owned_file(launcher, desired_launcher(root),
+                     (desired_launcher(root, pinned_font=True), desired_launcher(root, legacy=True)))
     check_owned_file(manifest, desired)
     check_owned_file(desktop_path(root), desired_desktop(launcher))
     return manifest, desired
@@ -377,6 +462,7 @@ def do_install(args, root, launcher):
             finally:
                 if temp.exists():
                     shutil.rmtree(temp)
+        repair_user_config()
         install_files(root, target, launcher)
         if current == f"versions/{version}":
             print(f"FrameYap {version}: already installed (same digest); wrappers verified")
@@ -395,7 +481,8 @@ def uninstall(root, launcher):
     manifest = root / "frameyap.vrmanifest"
     desired = (json.dumps(desired_manifest(launcher), sort_keys=True, indent=2) + "\n").encode()
     check_owned_file(manifest, desired)
-    check_owned_file(launcher, desired_launcher(root), (desired_launcher(root, legacy=True),))
+    check_owned_file(launcher, desired_launcher(root),
+                     (desired_launcher(root, pinned_font=True), desired_launcher(root, legacy=True)))
     desktop = desktop_path(root)
     check_owned_file(desktop, desired_desktop(launcher))
     versions = root / "versions"

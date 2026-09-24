@@ -89,12 +89,13 @@ model=/absolute/path/to/pinned/local/model
 
 The launcher reads these as **literal absolute paths**, not shell code, and does
 not follow a symlink to the config file. Environment variables override either
-setting for an explicit launch. This user-owned config survives upgrade/uninstall;
+setting for an explicit launch. This `paths.conf` survives upgrade/uninstall;
 the installer does not populate it or bundle an unauthorized runtime. No
 pip/bootstrap/model download or fallback is invoked by the launcher. Without
 paths, the native-only artifact cannot perform voice inference; its default
 runtime and model locations do not exist. A new installer accepts only the exact
 previous managed launcher bytes for migration; a modified launcher is refused.
+The current managed launcher leaves `--font` unset so `config.json` can choose it.
 
 Without any ASR runtime, these checks work directly through the installed launcher:
 
@@ -114,7 +115,12 @@ launcher: `~/.local/bin/frameyap`; desktop entry:
 `$XDG_DATA_HOME/applications/frameyap.desktop` (default
 `~/.local/share/applications/frameyap.desktop`). The desktop entry points to the
 user-local launcher; the installer never edits Steam's library or registers a
-Steam shortcut. Existing config is untouched. The launcher
+Steam shortcut. Install/upgrade creates or checks `$XDG_CONFIG_HOME/frameyap/config.json`
+(default `~/.config/frameyap/config.json`), filling missing properties or repairing
+invalid JSON/values while preserving valid customization. Before each repair it
+saves an exact-byte `config.json.backup-*` next to the original; valid config
+is left untouched. Symlinks and oversized config files are refused, and uninstall
+leaves both the config and backups in place. `paths.conf` is not modified. The launcher
 passes a stable install-root lock identity and sets `PYTHONDONTWRITEBYTECODE=1`.
 Runtime/check/registration modes and installer share an exclusive nonblocking
 `.lock`; no upgrade/rollback/uninstall kills a running app or any other process.

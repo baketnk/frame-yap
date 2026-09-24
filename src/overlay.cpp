@@ -51,6 +51,7 @@ struct Overlay::Impl {
     std::array<vr::VRActionHandle_t, 6> actions{};
     std::filesystem::path settings_path;
     Mount mount;
+    Config config;
     PanelSurface surface;
     Panel panel;
     bool save_failed = false;
@@ -75,9 +76,10 @@ struct Overlay::Impl {
     Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested, bool persist)
         : settings_path(default_mount_settings_path()),
           mount(requested ? *requested : load_mount(settings_path)),
-          surface(font.empty() ? (std::filesystem::path(assets) / "fonts/Inconsolata-Regular.ttf").string() : font, mount),
+          config(load_config(default_config_path())),
+          surface(resolve_font(assets, font.empty() ? config.font : font), mount, config.theme),
           persist_mount(persist) {
-        const auto action_path = absolute_file(std::filesystem::path(assets) / "actions.json");
+        const auto action_path = absolute_file(action_manifest(assets, config));
         absolute_file(std::filesystem::path(assets) / "bindings_knuckles.json");
         try {
             configure_registry();

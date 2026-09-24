@@ -12,9 +12,10 @@ normal build or test.
 Explicit development dependencies: Valve OpenVR SDK v2.15.6 and FreeType 2.
 Configure/build must not fetch them. The default font is the bundled Inconsolata
 Regular, also used by kouseki; its OFL and extraction provenance are included in
-[third-party notes](third-party.md). `--font FILE` is an explicit override. Glyph
-coverage depends on the selected face (no automatic system-font fallback or full
-CJK coverage is claimed).
+[third-party notes](third-party.md). `--font FILE` overrides the JSON selection.
+A missing selected font falls back to bundled Inconsolata, then a system DejaVu
+Sans face if present. Glyph coverage depends on the selected face; full CJK
+coverage is not claimed.
 
 `src/panel_surface.*` renders **one 1000×680 RGBA canvas** for review, settings,
 status and controls. One OpenVR handle receives it with `SetOverlayRaw`; tabs do
@@ -41,6 +42,48 @@ and transcription. A pointer action requires
 a press/release on the same enabled control from the same cursor; focus loss,
 tab changes, action-state changes and relocation clear pending presses. Enter is *always* a separate
 deliberate action, not inferred from text. Recording never automatically submits Enter.
+
+### User theme and controller configuration
+
+Optional `$XDG_CONFIG_HOME/frameyap/config.json` (fallback
+`~/.config/frameyap/config.json`, only with an absolute HOME) is read at native
+overlay startup. The native binary does not create a config by itself; the
+installer creates one with defaults on first install. Copy the shipped
+`assets/config.example.json` to that path for manual installs. Example:
+
+```json
+{
+  "font": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+  "theme": {
+    "background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
+    "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
+    "frame_start": "#1fff91", "frame_end": "#1f70ff"
+  },
+  "buttons": {
+    "ptt": "/user/hand/right/input/x",
+    "left_grip": "/user/hand/left/input/grip",
+    "right_grip": "/user/hand/right/input/grip"
+  }
+}
+```
+
+Each theme color is `#RRGGBB`; omitted colors keep the default. `font` is a
+TTF/OTF file path (not a family name); a missing file uses the bundled font.
+`buttons` maps named OpenVR actions (`left_grip`, `right_grip`, `ptt`, `cancel`,
+`insert`, `enter`) to Frame physical `/user/hand/{left|right}/input/NAME`
+button paths. Omitted actions retain their bundled defaults; an empty string
+disables a mapping. Paths must be distinct. Only the Frame binding is customized;
+SteamVR user overrides may still supersede it. On customized launches a generated
+action manifest and adjacent bindings are placed in `$XDG_CACHE_HOME/frameyap/bindings`
+(or `~/.cache/frameyap/bindings`); the bundled manifest remains unchanged. The
+config is read once at launch, not hot-reloaded. On install/upgrade the installer
+fills missing fields, removes retired keys, and resets invalid entries. It saves
+the exact prior bytes under `config.json.backup-*` before a repair and refuses
+symlink/oversized config paths; valid customizations remain intact. The installed
+launcher no longer pins `--font`, so this selection takes effect. Direct native
+launches with bad JSON, colors or button mappings fail startup rather than
+silently changing input behavior. This does not enable experimental SteamVR
+action overrides or prove delivery in games.
 
 ### Placement settings
 
