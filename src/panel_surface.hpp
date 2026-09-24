@@ -12,6 +12,7 @@ struct SurfaceEvent {
     std::optional<Mount> mount;
     std::optional<bool> lasers_anytime;
     std::optional<bool> advanced_debug;
+    std::optional<bool> auto_insert;
     bool recenter = false;
     bool open_bindings = false;
 };
@@ -34,6 +35,7 @@ public:
     void set_placement_note(std::string note);
     void set_lasers_anytime(bool enabled);
     void set_advanced_debug(bool enabled);
+    void set_auto_insert(bool enabled);
     void set_binding_note(std::string note);
     bool available(UiAction action) const;
 private:

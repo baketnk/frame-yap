@@ -63,7 +63,9 @@ tab changes, action-state changes and relocation clear pending presses. Enter is
 deliberate action, not inferred from text. Insert appends a trailing space (without
 doubling an existing trailing space). Enter inserts any pending review and then
 queues Enter; with no pending text it queues Enter only. A failed text step never
-proceeds to Enter. Recording never automatically inserts or submits.
+proceeds to Enter. Recording never automatically submits. Auto insert, when
+explicitly enabled, can queue text + space after transcription only under the
+stable Xwayland focus guard described below.
 
 ### Bindings button
 
@@ -95,6 +97,7 @@ installer creates one with defaults on first install. Copy the shipped
   "font": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
   "input_priority": "normal",
   "advanced_debug": false,
+  "auto_insert": false,
   "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
   "theme": {
     "background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
@@ -125,6 +128,23 @@ Detailed logs are bounded and owner-private; see [worker diagnostics](worker.md#
 config, retaining other fields and formatting; invalid/unwritable configs are
 left untouched and return failure. The installer backs up original bytes before
 repairing invalid values, while valid `true` and `false` are retained.
+
+`auto_insert` is a separate boolean, default `false`, also available as a
+Settings toggle. Only a **new** recording arms it. It observes the Xwayland
+display selected by `DISPLAY`; its root `_NET_ACTIVE_WINDOW` and
+`GAMESCOPE_FOCUSED_WINDOW` must agree with the exact X keyboard-focus window.
+Both properties and focus are rechecked after IME lease acquisition. A watched
+focus-out, root focus-property change (even if the same window returns), window
+destruction, held keyboard key, missing X display or any disagreement permanently
+disarms that clip. The transcript then remains for explicit review/Insert.
+Native Wayland focus and child text-field focus cannot be safely inferred here;
+those cases fall back to review. No automatic Enter, speech commands or retry.
+The compositor can still change focus in the gap between the final check and
+global delivery, and IME commit is not an application receipt. This path has
+offline synthetic focus tests; live automatic typing, target coverage and
+headset acceptance are still unverified. The setting is preserved on upgrade
+and a failed preference write applies only to the current session.
+
 `buttons` maps named OpenVR actions (`left_grip`, `right_grip`, `ptt`, `cancel`,
 `insert`, `enter`) to Frame physical `/user/hand/{left|right}/input/NAME`
 button paths. Omitted actions retain their bundled defaults; an empty string

@@ -76,6 +76,18 @@ void delivery_checks() {
         CHECK((fake.events == std::vector<std::string>{"text:preserve ", "enter"}));
     }
     {
+        auto s = review("focus lost during lease"); FakeDelivery fake;
+        auto acquire = fake.factory();
+        const DeliveryFactory invalidated_after_acquisition = [&]() -> std::unique_ptr<DeliveryLease> {
+            auto lease = acquire();
+            throw std::runtime_error("focus changed while connecting to IME");
+        };
+        try { (void)deliver_insert(s, invalidated_after_acquisition); CHECK(false); }
+        catch (const std::runtime_error&) {}
+        CHECK(s.state() == State::Review && s.text() == "focus lost during lease");
+        CHECK(fake.events.empty() && fake.active_leases == 0);
+    }
+    {
         auto s = review("uncertain"); FakeDelivery fake; fake.fail_text = true;
         CHECK(deliver_enter(s, fake.factory()) == DeliveryResult::TextUncertain);
         CHECK(fake.acquisitions == 1 && fake.events.size() == 1);

@@ -46,6 +46,9 @@ font, places the launcher copy at `fonts/font.ttf`, and includes its license in
   retain its LICENSE with redistributed loader binaries.
 - SDL3: zlib license; device trial used SDL 3.2.16 built in a private user prefix.
 - Wayland client and scanner: retain upstream MIT-style notices.
+- libxcb (X11 protocol client): MIT-style license; used only by the opt-in
+  Xwayland focus observer. Include it in native runtime dependency checks;
+  no X server is started by normal operation.
 - FreeType: choose and comply with its applicable FTL/GPL licensing option.
 - Optional font override: the earlier device check used system Hack Regular.
   A custom release font must include its own license and assessed glyph coverage;

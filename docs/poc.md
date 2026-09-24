@@ -46,10 +46,14 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
 
 ## Deliberately not claimed
 
-**Review-first only.** No automatic insertion or inferred commands. A transcript
-must be explicitly inserted into the *current* focused destination. We do not yet
-implement the proposed Xwayland focus-generation observer or safe quick typing.
-There remains a race with focus changes after user approval. Text delivery is
+**Review-first by default.** An opt-in Auto insert setting now watches the
+Xwayland active window, Gamescope focused-window property and exact keyboard
+focus from PTT start to IME lease acquisition. Loss/regain, disagreement,
+unavailable focus or a held keyboard key falls back to manual review. No
+automatic Enter or inferred speech commands. This focus guard has offline
+tests but live microphone → automatic insertion is **not yet accepted** on Frame;
+it cannot identify arbitrary native Wayland targets. There remains a race
+between the final focus check and global input processing. Text delivery is
 reported as **input queued**, not application consumption or message delivery.
 A request is consumed once even if transport completion is uncertain; no retries.
 Unavailable IME acquisition leaves the preview intact.

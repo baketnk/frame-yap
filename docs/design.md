@@ -5,7 +5,8 @@ Standalone project design; see
 This document is the full target design, not a blanket implementation claim.
 The native POC now implements overlay/actions, bounded SDL3 capture, a persistent
 Redux adapter, review-first Gamescope insertion and a user-local archive installer.
-Quick typing/focus-generation tracking, polished status-chip UX and full hardware
+Opt-in conservative Xwayland focus tracking is implemented locally but not yet
+accepted for live automatic typing on Frame. Polished status-chip UX and full hardware
 acceptance remain proposed. See [current scope](poc.md), [device observations](evidence/poc-cpu-overlay-2026-09-24.md)
 and [runtime licensing boundary](third-party.md).
 
@@ -66,13 +67,14 @@ Recording…  00:04           [ Cancel ]
   A click-to-start/stop overlay button provides
   a binding-independent alternative. Bound recording to 20 seconds; discard
   accidental taps (initial threshold: 200 ms).
-- **Quick typing:** insert on completion only when the explicitly armed target
-  is still valid. **Review mode:** always wait for Insert. Bring up review instead
-  of silently losing a transcript or typing into a new target.
+- **Quick typing (opt-in, locally implemented):** insert on completion only when
+  uninterrupted Xwayland target observation remains valid. **Review mode (default):**
+  wait for Insert. Bring up review on uncertainty rather than silently losing a
+  transcript or typing into a new target. Live Frame acceptance remains open.
 - Enter requires its own explicit control activation: insert pending review with
   a trailing space, then queue Enter only if the text step succeeds. With no
   review, it queues only Enter. Never interpret "submit", "delete" or other speech
-  as commands. Transcription completion never inserts or auto-submits.
+  as commands. Transcription completion never auto-submits.
 - No generic "undo last dictation" initially: another application's edits/cursor
   cannot be reliably rolled back by a guessed number of backspaces.
 - Stop/disable releases owned keys and microphone, invalidates pending delivery,

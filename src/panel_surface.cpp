@@ -28,10 +28,10 @@ struct Rect {
     }
 };
 enum class Control { Review, Settings, Bindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
-                     World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug };
+                     World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert };
 enum class Tab { Review, Settings };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 17> buttons{{
+constexpr std::array<Button, 18> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
@@ -48,7 +48,8 @@ constexpr std::array<Button, 17> buttons{{
     {{514, 308, 454, 58}, Control::Right, "Right wrist"},
     {{32, 394, 300, 50}, Control::Recenter, "Recenter in front"},
     {{514, 394, 454, 50}, Control::LasersAnytime, "Lasers anytime"},
-    {{32, 452, 936, 48}, Control::AdvancedDebug, "Advanced debugging (full logs)"},
+    {{32, 452, 454, 48}, Control::AutoInsert, "Auto insert"},
+    {{514, 452, 454, 48}, Control::AdvancedDebug, "Advanced debug"},
 }};
 std::optional<UiAction> action(Control c) {
     switch (c) {
@@ -107,7 +108,7 @@ struct PanelSurface::Impl {
     Theme theme;
     Color background, card, ink, muted, cyan, pink;
     Tab tab = Tab::Review;
-    bool dirty = true, lasers_anytime = false, advanced_debug = false;
+    bool dirty = true, lasers_anytime = false, advanced_debug = false, auto_insert = false;
     std::string placement_note, binding_note;
     std::array<int, 2> pressed{{-1, -1}};
     int resize_cursor = -1;
@@ -248,7 +249,7 @@ struct PanelSurface::Impl {
     bool visible(Control c) const {
         if (c == Control::Prev || c == Control::Next) return tab == Tab::Review;
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
-            c == Control::AdvancedDebug) return tab == Tab::Settings;
+            c == Control::AdvancedDebug || c == Control::AutoInsert) return tab == Tab::Settings;
         return true;
     }
     bool enabled(Control c) const {
@@ -284,7 +285,7 @@ struct PanelSurface::Impl {
         rect({0, 0, W, H}, background);
         frame();
         text("FrameYap", 32, 61, 40, ink, 300);
-        text("ON-DEVICE / REVIEW FIRST", 280, 58, 22, muted, 720);
+        text(auto_insert ? "ON-DEVICE / AUTO INSERT OPT-IN" : "ON-DEVICE / REVIEW FIRST", 280, 58, 22, muted, 720);
         text(mount_label(mount), 756, 58, 24, cyan, 968);
         rounded({32, 78, 936, 48}, 13, mix(background, card, .7f),
                 panel.recording ? mix(card, pink, .36f) : mix(card, cyan, .22f),
@@ -307,8 +308,8 @@ struct PanelSurface::Impl {
             if (!binding_note.empty()) text(binding_note, 32, 203, 20, muted, 968);
         } else {
             text("MOUNT AND INTERACTION", 32, 224, 22, muted, 968);
-            text("Full logs may contain speech/text/paths. No saved audio clips.", 32, 520, 20, pink, 968);
-            text(placement_note.empty() ? "Toggle restarts worker; cancels current work. Lasers may affect games." : placement_note,
+            text("Auto insert requires stable X focus; never Enter. Debug logs may contain speech.", 32, 520, 20, pink, 968);
+            text(placement_note.empty() ? "Debug restarts worker; lasers may affect games. No saved audio clips." : placement_note,
                  32, 540, 20, muted, 968);
         }
         rect({32, 550, 936, 1}, mix(card, cyan, .17f));
@@ -320,7 +321,8 @@ struct PanelSurface::Impl {
                             (b.id == Control::Settings && tab == Tab::Settings) ||
                             (mounting(b.id) && *mounting(b.id) == mount) ||
                             (b.id == Control::LasersAnytime && lasers_anytime) ||
-                            (b.id == Control::AdvancedDebug && advanced_debug);
+                            (b.id == Control::AdvancedDebug && advanced_debug) ||
+                            (b.id == Control::AutoInsert && auto_insert);
             const Color fill = !on ? mix(background, card, .40f) :
                                selected ? mix(card, cyan, .14f) : card;
             const Color accent = b.id == Control::Record && panel.recording ? pink : cyan;
@@ -332,8 +334,9 @@ struct PanelSurface::Impl {
             const auto label = b.id == Control::Record && panel.recording ? "Stop" : b.label;
             text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, 27, on ? ink : mix(background, muted, .48f), b.r.x + b.r.w - 8);
             if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
-            if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug) {
-                bool active = b.id == Control::LasersAnytime ? lasers_anytime : advanced_debug;
+            if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug || b.id == Control::AutoInsert) {
+                bool active = b.id == Control::LasersAnytime ? lasers_anytime :
+                              b.id == Control::AutoInsert ? auto_insert : advanced_debug;
                 text(active ? "ON" : "OFF", b.r.x + b.r.w - 66, b.r.y + b.r.h / 2 + 9, 22,
                      active ? cyan : muted, b.r.x + b.r.w - 12);
             }
@@ -386,6 +389,7 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
     else if (c == Control::Recenter) { result.recenter = true; impl_->reset(); }
     else if (c == Control::LasersAnytime) result.lasers_anytime = !impl_->lasers_anytime;
     else if (c == Control::AdvancedDebug) result.advanced_debug = !impl_->advanced_debug;
+    else if (c == Control::AutoInsert) result.auto_insert = !impl_->auto_insert;
     else if (c == Control::Bindings) { result.open_bindings = true; impl_->reset(); }
     else if (c == Control::Review || c == Control::Settings) {
         impl_->tab = c == Control::Review ? Tab::Review : Tab::Settings;
@@ -412,6 +416,13 @@ void PanelSurface::set_lasers_anytime(bool enabled) {
 void PanelSurface::set_advanced_debug(bool enabled) {
     if (impl_->advanced_debug != enabled) {
         impl_->advanced_debug = enabled;
+        impl_->reset();
+        impl_->dirty = true;
+    }
+}
+void PanelSurface::set_auto_insert(bool enabled) {
+    if (impl_->auto_insert != enabled) {
+        impl_->auto_insert = enabled;
         impl_->reset();
         impl_->dirty = true;
     }

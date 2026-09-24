@@ -197,6 +197,9 @@ Config load_config(const std::filesystem::path& path) {
         } else if (key == "advanced_debug") {
             if (!value.is_bool) throw std::runtime_error("Config advanced_debug must be a boolean");
             config.advanced_debug = value.value == "true";
+        } else if (key == "auto_insert") {
+            if (!value.is_bool) throw std::runtime_error("Config auto_insert must be a boolean");
+            config.auto_insert = value.value == "true";
         } else if (key == "input_priority") {
             if (!value.is_string || (value.value != "normal" && value.value != "experimental"))
                 throw std::runtime_error("Config input_priority must be normal or experimental");
@@ -250,7 +253,8 @@ Config load_config(const std::filesystem::path& path) {
     }
     return config;
 }
-bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept {
+namespace {
+bool save_bool_option(const std::filesystem::path& path, std::string_view key, bool enabled) noexcept {
     try {
         if (path.empty() || !path.is_absolute() || std::filesystem::is_symlink(path)) return false;
         const bool existing = std::filesystem::exists(path);
@@ -261,14 +265,14 @@ bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexce
         auto root = parser.parse(); parser.ws();
         if (!root.is_object || parser.pos != bytes.size()) return false;
         const std::string value = enabled ? "true" : "false";
-        auto it = root.object.find("advanced_debug");
+        auto it = root.object.find(std::string(key));
         if (it != root.object.end()) {
             if (!it->second.is_bool) return false;
             if (it->second.value == value) return true;
             bytes.replace(it->second.start, it->second.end - it->second.start, value);
         } else {
             bytes.insert(root.end - 1, std::string(root.object.empty() ? "" : ",") +
-                "\"advanced_debug\":" + value);
+                "\"" + std::string(key) + "\":" + value);
         }
         // The native reader rejects files >=4097 bytes, even if the JSON is valid.
         if (bytes.size() > 4096) return false;
@@ -280,6 +284,13 @@ bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexce
     } catch (...) {
         return false;
     }
+}
+} // namespace
+bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept {
+    return save_bool_option(path, "advanced_debug", enabled);
+}
+bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept {
+    return save_bool_option(path, "auto_insert", enabled);
 }
 std::string resolve_font(const std::string& assets, const std::string& requested) {
     const auto bundled = std::filesystem::path(assets) / "fonts/Inconsolata-Regular.ttf";

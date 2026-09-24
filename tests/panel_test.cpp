@@ -12,7 +12,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
     return surface.pointer_up(cursor, x, y);
 }
 void no_action(const SurfaceEvent& event) {
-    assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug &&
+    assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
            !event.recenter && !event.open_bindings);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
@@ -126,6 +126,13 @@ int main(int argc, char** argv) {
     laser = click(surface, 680, 420);
     assert(laser.lasers_anytime == false && !laser.action && !laser.mount);
     surface.set_lasers_anytime(false); assert(surface.render(p));
+    auto automatic = click(surface, 200, 474);
+    assert(automatic.auto_insert == true && !automatic.action);
+    assert(!surface.render(p)); // request alone has no effect
+    surface.set_auto_insert(true); assert(surface.render(p));
+    automatic = click(surface, 200, 474);
+    assert(automatic.auto_insert == false);
+    surface.set_auto_insert(false); assert(surface.render(p));
     auto debug = click(surface, 680, 474);
     assert(debug.advanced_debug == true && !debug.action && !debug.mount && !debug.lasers_anytime);
     assert(!surface.render(p)); // an event is only a request; caller sets the accepted value
@@ -151,6 +158,7 @@ int main(int argc, char** argv) {
     no_action(click(surface, 680, 260)); // mount controls not active on Review
     no_action(click(surface, 680, 420)); // laser toggle only exists on Settings
     no_action(click(surface, 680, 474)); // debug toggle only exists on Settings
+    no_action(click(surface, 200, 474)); // auto insert only exists on Settings
 
     // Bindings opens SteamVR directly, from either tab, without replacing review.
     surface.pointer_down(1, 480, 610);

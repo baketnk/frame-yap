@@ -25,6 +25,7 @@ public:
     std::vector<UiAction> poll();
     void draw(const Panel& panel);
     bool advanced_debug() const;
+    bool auto_insert() const;
     std::string controls_status(); // diagnostic only, no input delivery
     std::string pointer_status() const; // diagnostic counters, no input delivery
 private:

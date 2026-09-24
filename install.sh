@@ -35,6 +35,7 @@ CONFIG_DEFAULTS = {
     "font": "",
     "input_priority": "normal",
     "advanced_debug": False,
+    "auto_insert": False,
     "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
     "theme": {"background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
               "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
@@ -95,6 +96,8 @@ def normalized_config(data):
     fixed["input_priority"] = priority if priority in ("normal", "experimental") else "normal"
     debug = data.get("advanced_debug", False)
     fixed["advanced_debug"] = debug if type(debug) is bool else False
+    automatic = data.get("auto_insert", False)
+    fixed["auto_insert"] = automatic if type(automatic) is bool else False
     source = data.get("wrist")
     source = source if isinstance(source, dict) else {}
     fixed["wrist"] = {}

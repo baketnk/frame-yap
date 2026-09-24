@@ -74,6 +74,7 @@ class InstallTests(unittest.TestCase):
         config = self.home / ".config/frameyap/config.json"
         self.assertEqual(json.loads(config.read_text()), installer.CONFIG_DEFAULTS)
         self.assertIs(json.loads(config.read_text())["advanced_debug"], False)
+        self.assertIs(json.loads(config.read_text())["auto_insert"], False)
         self.assertEqual(list(config.parent.glob("config.json.backup-*")), [])
         self.assertIn("PYTHONDONTWRITEBYTECODE=1", launcher.read_text())
         self.assertTrue(os.access(root / "versions/v1/runtime/bin/helper", os.X_OK))
@@ -127,12 +128,14 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["buttons"]["cancel"], "/user/hand/right/input/b")
         self.assertEqual(fixed["input_priority"], "normal")
         self.assertIs(fixed["advanced_debug"], False)
+        self.assertIs(fixed["auto_insert"], False)
         self.assertEqual(fixed["wrist"], installer.CONFIG_DEFAULTS["wrist"])
         backups = list(config.parent.glob("config.json.backup-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), original)
         fixed["input_priority"] = "experimental"
         fixed["advanced_debug"] = True
+        fixed["auto_insert"] = True
         fixed["buttons"]["enter"] = ""  # intentional disabling survives upgrades
         fixed["wrist"]["y"] = 0.2
         compact = json.dumps(fixed, separators=(",", ":")).encode()
@@ -140,6 +143,7 @@ class InstallTests(unittest.TestCase):
         self.install("v1", archive, digest)
         self.assertEqual(config.read_bytes(), compact)
         self.assertIs(json.loads(config.read_text())["advanced_debug"], True)
+        self.assertIs(json.loads(config.read_text())["auto_insert"], True)
         self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), 1)
         fixed["advanced_debug"] = False
         compact_off = json.dumps(fixed, separators=(",", ":")).encode()
@@ -156,6 +160,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["buttons"], installer.CONFIG_DEFAULTS["buttons"])  # colliding paths reset
         self.assertEqual(fixed["input_priority"], "normal")
         self.assertIs(fixed["advanced_debug"], False)
+        self.assertIs(fixed["auto_insert"], False)
         self.assertEqual(fixed["wrist"]["x"], 0.04)
         self.assertEqual(fixed["wrist"]["y"], 0.18)
         self.assertEqual(fixed["wrist"]["width"], 0.30)
@@ -191,6 +196,17 @@ class InstallTests(unittest.TestCase):
             self.install("v1", archive, digest)
             self.assertIs(json.loads(config.read_text())["advanced_debug"], False)
             self.assertEqual(json.loads(config.read_text())["font"], "/custom/font.ttf")
+            self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+
+    def test_auto_insert_boolean_repair_backs_up_invalid_values(self):
+        archive, digest = self.package("v1")
+        config = self.home / ".config/frameyap/config.json"
+        config.parent.mkdir(parents=True)
+        for invalid in ("true", 1, None, [], {}):
+            original = json.dumps({"auto_insert": invalid, "font": "/custom/font.ttf"}).encode()
+            config.write_bytes(original)
+            self.install("v1", archive, digest)
+            self.assertIs(json.loads(config.read_text())["auto_insert"], False)
             self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
 
     def test_digest_and_same_version_mismatch_leave_previous(self):

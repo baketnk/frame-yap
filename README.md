@@ -26,7 +26,7 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
 - **Right B:** cancel/discard. **Right A:** insert reviewed text with a trailing space.
   **Right Y:** insert pending text, then send Enter; with no pending text, Enter only.
   **Left grip (when active):** double-tap for the same explicit Enter action.
-  Nothing inserts or submits automatically after transcription.
+  Nothing submits automatically. Auto Insert is opt-in and off by default.
 - **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
   Review and settings share one Inconsolata/neon-framed surface.
   Drag the inset lower-right grip to resize the panel (world, head or wrist);
@@ -49,8 +49,13 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   overlays**. FrameYap then requests priority for its bound controller sources.
   This may consume controls used by games or the dashboard; coexistence on Frame
   is under test. The default is `"normal"`; restart FrameYap after changing it.
-- **Review-first:** focus your destination, then press Insert (text + space) or
-  explicitly Enter (text + space, then Enter). No automatic insertion or submission. Maximum clip 20 seconds; accidental taps under 200 ms are discarded.
+- **Review by default:** focus your destination, then press Insert (text + space) or
+  explicitly Enter (text + space, then Enter). Settings → Auto insert is off by default:
+  when enabled, it queues text + space only if Xwayland keyboard focus, active
+  window and Gamescope focus match continuously from recording through delivery.
+  Any uncertainty leaves a preview for manual Insert; it never sends Enter.
+  This is not yet validated for live transcription on Frame. Maximum clip 20 seconds;
+  accidental taps under 200 ms are discarded.
 - While the native app is Ready, it keeps the mic device open and discards idle
   audio instead of opening/closing on every PTT. Quit releases the device. Other
   apps may still hear/transmit your voice; FrameYap does not mute them.

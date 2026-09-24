@@ -29,12 +29,14 @@ int main(int argc, char** argv) {
     assert(load_config(path).buttons.empty());
     assert(!load_config(path).experimental_input_priority);
     assert(!load_config(path).advanced_debug);
+    assert(!load_config(path).auto_insert);
     assert(load_config(path).wrist.width == .30f);
     auto example = load_config(std::filesystem::path(argv[1]) / "config.example.json");
     assert(example.buttons.at("ptt") == "/user/hand/right/input/x");
     assert(example.font.empty());
     assert(!example.experimental_input_priority);
     assert(!example.advanced_debug);
+    assert(!example.auto_insert);
     assert(example.wrist.y == .18f && example.wrist.z == .089f);
     std::filesystem::create_directories(path.parent_path());
     assert(save_advanced_debug(path, true));
@@ -42,6 +44,10 @@ int main(int argc, char** argv) {
     assert(get(path).find("\"advanced_debug\":true") != std::string::npos);
     assert(save_advanced_debug(path, false));
     assert(!load_config(path).advanced_debug);
+    assert(save_auto_insert(path, true));
+    assert(load_config(path).auto_insert);
+    assert(save_auto_insert(path, false));
+    assert(!load_config(path).auto_insert);
     for (const auto* invalid : {R"({"advanced_debug":"true"})", R"({"advanced_debug":0})",
                                R"({"advanced_debug":null})", R"({"advanced_debug":[]})"}) {
         put(path, invalid);
@@ -69,6 +75,7 @@ int main(int argc, char** argv) {
     auto link = dir / "linked-config";
     std::filesystem::create_symlink(path, link);
     assert(!save_advanced_debug(link, false));
+    assert(!save_auto_insert(link, true));
     assert(get(path) == before);
     std::filesystem::remove(link);
     put(path, R"({"font":")" + std::string(4090, 'x') + R"("})");
@@ -79,6 +86,13 @@ int main(int argc, char** argv) {
     assert(experimental.experimental_input_priority && experimental.advanced_debug);
     // A priority request must preserve the user's existing action manifest/bindings.
     assert(action_manifest(argv[1], experimental) == std::filesystem::absolute(std::filesystem::path(argv[1]) / "actions.json"));
+    put(path, R"({"auto_insert":"on"})");
+    fails([&] { load_config(path); });
+    assert(!save_auto_insert(path, true));
+    put(path, R"({"auto_insert":false,"font":"kept"})");
+    assert(save_auto_insert(path, true));
+    assert(load_config(path).auto_insert);
+    assert(get(path) == R"({"auto_insert":true,"font":"kept"})");
     put(path, R"({"input_priority":"normal"})");
     assert(!load_config(path).experimental_input_priority);
     for (const auto* invalid : {R"({"input_priority":true})", R"({"input_priority":16777216})",

@@ -22,7 +22,7 @@ void help() {
                  "  --check-overlay --assets DIR [--font FILE] [--mount MODE] (5s, no mic/input)\n"
                  "  --check-controls --assets DIR [--font FILE] [--mount MODE] (30s, gestures only)\n\n"
                  "Mount: world (first-launch default), left-wrist, right-wrist, head.\n"
-                 "Settings save the mount and opt-in Lasers anytime mode (may affect games).\n"
+                 "Settings save the mount, opt-in Lasers anytime mode and Auto insert (off by default).\n"
                  "--mount overrides placement for this launch. --head is an alias.\n"
                  "Theme, font and Frame button mappings: $XDG_CONFIG_HOME/frameyap/config.json\n"
                  "(or ~/.config/frameyap/config.json). CLI --font overrides config; missing fonts\n"
@@ -33,7 +33,8 @@ void help() {
                  "Grip gestures are remappable but may be unavailable in the dashboard.\n"
                  "Right B: cancel; A: insert + space; Y: insert pending text + Enter.\n"
                  "Left grip: double-tap for the same explicit Enter action when active.\n"
-                 "Review first: Insert approves current focus; never automatic Enter.\n"
+                 "Review by default. Auto insert requires uninterrupted verified Xwayland focus.\n"
+                 "Insert approves current focus; Enter is never automatic.\n"
                  "No device access unless an explicit runtime/check/registration mode is used.\n";
 #ifndef FRAMEYAP_NATIVE
     std::cout << "This offline build has no hardware backends; enable FRAMEYAP_NATIVE to run.\n";
