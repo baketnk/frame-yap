@@ -123,13 +123,14 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["theme"]["ink"], "#F1f2F3")
         self.assertEqual(fixed["buttons"]["ptt"], "/user/hand/left/input/y")
         self.assertEqual(fixed["theme"]["card"], installer.CONFIG_DEFAULTS["theme"]["card"])
-        self.assertEqual(fixed["buttons"]["cancel"], "")
+        self.assertEqual(fixed["buttons"]["cancel"], "/user/hand/right/input/b")
         self.assertEqual(fixed["input_priority"], "normal")
         self.assertEqual(fixed["wrist"], installer.CONFIG_DEFAULTS["wrist"])
         backups = list(config.parent.glob("config.json.backup-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), original)
         fixed["input_priority"] = "experimental"
+        fixed["buttons"]["enter"] = ""  # intentional disabling survives upgrades
         fixed["wrist"]["y"] = 0.2
         compact = json.dumps(fixed, separators=(",", ":")).encode()
         config.write_bytes(compact)

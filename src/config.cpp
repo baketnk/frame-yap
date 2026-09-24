@@ -254,7 +254,9 @@ std::filesystem::path action_manifest(const std::string& assets, const Config& c
     auto dir = root / "frameyap/bindings";
     std::filesystem::create_directories(dir);
     std::map<std::string, std::string> buttons{{"left_grip", "/user/hand/left/input/grip"},
-        {"right_grip", "/user/hand/right/input/grip"}, {"ptt", "/user/hand/right/input/x"}};
+        {"right_grip", "/user/hand/right/input/grip"}, {"ptt", "/user/hand/right/input/x"},
+        {"cancel", "/user/hand/right/input/b"}, {"insert", "/user/hand/right/input/a"},
+        {"enter", "/user/hand/right/input/y"}};
     for (const auto& [key, path] : config.buttons) buttons[key] = path;
     std::string binding = "{\"controller_type\":\"frame_controller\",\"name\":\"FrameYap configured controls\",\"bindings\":{\"/actions/frameyap\":{\"sources\":[";
     std::map<std::string, std::string> used;

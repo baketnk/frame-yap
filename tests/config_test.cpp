@@ -70,6 +70,14 @@ int main(int argc, char** argv) {
     assert(generated.find("/user/hand/left/input/y") != std::string::npos);
     assert(generated.find("/actions/frameyap/in/cancel") != std::string::npos);
     assert(generated.find("/actions/frameyap/in/right_grip") == std::string::npos);
+    assert(generated.find("/user/hand/right/input/a") != std::string::npos);
+    assert(generated.find("/user/hand/right/input/y") != std::string::npos);
+    config.buttons["cancel"] = ""; config.buttons["insert"] = ""; config.buttons["enter"] = "";
+    auto disabled = action_manifest(argv[1], config);
+    generated = get(disabled.parent_path() / "bindings_frame_controller.json");
+    assert(generated.find("/actions/frameyap/in/cancel") == std::string::npos);
+    assert(generated.find("/actions/frameyap/in/insert") == std::string::npos);
+    assert(generated.find("/actions/frameyap/in/enter") == std::string::npos);
     assert(action_manifest(argv[1], {}) == std::filesystem::absolute(std::filesystem::path(argv[1]) / "actions.json"));
     put(path, R"({"buttons":{"ptt":"/user/hand/left/input/grip"}})");
     fails([&] { action_manifest(argv[1], load_config(path)); }); // overlapping bindings are never silently chosen

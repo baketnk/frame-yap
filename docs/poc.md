@@ -11,7 +11,9 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
   mode while FrameYap is visible; it may affect games, and is not an input override.
 - Remappable SteamVR actions. The default Steam Frame binding maps right X
   (hold to record, release to transcribe) to the existing PTT action using the
-  observed `frame_controller` profile. Grip bindings remain, but both grip
+  observed `frame_controller` profile. Right B cancels, A inserts + space, and Y
+  inserts pending text + Enter (or Enter only with no preview). A Bindings tab
+  shows runtime origin labels and opens SteamVR's remapping editor. Grip bindings remain, but both grip
   actions were inactive in the observed dashboard check; do not rely on them.
   If left grip becomes active, two short taps request explicit Enter.
   For grip gestures, first squeeze <=250 ms; second squeeze begins <=350 ms
@@ -32,7 +34,12 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
   in-flight request or broken worker protocol may require reloading. No
   cloud/desktop fallback.
 - Gamescope IME v2 generated bindings, per-action short-lived lease, unavailable
-  handling, UTF-8/control validation and explicit separate Submit action for Enter.
+  handling, UTF-8/control validation and explicit Submit action for Enter.
+  Insert ensures a trailing space without doubling an existing one. Enter
+  first inserts pending review, releases the text lease, then acquires a fresh
+  lease for Submit. Failed/uncertain text never proceeds to Submit; failed
+  Submit acquisition never replays text. A full 4096-byte transcript without
+  room for a space is preserved with an error, never silently truncated.
 - Idempotent user-local release-archive installer: SHA-256, safe extraction,
   atomic current-version selection, retained rollback, runtime/install lock,
   foreign-file refusal and explicit unregister-before-uninstall acknowledgement.

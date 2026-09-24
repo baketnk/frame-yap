@@ -1,5 +1,7 @@
 #pragma once
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -27,4 +29,23 @@ private:
     uint64_t id_ = 0;
     std::string text_;
 };
+// Each lease is single-use. Constructing it must only check availability, not
+// deliver input. After a possibly ambiguous text failure the review is consumed.
+class DeliveryLease {
+public:
+    virtual ~DeliveryLease() = default;
+    virtual void text(const std::string& literal) = 0;
+    virtual void enter() = 0;
+};
+using DeliveryFactory = std::function<std::unique_ptr<DeliveryLease>()>;
+enum class DeliveryResult {
+    Ignored, TextQueued, EnterQueued, TextUncertain, EnterUncertain, TextQueuedEnterUnavailable
+};
+// Lease acquisition before consumption can throw while leaving review intact.
+// The suffix must fit inside the same 4096-byte validated text bound; overflow
+// throws before consumption rather than silently dropping transcript bytes.
+DeliveryResult deliver_insert(Session& session, const DeliveryFactory& acquire);
+// Review: insert text plus a trailing space, then explicitly send Enter only
+// after successful text delivery. Ready/Queued: Enter alone.
+DeliveryResult deliver_enter(Session& session, const DeliveryFactory& acquire);
 }

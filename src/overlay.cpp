@@ -92,6 +92,7 @@ struct Overlay::Impl {
     unsigned overlay_shown_events = 0, overlay_hidden_events = 0, image_loaded_events = 0, image_failed_events = 0;
     unsigned overlay_focus_events = 0, global_focus_events = 0, input_focus_captured_events = 0;
     std::string last_pointer_event = "none";
+    std::chrono::steady_clock::time_point next_binding_refresh{};
 
     Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested, bool persist)
         : settings_path(default_mount_settings_path()),
@@ -290,6 +291,34 @@ struct Overlay::Impl {
         }
         return {true, data.bState};
     }
+    void refresh_bindings() {
+        if (!surface.bindings_visible()) { next_binding_refresh = {}; return; }
+        const auto now = std::chrono::steady_clock::now();
+        if (now < next_binding_refresh) return;
+        next_binding_refresh = now + std::chrono::seconds(1);
+        std::array<std::string, 6> labels;
+        constexpr std::array<size_t, 6> order{{2, 3, 4, 5, 0, 1}};
+        for (size_t row = 0; row < order.size(); ++row) {
+            std::array<vr::VRInputValueHandle_t, vr::k_unMaxActionOriginCount> origins{};
+            const auto error = input->GetActionOrigins(action_set, actions[order[row]], origins.data(), uint32_t(origins.size()));
+            if (error != vr::VRInputError_None) { labels[row] = "Binding information unavailable"; continue; }
+            for (auto origin : origins) {
+                if (origin == vr::k_ulInvalidInputValueHandle) continue;
+                std::array<char, 256> name{};
+                if (input->GetOriginLocalizedName(origin, name.data(), uint32_t(name.size()),
+                        vr::VRInputString_Hand | vr::VRInputString_InputSource) != vr::VRInputError_None || !name[0]) {
+                    if (!labels[row].empty()) labels[row] += " / ";
+                    labels[row] += "Bound (name unavailable)";
+                } else {
+                    name.back() = '\0';
+                    if (!labels[row].empty()) labels[row] += " / ";
+                    labels[row] += name.data();
+                }
+            }
+            if (labels[row].empty()) labels[row] = "Unbound / controller unavailable";
+        }
+        surface.set_bindings(std::move(labels));
+    }
     std::vector<UiAction> poll() {
         std::vector<UiAction> result;
         system->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses.data(), uint32_t(poses.size()));
@@ -342,8 +371,18 @@ struct Overlay::Impl {
                 last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime) ++pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings) ++pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
+                    if (event_result.open_bindings) {
+                        // The editor changes input ownership. Invalidate held gestures
+                        // and pointer presses; never turn the returning release into input.
+                        reset_input(result);
+                        const auto error = input->OpenBindingUI(nullptr, action_set, vr::k_ulInvalidInputValueHandle, false);
+                        surface.set_binding_note(error == vr::VRInputError_None
+                            ? "SteamVR editor requested. Changes appear here when available."
+                            : "SteamVR could not open bindings. Try its controller settings.");
+                        next_binding_refresh = {};
+                    }
                     if (event_result.lasers_anytime) {
                         const bool enabled = *event_result.lasers_anytime;
                         if (overlay->SetOverlayFlag(handle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible,
@@ -377,6 +416,7 @@ struct Overlay::Impl {
         // experiment compares. SteamVR's separate permission gate is never changed here.
         set.nPriority = action_priority();
         action_update_error = input->UpdateActionState(&set, sizeof(set), 1);
+        refresh_bindings();
         if (action_update_error != vr::VRInputError_None) {
             reset_input(result); return result;
         }

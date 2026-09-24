@@ -29,7 +29,8 @@ CONFIG_DEFAULTS = {
               "frame_start": "#1fff91", "frame_end": "#1f70ff"},
     "buttons": {"left_grip": "/user/hand/left/input/grip",
                 "right_grip": "/user/hand/right/input/grip",
-                "ptt": "/user/hand/right/input/x", "cancel": "", "insert": "", "enter": ""},
+                "ptt": "/user/hand/right/input/x", "cancel": "/user/hand/right/input/b",
+                "insert": "/user/hand/right/input/a", "enter": "/user/hand/right/input/y"},
 }
 COLOR_RE = re.compile(r"#[0-9a-fA-F]{6}\Z")
 BUTTON_RE = re.compile(r"/user/hand/(left|right)/input/[A-Za-z0-9_]+\Z")

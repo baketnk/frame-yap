@@ -31,7 +31,8 @@ void help() {
                  "SteamVR Developer setting Enable global input from overlays.\n"
                  "Right X: hold to speak, release to review (default Frame binding).\n"
                  "Grip gestures are remappable but may be unavailable in the dashboard.\n"
-                 "Left grip: double-tap for explicit Enter when active.\n"
+                 "Right B: cancel; A: insert + space; Y: insert pending text + Enter.\n"
+                 "Left grip: double-tap for the same explicit Enter action when active.\n"
                  "Review first: Insert approves current focus; never automatic Enter.\n"
                  "No device access unless an explicit runtime/check/registration mode is used.\n";
 #ifndef FRAMEYAP_NATIVE

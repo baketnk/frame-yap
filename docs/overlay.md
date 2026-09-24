@@ -19,7 +19,7 @@ Sans face if present. Glyph coverage depends on the selected face; full CJK
 coverage is not claimed.
 
 `src/panel_surface.*` renders **one 1000×680 RGBA canvas** for review, settings,
-status and controls. `src/overlay_texture.*` uploads this CPU canvas into one
+bindings, status and controls. `src/overlay_texture.*` uploads this CPU canvas into one
 persistent Vulkan RGBA8 image and submits it with `SetOverlayTexture`. The image,
 staging allocation and command buffer are reused; tabs do not create extra
 overlays or render targets. The rounded mint-to-blue perimeter,
@@ -53,14 +53,38 @@ native installation and offscreen GPU checks separately from headset acceptance.
 The complete transcript preview is paginated by glyph width and four-line
 height; Previous and Next navigate it without changing the source transcript.
 Long status/detail messages show a prefix with a visible truncation marker.
-The footer remains available on both tabs: Record (labelled Stop while recording),
+The footer remains available on all tabs: Record (labelled Stop while recording),
 Cancel, Insert, Enter, Quit. Record can retry after an error; it is disabled while
 warming/transcribing and until an existing review is inserted or discarded.
 Cancel can stop worker startup. Insert and Enter are disabled during recording
 and transcription. A pointer action requires
 a press/release on the same enabled control from the same cursor; focus loss,
 tab changes, action-state changes and relocation clear pending presses. Enter is *always* a separate
-deliberate action, not inferred from text. Recording never automatically submits Enter.
+deliberate action, not inferred from text. Insert appends a trailing space (without
+doubling an existing trailing space). Enter inserts any pending review and then
+queues Enter; with no pending text it queues Enter only. A failed text step never
+proceeds to Enter. Recording never automatically inserts or submits.
+
+### Bindings menu
+
+The **Bindings** tab shows the runtime-provided hand/control names for PTT,
+Cancel, Insert, Enter and both grip gestures. **Edit in SteamVR** requests the
+in-headset binding editor for the current process/action set. SteamVR owns
+remapping and persistence; the tab refreshes its origin labels once per second
+while visible. Unknown/unavailable origins are reported instead of showing
+bundled defaults as if they were live bindings. Long labels show a truncation
+marker; the editor is the full binding view. Opening it clears pending pointer
+presses and rearms controller gestures from neutral.
+
+OpenVR 2.15.6 provides `GetActionOrigins`, `GetOriginLocalizedName` and
+`OpenBindingUI`, not a generic 2D button-glyph API. Frame's installed controller
+profile references left/right SVG diagrams for SteamVR's own editor. FrameYap
+uses runtime text labels; it does not copy runtime artwork into its package.
+Editor availability and artwork rendering still require headset acceptance.
+
+Normal priority with Lasers anytime off is the practical baseline: the wearer
+reports controller actions with the dashboard closed and clickable UI with it
+open. The menu does not enable global overrides or promise simultaneous access.
 
 ### User theme and controller configuration
 
@@ -82,6 +106,9 @@ installer creates one with defaults on first install. Copy the shipped
   },
   "buttons": {
     "ptt": "/user/hand/right/input/x",
+    "cancel": "/user/hand/right/input/b",
+    "insert": "/user/hand/right/input/a",
+    "enter": "/user/hand/right/input/y",
     "left_grip": "/user/hand/left/input/grip",
     "right_grip": "/user/hand/right/input/grip"
   }
@@ -93,7 +120,10 @@ TTF/OTF file path (not a family name); a missing file uses the bundled font.
 `buttons` maps named OpenVR actions (`left_grip`, `right_grip`, `ptt`, `cancel`,
 `insert`, `enter`) to Frame physical `/user/hand/{left|right}/input/NAME`
 button paths. Omitted actions retain their bundled defaults; an empty string
-disables a mapping. Paths must be distinct. Only the Frame binding is customized;
+disables a mapping, including after an upgrade. The Frame defaults are right
+X = hold-to-talk, B = Cancel, A = Insert + space, Y = Insert + Enter. Existing
+configs with empty actions retain those disabled mappings; change them explicitly
+or use SteamVR's binding editor. Paths must be distinct. Only the Frame binding is customized;
 SteamVR user overrides may still supersede it. On customized launches a generated
 action manifest and adjacent bindings are placed in `$XDG_CACHE_HOME/frameyap/bindings`
 (or `~/.cache/frameyap/bindings`); the bundled manifest remains unchanged. The
@@ -202,7 +232,7 @@ ctest --test-dir build-ui --output-on-failure
 ./build-ui/frameyap_panel_test assets/fonts/Inconsolata-Regular.ttf /tmp/frameyap-ui
 ```
 
-The last command writes `-review.ppm`, `-settings.ppm`, `-recording.ppm` to the
+The last command writes `-review.ppm`, `-settings.ppm`, `-bindings.ppm` and `-recording.ppm` to the
 supplied prefix. The native build includes these tests too; tests never initialize
 OpenVR or touch the real mounting preference. Physical pointing, tracking loss,
 recentring and readability still require a separately authorized headset check.

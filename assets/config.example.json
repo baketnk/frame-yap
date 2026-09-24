@@ -16,8 +16,8 @@
     "left_grip": "/user/hand/left/input/grip",
     "right_grip": "/user/hand/right/input/grip",
     "ptt": "/user/hand/right/input/x",
-    "cancel": "",
-    "insert": "",
-    "enter": ""
+    "cancel": "/user/hand/right/input/b",
+    "insert": "/user/hand/right/input/a",
+    "enter": "/user/hand/right/input/y"
   }
 }

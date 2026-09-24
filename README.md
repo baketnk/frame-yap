@@ -23,9 +23,14 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   transcribe. Repeated presses reached the controls-only diagnostic on Frame;
   live mic capture through this shortcut still needs guided acceptance. This
   PTT action is remappable through SteamVR bindings.
-- **Left grip (when active):** double-tap to explicitly send Enter. Never inferred from speech.
+- **Right B:** cancel/discard. **Right A:** insert reviewed text with a trailing space.
+  **Right Y:** insert pending text, then send Enter; with no pending text, Enter only.
+  **Left grip (when active):** double-tap for the same explicit Enter action.
+  Nothing inserts or submits automatically after transcription.
 - **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
-  Review and settings share one Inconsolata/neon-framed surface. World-space by
+  Review, settings and bindings share one Inconsolata/neon-framed surface.
+  **Bindings → Edit in SteamVR** opens the runtime binding editor; the tab shows
+  runtime-provided control names. Existing SteamVR overrides may supersede defaults. World-space by
   default; settings offer left wrist, right wrist and head mounting, plus recenter.
   Dashboard lasers provide clickable controls. Settings → Lasers anytime is an
   opt-in, default-off system-wide laser mode while the panel is visible; it may
@@ -39,8 +44,8 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   overlays**. FrameYap then requests priority for its bound controller sources.
   This may consume controls used by games or the dashboard; coexistence on Frame
   is under test. The default is `"normal"`; restart FrameYap after changing it.
-- **Review-first:** focus your destination, then press Insert. No automatic insertion
-  or submission. Maximum clip 20 seconds; accidental taps under 200 ms are discarded.
+- **Review-first:** focus your destination, then press Insert (text + space) or
+  explicitly Enter (text + space, then Enter). No automatic insertion or submission. Maximum clip 20 seconds; accidental taps under 200 ms are discarded.
 - While the native app is Ready, it keeps the mic device open and discards idle
   audio instead of opening/closing on every PTT. Quit releases the device. Other
   apps may still hear/transmit your voice; FrameYap does not mute them.

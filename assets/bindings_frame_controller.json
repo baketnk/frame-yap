@@ -1,6 +1,6 @@
 {
   "controller_type": "frame_controller",
-  "description": "Hold right X to dictate; release to review. Grip gestures remain remappable in SteamVR.",
+  "description": "Right X: hold to dictate. B: cancel. A: insert + space. Y: insert + Enter. Remap in SteamVR.",
   "name": "FrameYap Steam Frame controls",
   "bindings": {
     "/actions/frameyap": {
@@ -19,6 +19,21 @@
           "path": "/user/hand/right/input/x",
           "mode": "button",
           "inputs": { "click": { "output": "/actions/frameyap/in/ptt" } }
+        },
+        {
+          "path": "/user/hand/right/input/b",
+          "mode": "button",
+          "inputs": { "click": { "output": "/actions/frameyap/in/cancel" } }
+        },
+        {
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
+          "inputs": { "click": { "output": "/actions/frameyap/in/insert" } }
+        },
+        {
+          "path": "/user/hand/right/input/y",
+          "mode": "button",
+          "inputs": { "click": { "output": "/actions/frameyap/in/enter" } }
         }
       ]
     }

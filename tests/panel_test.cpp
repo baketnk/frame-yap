@@ -12,7 +12,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
     return surface.pointer_up(cursor, x, y);
 }
 void no_action(const SurfaceEvent& event) {
-    assert(!event.action && !event.mount && !event.lasers_anytime && !event.recenter);
+    assert(!event.action && !event.mount && !event.lasers_anytime && !event.recenter && !event.open_bindings);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -123,6 +123,31 @@ int main(int argc, char** argv) {
     no_action(surface.pointer_up(1, 680, 260));
     no_action(click(surface, 680, 260)); // mount controls not active on Review
     no_action(click(surface, 680, 420)); // laser toggle only exists on Settings
+
+    // Binding navigation is not a delivery action; settings and paging are hidden.
+    assert(!surface.bindings_visible());
+    surface.pointer_down(1, 480, 610);
+    no_action(click(surface, 500, 160));
+    assert(surface.bindings_visible());
+    no_action(surface.pointer_up(1, 480, 610)); // switching tabs invalidates old approval
+    surface.set_bindings({"Right X", "Unbound / controller unavailable", "Left Y", "Right Y", "Left grip", "Right grip"});
+    assert(surface.render(p)); assert(!surface.render(p));
+    surface.set_bindings({"Right X", "Unbound / controller unavailable", "Left Y", "Right Y", "Left grip", "Right grip"});
+    assert(!surface.render(p));
+    if (argc >= 3) snapshot(surface, std::string(argv[2]) + "-bindings.ppm");
+    no_action(click(surface, 680, 260));
+    no_action(click(surface, 900, 430));
+    no_action(click(surface, 680, 420));
+    const auto editor = click(surface, 200, 434);
+    assert(editor.open_bindings && !editor.action && !editor.mount && !editor.recenter && !editor.lasers_anytime);
+    no_action(surface.pointer_up(0, 200, 434)); // one launch per deliberate click
+    surface.set_binding_note("SteamVR could not open bindings. Try its controller settings.");
+    assert(surface.render(p)); assert(!surface.render(p));
+    assert(click(surface, 480, 610).action == UiAction::Insert);
+    assert(click(surface, 680, 610).action == UiAction::Enter);
+    assert(click(surface, 280, 610).action == UiAction::Cancel);
+    no_action(click(surface, 100, 160));
+    assert(!surface.bindings_visible());
 
     // Long UTF-8, newlines and malformed bytes are bounded, paginated and navigable.
     p.transcript.clear();

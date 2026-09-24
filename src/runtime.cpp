@@ -21,6 +21,14 @@ namespace frameyap {
 namespace {
 volatile sig_atomic_t interrupted = 0;
 void signal_stop(int) { interrupted = 1; }
+class NativeDeliveryLease final : public DeliveryLease {
+public:
+    explicit NativeDeliveryLease(const std::string& socket) : input_(socket) {}
+    void text(const std::string& literal) override { input_.text(literal); }
+    void enter() override { input_.enter(); }
+private:
+    TextInput input_;
+};
 std::string state_label(State state) {
     switch (state) {
     case State::Warming: return "Warming - on-device Redux CPU";
@@ -44,8 +52,29 @@ int run(const Options& options) {
     Worker worker;
     Audio audio;
     Session session;
-    std::string detail = "Review mode. Other apps may also hear your mic. Enter is separate.";
+    std::string detail = "Review mode. Other apps may also hear your mic. Enter is explicit.";
     bool quit = false;
+    const DeliveryFactory acquire = [&]() -> std::unique_ptr<DeliveryLease> {
+        auto input = std::make_unique<NativeDeliveryLease>(options.socket);
+        if (interrupted) throw std::runtime_error("Input cancelled before delivery");
+        return input;
+    };
+    auto delivery_detail = [&](DeliveryResult result, bool submit) {
+        switch (result) {
+        case DeliveryResult::Ignored: break;
+        case DeliveryResult::TextQueued:
+            detail = "Text and trailing space queued to current focus. Enter remains explicit."; break;
+        case DeliveryResult::EnterQueued:
+            detail = submit ? "Explicit Enter queued to current focus; not a delivery receipt."
+                            : "Input queued to current focus; not a delivery receipt."; break;
+        case DeliveryResult::TextUncertain:
+            detail = "Text delivery uncertain; Enter not sent. Not retried; check destination."; break;
+        case DeliveryResult::EnterUncertain:
+            detail = "Enter delivery uncertain; not retried. Check destination."; break;
+        case DeliveryResult::TextQueuedEnterUnavailable:
+            detail = "Text and trailing space queued; Enter unavailable and not sent. Check destination."; break;
+        }
+    };
     auto warm = [&] {
         audio.close(); worker.stop(); session = Session{};
         worker.start(options.python, options.worker, options.model, options.threads);
@@ -132,22 +161,10 @@ int run(const Options& options) {
                     break;
                 }
                 case UiAction::Insert:
-                    if (session.state() == State::Review) {
-                        // Acquire IME before consuming: unavailable means the preview remains.
-                        TextInput input(options.socket);
-                        if (interrupted) break;
-                        auto literal = session.take_insert();
-                        try { input.text(*literal); detail = "Input queued to current focus. Enter remains a separate action."; }
-                        catch (...) { detail = "Delivery uncertain; not retried. Check destination before dictating again."; }
-                    }
+                    delivery_detail(deliver_insert(session, acquire), false);
                     break;
                 case UiAction::Enter:
-                    if (session.state() == State::Ready || session.state() == State::Queued || session.state() == State::Review) {
-                        TextInput input(options.socket);
-                        if (interrupted) break;
-                        try { input.enter(); detail = "Explicit Enter queued to current focus."; }
-                        catch (...) { detail = "Enter delivery uncertain; not retried."; }
-                    }
+                    delivery_detail(deliver_enter(session, acquire), true);
                     break;
                 }
             } catch (const std::exception& e) {

@@ -13,6 +13,7 @@ struct SurfaceEvent {
     std::optional<Mount> mount;
     std::optional<bool> lasers_anytime;
     bool recenter = false;
+    bool open_bindings = false;
 };
 // One CPU RGBA canvas, independent of OpenVR. Settings replace the review area;
 // status and safety controls remain on the same surface.
@@ -31,6 +32,10 @@ public:
     void reset_pointers();
     void set_placement_note(std::string note);
     void set_lasers_anytime(bool enabled);
+    // PTT, Cancel, Insert, Enter, left-grip gesture, right-grip gesture.
+    void set_bindings(std::array<std::string, 6> labels);
+    void set_binding_note(std::string note);
+    bool bindings_visible() const;
     bool available(UiAction action) const;
 private:
     struct Impl;

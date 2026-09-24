@@ -57,4 +57,47 @@ std::optional<std::string> Session::take_insert() {
 }
 void Session::cancel() { ++id_; text_.clear(); state_ = State::Ready; }
 void Session::fail() { ++id_; text_.clear(); state_ = State::Error; }
+namespace {
+std::unique_ptr<DeliveryLease> lease(const DeliveryFactory& acquire) {
+    auto result = acquire();
+    if (!result) throw std::runtime_error("Input lease unavailable");
+    return result;
+}
+DeliveryResult send_review(Session& session, const DeliveryFactory& acquire, bool submit) {
+    // literal_text already validated the transcript at reply time. Do not
+    // truncate at the boundary: the suffix is also subject to the 4096-byte
+    // Gamescope text limit, including any existing trailing whitespace.
+    const bool needs_space = session.text().back() != ' ';
+    if (needs_space && session.text().size() >= 4096)
+        throw std::runtime_error("Cannot append space: transcript fills the 4096-byte input limit; discard and dictate a shorter clip");
+    auto spaced = session.text();
+    if (needs_space) spaced += ' ';
+    auto input = lease(acquire); // Failed acquisition keeps the review available.
+    session.take_insert();      // Consume before any potentially ambiguous send.
+    try { input->text(spaced); }
+    catch (...) { return DeliveryResult::TextUncertain; }
+    if (!submit) return DeliveryResult::TextQueued;
+    // The Gamescope IME is exclusive and each lease is single-use. Release
+    // the text lease BEFORE acquiring another one for Enter. Never send Enter
+    // unless text returned successfully; do not replay text on lease failure.
+    input.reset();
+    try { input = lease(acquire); }
+    catch (...) { return DeliveryResult::TextQueuedEnterUnavailable; }
+    try { input->enter(); }
+    catch (...) { return DeliveryResult::EnterUncertain; }
+    return DeliveryResult::EnterQueued;
+}
+}
+DeliveryResult deliver_insert(Session& session, const DeliveryFactory& acquire) {
+    if (session.state() != State::Review) return DeliveryResult::Ignored;
+    return send_review(session, acquire, false);
+}
+DeliveryResult deliver_enter(Session& session, const DeliveryFactory& acquire) {
+    if (session.state() == State::Review) return send_review(session, acquire, true);
+    if (session.state() != State::Ready && session.state() != State::Queued) return DeliveryResult::Ignored;
+    auto input = lease(acquire);
+    try { input->enter(); }
+    catch (...) { return DeliveryResult::EnterUncertain; }
+    return DeliveryResult::EnterQueued;
+}
 }

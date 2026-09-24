@@ -54,22 +54,25 @@ armed remains a possible refinement, not a second implemented overlay. See
 Recording…  00:04           [ Cancel ]
 
 "The recognized text appears here."
-[ Insert ]  [ Discard ]     [ Enter — separate action ]
+[ Insert + space ]  [ Discard ]     [ Insert + Enter — explicit ]
 ```
 
 - States: disabled, warming, ready, recording, transcribing, review, inserted,
   unavailable/error. Recording uses visible icon + text, not color alone.
-- Default POC binding: tap right grip briefly, then hold the second squeeze to
-  speak; release to finish. Double-tap left grip is a separate explicit Enter.
-  Both are remappable, with a separate named hold-to-talk action available.
+- Default Frame bindings: hold right X to speak, release to finish; B cancels,
+  A inserts with a trailing space, Y inserts pending text then sends Enter.
+  The alternate right-grip tap-then-hold gesture and left-grip double-tap Enter
+  remain available. All are remappable through the Bindings tab's SteamVR editor.
   A click-to-start/stop overlay button provides
   a binding-independent alternative. Bound recording to 20 seconds; discard
   accidental taps (initial threshold: 200 ms).
 - **Quick typing:** insert on completion only when the explicitly armed target
   is still valid. **Review mode:** always wait for Insert. Bring up review instead
   of silently losing a transcript or typing into a new target.
-- Enter is always a separate press after insertion. Never interpret "submit",
-  "delete" or other speech as commands in this utility. Do not auto-submit.
+- Enter requires its own explicit control activation: insert pending review with
+  a trailing space, then queue Enter only if the text step succeeds. With no
+  review, it queues only Enter. Never interpret "submit", "delete" or other speech
+  as commands. Transcription completion never inserts or auto-submits.
 - No generic "undo last dictation" initially: another application's edits/cursor
   cannot be reliably rolled back by a guessed number of backspaces.
 - Stop/disable releases owned keys and microphone, invalidates pending delivery,
