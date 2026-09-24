@@ -36,7 +36,9 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   backs it up before repairs. See [overlay configuration](docs/overlay.md#user-theme-and-controller-configuration).
 - **Review-first:** focus your destination, then press Insert. No automatic insertion
   or submission. Maximum clip 20 seconds; accidental taps under 200 ms are discarded.
-- Other apps may still hear/transmit your voice. FrameYap does not mute them.
+- While the native app is Ready, it keeps the mic device open and discards idle
+  audio instead of opening/closing on every PTT. Quit releases the device. Other
+  apps may still hear/transmit your voice; FrameYap does not mute them.
 
 Physical gesture timing, global bindings during games, mic capture, target-app
 compatibility and headset comfort still need coordinated validation. Successful

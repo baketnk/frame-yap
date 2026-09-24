@@ -47,7 +47,7 @@ int run(const Options& options) {
     std::string detail = "Review mode. Other apps may also hear your mic. Enter is separate.";
     bool quit = false;
     auto warm = [&] {
-        worker.stop(); session = Session{};
+        audio.close(); worker.stop(); session = Session{};
         worker.start(options.python, options.worker, options.model, options.threads);
         detail = "Loading local model; microphone closed. Record again when Ready.";
     };
@@ -63,6 +63,7 @@ int run(const Options& options) {
     auto start_record = [&] {
         if (session.state() == State::Review || session.state() == State::Transcribing || session.state() == State::Warming) return;
         if (!worker.ready()) { warm(); return; }
+        if (!audio.open()) audio.prepare(); // recovery only; normal PTT never opens the device
         if (session.state() == State::Error) session.cancel();
         if (!session.record()) return;
         audio.start();
@@ -86,16 +87,19 @@ int run(const Options& options) {
             }
             if (worker.ready()) session.ready();
         } catch (const std::exception& e) {
-            audio.cancel(); worker.stop();
+            audio.close(); worker.stop();
             if (session.state() != State::Review && session.state() != State::Queued) session.fail();
             detail = e.what(); // Preserve an already-correlated preview if the worker dies.
         }
         try {
-            if (audio.recording() && audio.poll()) stop_record();
+            // Prepare after model warm-up, not on PTT. Keep draining/discarding
+            // idle samples so neither a device transition nor old speech reaches
+            // the next clip. A capture failure still requires an explicit retry.
+            if (session.state() == State::Ready && !audio.open() && worker.ready()) audio.prepare();
+            if (audio.open() && audio.poll()) stop_record();
         } catch (const std::exception& e) {
-            // A microphone failure is not a model failure. Release the device,
-            // retain the loaded worker, and allow Record to retry capture.
-            audio.cancel(); session.fail(); detail = e.what();
+            // A microphone failure is not a model failure.
+            audio.close(); session.fail(); detail = e.what();
         }
         // Drawing precedes input polling: Enter is disabled until Ready is visible.
         const auto status = session.state() == State::Error && worker.ready()
@@ -118,10 +122,11 @@ int run(const Options& options) {
                 case UiAction::EndRecord: stop_record(); break;
                 case UiAction::Cancel: {
                     auto state = session.state();
-                    audio.cancel(); session.cancel(); detail = "Discarded. Microphone closed.";
+                    audio.cancel(); session.cancel(); detail = "Discarded. Idle microphone samples are discarded.";
                     if (state == State::Warming || state == State::Transcribing) {
-                        worker.stop(); session.fail(); detail = "Cancelled. Record to reload local worker.";
+                        audio.close(); worker.stop(); session.fail(); detail = "Cancelled. Record to reload local worker.";
                     } else if (state == State::Error && !worker.ready()) {
+                        audio.close();
                         session.fail(); detail = "Worker unavailable. Record to reload local worker.";
                     }
                     break;
@@ -150,7 +155,7 @@ int run(const Options& options) {
                 // only the microphone; submit failures stop their own child if
                 // the IPC stream was partially written.
                 if (session.state() == State::Recording || session.state() == State::Transcribing) {
-                    audio.cancel(); session.fail();
+                    audio.close(); session.fail();
                 }
                 detail = e.what();
             }
@@ -158,7 +163,7 @@ int run(const Options& options) {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    audio.cancel(); session.cancel(); worker.stop();
+    audio.close(); session.cancel(); worker.stop();
     return 0;
 }
 }

@@ -18,14 +18,19 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
   after first release.
   Activity/tracking loss cancels a held recording and requires neutral rearm.
 - SDL3 default recording device, mono float32 conversion at 16 kHz, 200 ms minimum,
-  20 second maximum. Microphone is closed outside actual capture. Other apps may
-  still transmit your voice: this app does **not** mute VRChat or any other app.
+  20 second maximum. In the native app the microphone stream opens after model
+  warm-up, stays running between utterances, and discards idle samples; PTT does
+  not open/pause/close the device. Quit, worker restart, device failure or capture
+  failure closes it. This avoids repeated capture-device transitions but does not
+  promise glitch-free playback on every audio stack. Other apps may still
+  transmit your voice: this app does **not** mute VRChat or any other app.
 - Persistent local Redux worker, correlated bounded pipes, private tmpfs clips,
   cancellation/reaping and deadlines; exact pinned model SHA-256 verification.
   Model imports are lazy and loading is offline. Normal repeats, request-local
   transcription failures and microphone failures retain the loaded model;
-  microphone device streams close outside capture. A cancelled in-flight request
-  or broken worker protocol may require reloading. No cloud/desktop fallback.
+  microphone device failure releases the stream for explicit retry. A cancelled
+  in-flight request or broken worker protocol may require reloading. No
+  cloud/desktop fallback.
 - Gamescope IME v2 generated bindings, per-action short-lived lease, unavailable
   handling, UTF-8/control validation and explicit separate Submit action for Enter.
 - Idempotent user-local release-archive installer: SHA-256, safe extraction,
