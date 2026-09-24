@@ -139,31 +139,26 @@ int main(int argc, char** argv) {
     no_action(click(surface, 680, 420)); // laser toggle only exists on Settings
     no_action(click(surface, 680, 474)); // debug toggle only exists on Settings
 
-    // Binding navigation is not a delivery action; settings and paging are hidden.
-    assert(!surface.bindings_visible());
+    // Bindings opens SteamVR directly, from either tab, without replacing review.
     surface.pointer_down(1, 480, 610);
-    no_action(click(surface, 500, 160));
-    assert(surface.bindings_visible());
-    no_action(surface.pointer_up(1, 480, 610)); // switching tabs invalidates old approval
-    surface.set_bindings({"Right X", "Unbound / controller unavailable", "Left Y", "Right Y", "Left grip", "Right grip"});
-    assert(surface.render(p)); assert(!surface.render(p));
-    surface.set_bindings({"Right X", "Unbound / controller unavailable", "Left Y", "Right Y", "Left grip", "Right grip"});
-    assert(!surface.render(p));
-    if (argc >= 3) snapshot(surface, std::string(argv[2]) + "-bindings.ppm");
-    no_action(click(surface, 680, 260));
-    no_action(click(surface, 900, 430));
-    no_action(click(surface, 680, 420));
-    no_action(click(surface, 680, 474));
-    const auto editor = click(surface, 200, 434);
+    auto editor = click(surface, 500, 160);
     assert(editor.open_bindings && !editor.action && !editor.mount && !editor.recenter && !editor.lasers_anytime);
-    no_action(surface.pointer_up(0, 200, 434)); // one launch per deliberate click
+    no_action(surface.pointer_up(1, 480, 610)); // opening editor invalidates old approval
+    no_action(surface.pointer_up(0, 500, 160)); // one launch per deliberate click
     surface.set_binding_note("SteamVR could not open bindings. Try its controller settings.");
     assert(surface.render(p)); assert(!surface.render(p));
     assert(click(surface, 480, 610).action == UiAction::Insert);
     assert(click(surface, 680, 610).action == UiAction::Enter);
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     no_action(click(surface, 100, 160));
-    assert(!surface.bindings_visible());
+    editor = click(surface, 500, 160);
+    assert(editor.open_bindings && !editor.action);
+    no_action(click(surface, 200, 434)); // old secondary editor button is gone
+    no_action(click(surface, 290, 160)); // switch to Settings
+    editor = click(surface, 500, 160);
+    assert(editor.open_bindings && !editor.action && !editor.mount);
+    assert(click(surface, 680, 260).mount == Mount::Head); // still in Settings
+    no_action(click(surface, 100, 160));
 
     // Long UTF-8, newlines and malformed bytes are bounded, paginated and navigable.
     p.transcript.clear();

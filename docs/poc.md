@@ -12,8 +12,8 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
 - Remappable SteamVR actions. The default Steam Frame binding maps right X
   (hold to record, release to transcribe) to the existing PTT action using the
   observed `frame_controller` profile. Right B cancels, A inserts + space, and Y
-  inserts pending text + Enter (or Enter only with no preview). A Bindings tab
-  shows runtime origin labels and opens SteamVR's remapping editor. Grip bindings remain, but both grip
+  inserts pending text + Enter (or Enter only with no preview). The Bindings button
+  requests SteamVR's remapping editor directly. Grip bindings remain, but both grip
   actions were inactive in the observed dashboard check; do not rely on them.
   If left grip becomes active, two short taps request explicit Enter.
   For grip gestures, first squeeze <=250 ms; second squeeze begins <=350 ms

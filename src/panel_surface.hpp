@@ -1,7 +1,6 @@
 #pragma once
 #include "overlay.hpp"
 #include "config.hpp"
-#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -34,10 +33,7 @@ public:
     void set_placement_note(std::string note);
     void set_lasers_anytime(bool enabled);
     void set_advanced_debug(bool enabled);
-    // PTT, Cancel, Insert, Enter, left-grip gesture, right-grip gesture.
-    void set_bindings(std::array<std::string, 6> labels);
     void set_binding_note(std::string note);
-    bool bindings_visible() const;
     bool available(UiAction action) const;
 private:
     struct Impl;

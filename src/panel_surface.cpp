@@ -2,6 +2,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -25,15 +26,14 @@ struct Rect {
                rounded_distance(px, py, x, y, w, h, std::min(16, h / 3)) <= 0.f;
     }
 };
-enum class Control { Review, Settings, Bindings, OpenBindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
+enum class Control { Review, Settings, Bindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug };
-enum class Tab { Review, Settings, Bindings };
+enum class Tab { Review, Settings };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 18> buttons{{
+constexpr std::array<Button, 17> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
-    {{32, 410, 420, 48}, Control::OpenBindings, "Edit in SteamVR"},
     {{32, 406, 154, 44}, Control::Prev, "Previous"},
     {{838, 406, 130, 44}, Control::Next, "Next"},
     {{32, 574, 176, 68}, Control::Record, "Record"},
@@ -108,7 +108,6 @@ struct PanelSurface::Impl {
     Tab tab = Tab::Review;
     bool dirty = true, lasers_anytime = false, advanced_debug = false;
     std::string placement_note, binding_note;
-    std::array<std::string, 6> bindings{};
     std::array<int, 2> pressed{{-1, -1}};
     std::vector<std::string> lines;
     size_t page = 0;
@@ -247,7 +246,6 @@ struct PanelSurface::Impl {
         if (c == Control::Prev || c == Control::Next) return tab == Tab::Review;
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
             c == Control::AdvancedDebug) return tab == Tab::Settings;
-        if (c == Control::OpenBindings) return tab == Tab::Bindings;
         return true;
     }
     bool enabled(Control c) const {
@@ -302,20 +300,7 @@ struct PanelSurface::Impl {
             for (size_t i = 0; i < std::min(size_t(2), detail.size()); ++i)
                 text(detail[i], 32, 486 + int(i) * 30, 24, muted, 936);
             if (detail.size() > 2) text("[detail truncated]", 730, 546, 22, pink, 968);
-        } else if (tab == Tab::Bindings) {
-            constexpr std::array<const char*, 6> names{{"Hold to record", "Cancel / discard", "Insert + space",
-                "Insert + Enter", "Double tap: Enter", "Tap then hold: record"}};
-            for (size_t i = 0; i < names.size(); ++i) {
-                const int y = 229 + int(i) * 30;
-                text(names[i], 32, y, 23, muted, 335);
-                auto label = wrap(bindings[i].empty() ? "Waiting for SteamVR..." : bindings[i], 23, 582);
-                text(label.front(), 346, y, 23, ink, 928);
-                if (label.size() > 1) text("...", 930, y, 23, muted, 968);
-            }
-            text("Enter inserts pending text, then presses Enter; no text = Enter only.", 32, 484, 22, muted, 968);
-            text("Normal mode: bindings with dashboard closed; UI with it open.", 32, 512, 22, muted, 968);
-            text(binding_note.empty() ? "SteamVR owns remapping. Multiple controls may appear per action." : binding_note,
-                 32, 539, 21, muted, 968);
+            if (!binding_note.empty()) text(binding_note, 32, 203, 20, muted, 968);
         } else {
             text("MOUNT AND INTERACTION", 32, 224, 22, muted, 968);
             text("Full logs may contain speech/text/paths. No saved audio clips.", 32, 520, 20, pink, 968);
@@ -329,7 +314,6 @@ struct PanelSurface::Impl {
             bool on = enabled(b.id);
             bool selected = (b.id == Control::Review && tab == Tab::Review) ||
                             (b.id == Control::Settings && tab == Tab::Settings) ||
-                            (b.id == Control::Bindings && tab == Tab::Bindings) ||
                             (mounting(b.id) && *mounting(b.id) == mount) ||
                             (b.id == Control::LasersAnytime && lasers_anytime) ||
                             (b.id == Control::AdvancedDebug && advanced_debug);
@@ -380,18 +364,14 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
     else if (c == Control::Recenter) { result.recenter = true; impl_->reset(); }
     else if (c == Control::LasersAnytime) result.lasers_anytime = !impl_->lasers_anytime;
     else if (c == Control::AdvancedDebug) result.advanced_debug = !impl_->advanced_debug;
-    else if (c == Control::OpenBindings) { result.open_bindings = true; impl_->reset(); }
-    else if (c == Control::Review || c == Control::Settings || c == Control::Bindings) {
-        impl_->tab = c == Control::Review ? Tab::Review : c == Control::Settings ? Tab::Settings : Tab::Bindings;
+    else if (c == Control::Bindings) { result.open_bindings = true; impl_->reset(); }
+    else if (c == Control::Review || c == Control::Settings) {
+        impl_->tab = c == Control::Review ? Tab::Review : Tab::Settings;
         impl_->reset(); impl_->dirty = true;
     }
     else if (c == Control::Prev) { --impl_->page; impl_->dirty = true; }
     else if (c == Control::Next) { ++impl_->page; impl_->dirty = true; }
     return result;
-}
-bool PanelSurface::bindings_visible() const { return impl_->tab == Tab::Bindings; }
-void PanelSurface::set_bindings(std::array<std::string, 6> labels) {
-    if (impl_->bindings != labels) { impl_->bindings = std::move(labels); impl_->dirty = true; }
 }
 void PanelSurface::set_binding_note(std::string note) {
     if (impl_->binding_note != note) { impl_->binding_note = std::move(note); impl_->dirty = true; }

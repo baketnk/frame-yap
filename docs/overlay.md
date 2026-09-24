@@ -19,7 +19,7 @@ Sans face if present. Glyph coverage depends on the selected face; full CJK
 coverage is not claimed.
 
 `src/panel_surface.*` renders **one 1000×680 RGBA canvas** for review, settings,
-bindings, status and controls. `src/overlay_texture.*` uploads this CPU canvas into one
+status and controls. `src/overlay_texture.*` uploads this CPU canvas into one
 persistent Vulkan RGBA8 image and submits it with `SetOverlayTexture`. The image,
 staging allocation and command buffer are reused; tabs do not create extra
 overlays or render targets. The rounded mint-to-blue perimeter,
@@ -65,21 +65,17 @@ doubling an existing trailing space). Enter inserts any pending review and then
 queues Enter; with no pending text it queues Enter only. A failed text step never
 proceeds to Enter. Recording never automatically inserts or submits.
 
-### Bindings menu
+### Bindings button
 
-The **Bindings** tab shows the runtime-provided hand/control names for PTT,
-Cancel, Insert, Enter and both grip gestures. **Edit in SteamVR** requests the
-in-headset binding editor for the current process/action set. SteamVR owns
-remapping and persistence; the tab refreshes its origin labels once per second
-while visible. Unknown/unavailable origins are reported instead of showing
-bundled defaults as if they were live bindings. Long labels show a truncation
-marker; the editor is the full binding view. Opening it clears pending pointer
-presses and rearms controller gestures from neutral.
+**Bindings** requests SteamVR's in-headset binding editor directly for the
+current process/action set, without changing the FrameYap tab. SteamVR owns
+remapping, persistence and the full binding view. The Review tab shows a request
+or error note after the call. Opening it clears pending pointer presses and
+rearms controller gestures from neutral.
 
-OpenVR 2.15.6 provides `GetActionOrigins`, `GetOriginLocalizedName` and
-`OpenBindingUI`, not a generic 2D button-glyph API. Frame's installed controller
-profile references left/right SVG diagrams for SteamVR's own editor. FrameYap
-uses runtime text labels; it does not copy runtime artwork into its package.
+OpenVR 2.15.6 provides `OpenBindingUI`. Frame's installed controller profile
+references left/right SVG diagrams for SteamVR's own editor. FrameYap
+does not copy runtime artwork into its package.
 Editor availability and artwork rendering still require headset acceptance.
 
 Normal priority with Lasers anytime off is the practical baseline: the wearer
@@ -247,7 +243,7 @@ ctest --test-dir build-ui --output-on-failure
 ./build-ui/frameyap_panel_test assets/fonts/Inconsolata-Regular.ttf /tmp/frameyap-ui
 ```
 
-The last command writes `-review.ppm`, `-settings.ppm`, `-bindings.ppm` and `-recording.ppm` to the
+The last command writes `-review.ppm`, `-settings.ppm` and `-recording.ppm` to the
 supplied prefix. The native build includes these tests too; tests never initialize
 OpenVR or touch the real mounting preference. Physical pointing, tracking loss,
 recentring and readability still require a separately authorized headset check.

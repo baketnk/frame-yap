@@ -62,7 +62,7 @@ Recording…  00:04           [ Cancel ]
 - Default Frame bindings: hold right X to speak, release to finish; B cancels,
   A inserts with a trailing space, Y inserts pending text then sends Enter.
   The alternate right-grip tap-then-hold gesture and left-grip double-tap Enter
-  remain available. All are remappable through the Bindings tab's SteamVR editor.
+  remain available. All are remappable through the Bindings button's SteamVR editor.
   A click-to-start/stop overlay button provides
   a binding-independent alternative. Bound recording to 20 seconds; discard
   accidental taps (initial threshold: 200 ms).
