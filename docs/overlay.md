@@ -46,7 +46,9 @@ were compared with kouseki's `openvr_session.cpp` and `vulkan_renderer.cpp` at
 `738569f4c41ff4c8fc9edd5bfff9c861957ea39e`; FrameYap owns this implementation.
 GPU setup/submission errors stop startup or the run with an explicit error.
 This replaces the raw-upload rendering path; headset flicker acceptance still
-requires an on-device comparison.
+requires an on-device comparison. The
+[Vulkan deployment record](evidence/vulkan-overlay-2026-09-24.md) documents the
+native installation and offscreen GPU checks separately from headset acceptance.
 
 The complete transcript preview is paginated by glyph width and four-line
 height; Previous and Next navigate it without changing the source transcript.
