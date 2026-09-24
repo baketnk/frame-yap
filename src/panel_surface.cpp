@@ -353,6 +353,17 @@ struct PanelSurface::Impl {
         rounded({400, 721, 200, 6}, 3, handle, handle);
         rounded({1008, 721, 36, 6}, 3, handle, handle);
         rounded({1038, 691, 6, 36}, 3, handle, handle);
+        // Give each handle the same full mint-to-blue theme gradient as the
+        // main frame, without changing its antialiased alpha coverage.
+        for (Rect bounds : {Rect{400, 721, 200, 6}, Rect{1008, 691, 36, 36}})
+            for (int y = bounds.y; y < bounds.y + bounds.h; ++y)
+                for (int x = bounds.x; x < bounds.x + bounds.w; ++x) {
+                    auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
+                    if (!dst[3]) continue;
+                    const auto color = mix(theme.frame_start, theme.frame_end,
+                                           float(x - bounds.x) / (bounds.w - 1));
+                    std::copy_n(color.begin(), 3, dst);
+                }
         dirty = false;
         return true;
     }

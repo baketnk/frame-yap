@@ -89,6 +89,20 @@ int main(int argc, char** argv) {
     assert(alpha(500, 690) == 0 && alpha(1030, 704) == 0);
     // Antialiased handle edges carry real alpha, not RGB hidden at alpha zero.
     assert(alpha(401, 721) > 0 && alpha(401, 721) < 255);
+    // Both external handles use the configured full frame gradient, not a
+    // fixed blue or a tint that fills in their transparent surroundings.
+    Theme gradient_theme;
+    gradient_theme.frame_start = {255, 0, 0, 255};
+    gradient_theme.frame_end = {0, 0, 255, 255};
+    PanelSurface gradient_surface(argv[1], Mount::World, gradient_theme);
+    gradient_surface.render(p);
+    const auto channel = [&](int x, int y, int c) {
+        return gradient_surface.pixels()[(y * PanelSurface::width + x) * 4 + c];
+    };
+    assert(channel(410, 723, 0) > 230 && channel(590, 723, 2) > 230);
+    assert(channel(1012, 723, 0) > 220 && channel(1040, 705, 2) > 220);
+    assert(channel(1030, 704, 3) == 0 && channel(800, 724, 3) == 0);
+    assert(channel(401, 721, 3) == alpha(401, 721));
 
     p.enabled = true;
     p.record_available = false;
