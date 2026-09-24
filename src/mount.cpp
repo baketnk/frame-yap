@@ -62,19 +62,31 @@ std::optional<Matrix34> world_mount_pose(const Matrix34& hmd) {
     return pose;
 }
 
-Matrix34 relative_mount_pose(Mount mount) {
+Matrix34 relative_mount_pose(Mount mount, const WristPlacement& wrist) {
     auto pose = identity;
     switch (mount) {
     case Mount::Head: pose[1][3] = -0.16f; pose[2][3] = -1.05f; break;
-    case Mount::LeftWrist: pose[0][3] = 0.13f; pose[1][3] = 0.12f; pose[2][3] = -0.18f; break;
-    case Mount::RightWrist: pose[0][3] = -0.13f; pose[1][3] = 0.12f; pose[2][3] = -0.18f; break;
+    case Mount::LeftWrist: case Mount::RightWrist: {
+        // VR Workspace's fallback wrist frame maps +Y toward fingers (-Z of
+        // controller), +Z out of the back of the hand (+Y of controller).
+        // Its HUD has right=fingers, up=back of hand, front=right x up.
+        // The 0.089 m Z is the 0.054 m wrist calibration plus 0.035 m
+        // backward from the fingers. Y also accounts for the HUD canvas's
+        // bottom anchor: .12 m wrist lift + .09 m anchor - ~.03 m panel center.
+        const float angle = wrist.roll_degrees * (std::acos(-1.f) / 180.f);
+        const float c = std::cos(angle), s = std::sin(angle);
+        pose[0] = {0.f, s, c, c * wrist.x + s * wrist.y};
+        pose[1] = {0.f, c, -s, -s * wrist.x + c * wrist.y};
+        pose[2] = {-1.f, 0.f, 0.f, wrist.z};
+        break;
+    }
     case Mount::World: break;
     }
     return pose;
 }
 
-float mount_width(Mount mount) {
-    return mount == Mount::LeftWrist || mount == Mount::RightWrist ? 0.42f : 0.85f;
+float mount_width(Mount mount, const WristPlacement& wrist) {
+    return mount == Mount::LeftWrist || mount == Mount::RightWrist ? wrist.width : 0.85f;
 }
 
 std::filesystem::path default_mount_settings_path() {

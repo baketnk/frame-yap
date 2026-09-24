@@ -60,16 +60,25 @@ int main() {
     CHECK(!parse_mount("")); CHECK(!parse_mount("world extra"));
 
     CHECK(near(mount_width(Mount::World), .85f)); CHECK(near(mount_width(Mount::Head), .85f));
-    CHECK(near(mount_width(Mount::LeftWrist), .42f)); CHECK(near(mount_width(Mount::RightWrist), .42f));
+    CHECK(near(mount_width(Mount::LeftWrist), .30f)); CHECK(near(mount_width(Mount::RightWrist), .30f));
     CHECK(relative_mount_pose(Mount::World) == identity);
     const auto head = relative_mount_pose(Mount::Head);
     check_basis(head, 1, 0, 0, 1);
     CHECK(near(head[0][3], 0)); CHECK(near(head[1][3], -.16f)); CHECK(near(head[2][3], -1.05f));
     const auto left = relative_mount_pose(Mount::LeftWrist), right = relative_mount_pose(Mount::RightWrist);
-    check_basis(left, 1, 0, 0, 1); check_basis(right, 1, 0, 0, 1);
-    CHECK(near(left[0][3], .13f)); CHECK(near(right[0][3], -.13f));
-    CHECK(near(left[1][3], .12f)); CHECK(near(right[1][3], .12f));
-    CHECK(near(left[2][3], -.18f)); CHECK(near(right[2][3], -.18f));
+    CHECK(left == right); // VR Workspace fallback calibration uses the same controller-local axes for both hands.
+    CHECK(near(left[0][0], 0)); CHECK(near(left[1][0], 0)); CHECK(near(left[2][0], -1));
+    CHECK(near(left[0][1], 0)); CHECK(near(left[1][1], 1)); CHECK(near(left[2][1], 0));
+    CHECK(near(left[0][2], 1)); CHECK(near(left[1][2], 0)); CHECK(near(left[2][2], 0));
+    CHECK(near(left[0][3], 0)); CHECK(near(left[1][3], .18f)); CHECK(near(left[2][3], .089f));
+    WristPlacement tuned{.02f, .1f, .07f, .25f, 90.f};
+    const auto rotated = relative_mount_pose(Mount::RightWrist, tuned);
+    CHECK(near(rotated[0][1], 1)); CHECK(near(rotated[1][1], 0));
+    CHECK(near(rotated[0][2], 0)); CHECK(near(rotated[1][2], -1));
+    CHECK(near(rotated[0][3], .1f)); CHECK(near(rotated[1][3], -.02f));
+    CHECK(near(rotated[2][3], .07f)); CHECK(near(mount_width(Mount::RightWrist, tuned), .25f));
+    CHECK(relative_mount_pose(Mount::Head, tuned) == head);
+    CHECK(near(mount_width(Mount::World, tuned), .85f));
 
     auto hmd = identity;
     hmd[0][3] = 2; hmd[1][3] = 1.7f; hmd[2][3] = 3;
