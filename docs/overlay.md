@@ -239,7 +239,16 @@ inward with upright, unmirrored text. The controller-relative center is
 (0, 0.18, 0.089) m, approximating the compact HUD's surface center: its
 0.12 m wrist lift, 0.09 m bottom anchor and ~0.03 m panel-center correction;
 Z combines the fallback 0.054 m wrist calibration and 0.035 m finger-back offset. This copies placement geometry, not
-VR Workspace's avatar-dependent wrist calibration or its head-facing fade.
+VR Workspace's avatar-dependent wrist calibration. Wrist-mounted panels now use
+the same *behavior* as kouseki's watch HUD: fully visible while their entire
+orientation is within 60° of an upright, viewer-facing panel; linear opacity
+fade from 60° to 75°, then hidden (including laser interaction). Pitch, yaw and
+roll contribute together; turning the wrist away or moving the head around it
+changes the angle. OpenVR's overlay alpha changes without rerendering the panel.
+World and head mounts do not fade. Missing headset tracking hides a wrist panel;
+a lost wrist still uses the existing world-space fallback. This was implemented
+independently with no kouseki library or runtime dependency. Headset readability,
+fade feel and interaction at the threshold still need live acceptance.
 
 To tune the selected wrist, set `wrist` in `config.json` as in the example above:
 `x`, `y`, `z` are controller-local meters (each -0.3 to 0.3), `width` is panel

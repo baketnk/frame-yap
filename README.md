@@ -33,6 +33,9 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   lower-right corner bracket to scale it (world, head or wrist). Both sit in
   transparent margins, like Steam's window handles. Scaling keeps the upper-left
   corner anchored. Position/size changes last for this run only.
+  Wrist mounting fades the panel as its full orientation turns away from an
+  upright viewer-facing pose (60°–75°), hiding interaction past that angle;
+  world and head mounting do not fade.
   **Bindings** requests SteamVR's binding editor directly. Existing SteamVR overrides may supersede defaults. World-space by
   default; settings offer left wrist, right wrist and head mounting, plus recenter.
   Dashboard lasers provide clickable controls. Settings → Lasers anytime is an

@@ -1,5 +1,6 @@
 #include "overlay.hpp"
 #include "overlay_texture.hpp"
+#include "angle_fade.hpp"
 #include "gestures.hpp"
 #include "laser_setting.hpp"
 #include "panel_surface.hpp"
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -89,6 +91,7 @@ struct Overlay::Impl {
     Panel panel;
     bool save_failed = false, debug_save_failed = false, auto_save_failed = false;
     bool world_ready = false, placed = false, has_texture = false, shown = false;
+    float published_alpha = -1.f;
     float size_scale = 1.f;
     bool size_changed = false;
     float move_x = 0.f, move_y = 0.f;
@@ -208,7 +211,21 @@ struct Overlay::Impl {
         gpu_texture.reset();
     }
     void visibility() {
-        const bool wanted = placed && has_texture;
+        float alpha = 1.f;
+        if (placed && applied_mount && (*applied_mount == Mount::LeftWrist || *applied_mount == Mount::RightWrist)) {
+            alpha = tracked(anchor) && tracked(vr::k_unTrackedDeviceIndex_Hmd)
+                ? wrist_view_opacity_relative(canvas_pose, matrix(poses[anchor].mDeviceToAbsoluteTracking),
+                                              matrix(poses[vr::k_unTrackedDeviceIndex_Hmd].mDeviceToAbsoluteTracking))
+                : 0.f;
+        }
+        // Keep geometry/texture stationary; opacity is a compositor property,
+        // not an upload. At zero, hide the interactive overlay as well.
+        alpha = std::round(alpha * 255.f) / 255.f;
+        if (alpha != published_alpha) {
+            overlay_check(overlay->SetOverlayAlpha(handle, alpha), overlay, "SetOverlayAlpha");
+            published_alpha = alpha;
+        }
+        const bool wanted = placed && has_texture && alpha > 0.f;
         if (wanted == shown) return;
         overlay_check(wanted ? overlay->ShowOverlay(handle) : overlay->HideOverlay(handle), overlay, "Overlay visibility");
         if (wanted) ++show_calls; else ++hide_calls;
