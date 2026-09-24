@@ -51,3 +51,11 @@ not establish SteamVR texture acceptance, orientation, click behavior or a
 flicker fix. No microphone, inference or text/Enter delivery was exercised.
 The next human headset check should compare both static action clicks and
 content-changing tabs using the installed Vulkan build's `--check-controls`.
+
+## Subsequent wearer report — 2026-09-24
+
+After testing the installed Vulkan build, the user confirmed that the flicker
+is fixed. They separately reported controller shortcuts becoming unavailable
+in system laser/dashboard interaction states while pointer clicks work. This
+is wearer confirmation of the visual fix and a distinct input-routing issue;
+it does not establish microphone, transcription or text-delivery acceptance.

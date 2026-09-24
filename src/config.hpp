@@ -15,6 +15,8 @@ struct Theme {
 struct Config {
     Theme theme;
     std::string font; // absolute TTF/OTF path; empty uses the bundled face
+    // Requests OpenVR's experimental global action priority; SteamVR must allow it too.
+    bool experimental_input_priority = false;
     // OpenVR action name -> physical Frame controller input path; empty disables it.
     std::map<std::string, std::string> buttons;
 };

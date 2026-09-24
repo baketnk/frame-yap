@@ -27,6 +27,8 @@ void help() {
                  "Theme, font and Frame button mappings: $XDG_CONFIG_HOME/frameyap/config.json\n"
                  "(or ~/.config/frameyap/config.json). CLI --font overrides config; missing fonts\n"
                  "fall back to bundled Inconsolata, then a system DejaVu face.\n"
+                 "Config input_priority: normal (default) or experimental; also requires\n"
+                 "SteamVR Developer setting Enable global input from overlays.\n"
                  "Right X: hold to speak, release to review (default Frame binding).\n"
                  "Grip gestures are remappable but may be unavailable in the dashboard.\n"
                  "Left grip: double-tap for explicit Enter when active.\n"

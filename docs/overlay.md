@@ -73,6 +73,7 @@ installer creates one with defaults on first install. Copy the shipped
 ```json
 {
   "font": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+  "input_priority": "normal",
   "theme": {
     "background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
     "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
@@ -101,8 +102,36 @@ the exact prior bytes under `config.json.backup-*` before a repair and refuses
 symlink/oversized config paths; valid customizations remain intact. The installed
 launcher no longer pins `--font`, so this selection takes effect. Direct native
 launches with bad JSON, colors or button mappings fail startup rather than
-silently changing input behavior. This does not enable experimental SteamVR
-action overrides or prove delivery in games.
+silently changing input behavior.
+
+### Experimental controller input priority
+
+There are two independent gates:
+
+1. SteamVR's Developer setting **Enable global input from overlays** (called
+   **Experimental overlay input overrides** in the SDK documentation) permits
+   global action priority. FrameYap reads it and never changes it.
+2. FrameYap config `"input_priority": "experimental"` requests
+   `k_nActionSetOverlayGlobalPriorityMin` (`0x01000000`) for its existing action
+   set. `"normal"` or an omitted field requests priority zero. Restart FrameYap
+   after changing the config. Invalid values fail native startup; the installer
+   repairs them to normal and backs up the prior bytes.
+
+This applies to all controller sources bound to FrameYap actions, including
+custom SteamVR bindings. It does not replace the action manifest or change the
+physical button mappings. Bound sources can take input away from games or the
+dashboard. The request stays the same with the dashboard open/closed and Lasers
+anytime on/off so the experiment can compare those modes. Successful API calls
+do not prove that controller actions arrive or that dashboard interaction works.
+
+Native startup logs the requested priority and SteamVR permission separately.
+The no-audio/no-delivery `--check-controls` probe also logs dashboard state, the
+Lasers anytime flag, `IsInputAvailable`, panel visibility/focus, and activity,
+press state and pose/role acceptance for all six actions. The laser flag is our
+request, not a detector for every system laser. Compare the same bindings in
+each dashboard/laser state; check pointer clicks and press/release through mode
+transitions too. Return `input_priority` to `normal` and relaunch to end the
+FrameYap experiment.
 
 ### Placement settings
 
@@ -139,7 +168,10 @@ missing, symlinked or invalid files mean off. A failed save keeps the new
 choice only for the running session and shows a warning. To turn it back on
 after disabling it with the dashboard closed, open the dashboard to use its
 laser on the Settings button. Controls-only checks can toggle it temporarily
-but do not save the preference. This has not yet been accepted in a headset.
+but do not save the preference. The wearer reports that pointer clicks work,
+while normal-priority controller actions become unavailable in system laser
+mode, including when this preference is enabled. Experimental-priority
+coexistence remains unverified.
 
 ### Hardware-free UI checks
 
@@ -199,9 +231,9 @@ action explicitly begins on down and ends on up. On tracking-pose invalidity,
 action inactivity or overlay focus loss, a held capture emits Cancel, and
 reconnection requires a neutral observation before any new press. PTT and left
 Enter require an enabled panel; clickable Record remains available for retry
-after an error and Cancel is always available. The action set has normal priority: global input
-while a scene is active is not guaranteed, and experimental overlay overrides
-are not switched on automatically.
+after an error and Cancel is always available. The action set defaults to normal
+priority; the experimental config request is described above. Neither priority
+guarantees delivery while a game or dashboard owns input.
 
 The UI cannot itself guarantee a capture started when a BeginRecord action
 arrives: the owning runtime checks worker readiness. `Cancel` invalidates

@@ -22,6 +22,7 @@ VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
 DIGEST_RE = re.compile(r"[a-fA-F0-9]{64}\Z")
 CONFIG_DEFAULTS = {
     "font": "",
+    "input_priority": "normal",
     "theme": {"background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
               "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
               "frame_start": "#1fff91", "frame_end": "#1f70ff"},
@@ -76,6 +77,8 @@ def normalized_config(data):
     if not isinstance(data, dict):
         data = {}
     fixed = {"font": data.get("font") if isinstance(data.get("font"), str) else ""}
+    priority = data.get("input_priority", "normal")
+    fixed["input_priority"] = priority if priority in ("normal", "experimental") else "normal"
     for section in ("theme", "buttons"):
         source = data.get(section)
         source = source if isinstance(source, dict) else {}

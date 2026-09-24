@@ -27,10 +27,24 @@ int main(int argc, char** argv) {
     assert(default_config_path().empty());
     ::setenv("XDG_CONFIG_HOME", dir.c_str(), 1);
     assert(load_config(path).buttons.empty());
+    assert(!load_config(path).experimental_input_priority);
     auto example = load_config(std::filesystem::path(argv[1]) / "config.example.json");
     assert(example.buttons.at("ptt") == "/user/hand/right/input/x");
     assert(example.font.empty());
+    assert(!example.experimental_input_priority);
     std::filesystem::create_directories(path.parent_path());
+    put(path, R"({"input_priority":"experimental"})");
+    auto experimental = load_config(path);
+    assert(experimental.experimental_input_priority);
+    // A priority request must preserve the user's existing action manifest/bindings.
+    assert(action_manifest(argv[1], experimental) == std::filesystem::absolute(std::filesystem::path(argv[1]) / "actions.json"));
+    put(path, R"({"input_priority":"normal"})");
+    assert(!load_config(path).experimental_input_priority);
+    for (const auto* invalid : {R"({"input_priority":true})", R"({"input_priority":16777216})",
+                               R"({"input_priority":"highest"})", R"({"input_priority":null})"}) {
+        put(path, invalid);
+        fails([&] { load_config(path); });
+    }
     put(path, R"({"theme":{"background":"#123ABC","accent":"#abcdef","frame_end":"#010203"},"font":"/nonexistent/face.ttf","buttons":{"ptt":"/user/hand/left/input/y","cancel":"/user/hand/right/input/b","right_grip":""}})");
     auto config = load_config(path);
     assert((config.theme.background == Rgba{0x12, 0x3a, 0xbc, 255}));

@@ -34,6 +34,7 @@ void configure_registry() {
         ::setenv("VR_PATHREG_OVERRIDE", registry.c_str(), 0);
 }
 constexpr int W = PanelSurface::width, H = PanelSurface::height;
+constexpr std::array<const char*, 6> action_names{{"left_grip", "right_grip", "ptt", "cancel", "insert", "enter"}};
 void overlay_check(vr::EVROverlayError err, vr::IVROverlay* api, const char* op) {
     if (err != vr::VROverlayError_None)
         throw std::runtime_error(std::string(op) + ": " + api->GetOverlayErrorNameFromEnum(err));
@@ -136,15 +137,13 @@ struct Overlay::Impl {
                 throw std::runtime_error("Could not set OpenVR action manifest path");
             if (input->GetActionSetHandle("/actions/frameyap", &action_set) != vr::VRInputError_None)
                 throw std::runtime_error("Could not find FrameYap action set");
-            constexpr std::array<const char*, 6> names{{"left_grip", "right_grip", "ptt", "cancel", "insert", "enter"}};
-            for (size_t i = 0; i < names.size(); ++i)
-                if (input->GetActionHandle((std::string("/actions/frameyap/in/") + names[i]).c_str(), &actions[i]) != vr::VRInputError_None)
-                    throw std::runtime_error(std::string("Could not find action ") + names[i]);
+            for (size_t i = 0; i < action_names.size(); ++i)
+                if (input->GetActionHandle((std::string("/actions/frameyap/in/") + action_names[i]).c_str(), &actions[i]) != vr::VRInputError_None)
+                    throw std::runtime_error(std::string("Could not find action ") + action_names[i]);
             overlay_check(overlay->CreateOverlay("local.frameyap.overlay.panel", "FrameYap", &handle), overlay, "CreateOverlay");
             overlay_check(overlay->SetOverlayWidthInMeters(handle, 0.85f), overlay, "SetOverlayWidthInMeters");
             overlay_check(overlay->SetOverlayInputMethod(handle, vr::VROverlayInputMethod_Mouse), overlay, "SetOverlayInputMethod");
-            // Normal priority actions stay unchanged. This separate, explicit
-            // preference requests system-wide laser mouse mode only while the
+            // This separate preference requests system-wide laser mouse mode only while the
             // panel is visible; it may affect interaction with a running game.
             if (lasers_anytime && overlay->SetOverlayFlag(handle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true) != vr::VROverlayError_None) {
                 lasers_anytime = false;
@@ -157,6 +156,7 @@ struct Overlay::Impl {
             system->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses.data(), uint32_t(poses.size()));
             place();
             draw(Panel{"Disabled", "", "Record to start local worker", false, false});
+            std::cout << input_mode_status() << std::endl;
         } catch (...) { cleanup(); throw; }
     }
     ~Impl() { cleanup(); }
@@ -249,6 +249,28 @@ struct Overlay::Impl {
         if (lost_grip || lost_ptt) result.push_back(UiAction::Cancel);
         for (size_t i = 1; i < edges.size(); ++i) edges[i].reset();
         surface.reset_pointers();
+    }
+    int32_t action_priority() const {
+        return config.experimental_input_priority ? vr::k_nActionSetOverlayGlobalPriorityMin : 0;
+    }
+    std::string input_mode_status() const {
+        // Read the runtime permission separately: requesting a priority does not
+        // enable SteamVR's global setting or prove delivery of controller input.
+        vr::EVRSettingsError settings_error = vr::VRSettingsError_None;
+        auto* settings = vr::VRSettings();
+        const bool allowed = settings && settings->GetBool(vr::k_pch_SteamVR_Section,
+            vr::k_pch_SteamVR_AllowGlobalActionSetPriority, &settings_error);
+        const char* permission = !settings || settings_error != vr::VRSettingsError_None ? "unavailable" :
+                                 allowed ? "enabled" : "disabled";
+        bool laser_flag = false;
+        const auto laser_error = overlay->GetOverlayFlag(handle,
+            vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, &laser_flag);
+        return std::string("Input priority-request=") + (config.experimental_input_priority ? "experimental" : "normal") +
+            " (" + std::to_string(action_priority()) + ") SteamVR-global-input=" + permission +
+            "\nMode dashboard=" + (overlay->IsDashboardVisible() ? "Y" : "N") +
+            " lasers-anytime=" + (laser_error == vr::VROverlayError_None ? (laser_flag ? "Y" : "N") : "n/a") +
+            " system-input-available=" + (system->IsInputAvailable() ? "Y" : "N") +
+            " panel-shown=" + (shown ? "Y" : "N") + " focus-gate=" + (focus ? "Y" : "N");
     }
     // Bound actions are accepted only with a connected tracked source. A held input
     // following loss of activity must return to neutral before generating an edge.
@@ -350,7 +372,10 @@ struct Overlay::Impl {
         vr::VRActiveActionSet_t set{};
         set.ulActionSet = action_set;
         set.ulRestrictedToDevice = vr::k_ulInvalidInputValueHandle;
-        set.nPriority = 0; // normal priority; no experimental scene-input overrides
+        // Explicit opt-in affects only sources bound to our existing action set.
+        // Keep requesting it across dashboard/laser states: those are what the
+        // experiment compares. SteamVR's separate permission gate is never changed here.
+        set.nPriority = action_priority();
         action_update_error = input->UpdateActionState(&set, sizeof(set), 1);
         if (action_update_error != vr::VRInputError_None) {
             reset_input(result); return result;
@@ -392,42 +417,19 @@ Overlay::~Overlay() = default;
 std::vector<UiAction> Overlay::poll() { return impl_->poll(); }
 void Overlay::draw(const Panel& panel) { impl_->draw(panel); }
 std::string Overlay::controls_status() {
-    // Diagnostic only: distinguish SteamVR binding/activity from our stricter
-    // pose/role gate. Raw legacy state is read-only and may be unavailable.
-    bool laser_flag = false;
-    const auto laser_error = impl_->overlay->GetOverlayFlag(impl_->handle,
-        vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, &laser_flag);
-    std::string result = "SteamVR update=" + std::to_string(int(impl_->action_update_error)) +
-        " dashboard=" + (impl_->overlay->IsDashboardVisible() ? "Y" : "N") +
-        " lasers-anytime=" + (laser_error == vr::VROverlayError_None ? (laser_flag ? "Y" : "N") : "n/a");
-    for (size_t i = 0; i < 2; ++i) {
-        const auto role = i == 0 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand;
-        const auto device = impl_->system->GetTrackedDeviceIndexForControllerRole(role);
-        const bool tracked = device < impl_->poses.size() && impl_->poses[device].bPoseIsValid &&
-                             impl_->system->IsTrackedDeviceConnected(device);
+    // Compare the same actions across modes, before and after our pose/role gate.
+    // IsInputAvailable and a successful UpdateActionState are not delivery proof.
+    std::string result = impl_->input_mode_status() +
+        " update=" + std::to_string(int(impl_->action_update_error));
+    for (size_t i = 0; i < action_names.size(); ++i) {
         vr::InputDigitalActionData_t data{};
         const auto error = impl_->input->GetDigitalActionData(impl_->actions[i], &data, sizeof(data), vr::k_ulInvalidInputValueHandle);
-        vr::InputOriginInfo_t origin{};
-        const bool origin_ok = error == vr::VRInputError_None && data.activeOrigin != vr::k_ulInvalidInputValueHandle &&
-            impl_->input->GetOriginTrackedDeviceInfo(data.activeOrigin, &origin, sizeof(origin)) == vr::VRInputError_None &&
-            origin.trackedDeviceIndex == device;
-        vr::VRControllerState_t raw{};
-        const bool raw_ok = device < impl_->poses.size() && impl_->system->GetControllerState(device, &raw, sizeof(raw));
-        result += std::string(i == 0 ? "\nLeft:" : "\nRight:") +
+        const auto [accepted, down] = impl_->digital(i);
+        result += std::string("\nAction ") + action_names[i] +
             " err=" + std::to_string(int(error)) + " active=" + (data.bActive ? "Y" : "N") +
-            " down=" + (data.bState ? "Y" : "N") + " pose=" + (tracked ? "Y" : "N") +
-            " origin=" + (origin_ok ? "Y" : "N") +
-            " raw=" + (raw_ok ? ((raw.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_Grip)) ? "down" : "up") : "n/a");
+            " down=" + (data.bState ? "Y" : "N") +
+            " pose-role-accepted=" + (accepted ? "Y" : "N") + " gated-down=" + (down ? "Y" : "N");
     }
-    // The default Frame binding maps right X to the named hold-to-talk action.
-    // Report the action's own activity separately from the stricter pose gate;
-    // remapped bindings may intentionally have a different origin.
-    vr::InputDigitalActionData_t ptt{};
-    const auto ptt_error = impl_->input->GetDigitalActionData(impl_->actions[2], &ptt, sizeof(ptt), vr::k_ulInvalidInputValueHandle);
-    const auto [accepted, down] = impl_->digital(2);
-    result += "\nPTT (default right X): err=" + std::to_string(int(ptt_error)) +
-              " active=" + (ptt.bActive ? "Y" : "N") + " down=" + (ptt.bState ? "Y" : "N") +
-              " accepted=" + (accepted ? "Y" : "N") + " gated-down=" + (down ? "Y" : "N");
     return result;
 }
 std::string Overlay::pointer_status() const {

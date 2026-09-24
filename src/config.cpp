@@ -173,6 +173,10 @@ Config load_config(const std::filesystem::path& path) {
         if (key == "font") {
             if (!value.is_string) throw std::runtime_error("Config font must be a path string");
             config.font = value.value;
+        } else if (key == "input_priority") {
+            if (!value.is_string || (value.value != "normal" && value.value != "experimental"))
+                throw std::runtime_error("Config input_priority must be normal or experimental");
+            config.experimental_input_priority = value.value == "experimental";
         } else if (key == "theme") {
             if (!value.is_object) throw std::runtime_error("Config theme must be an object");
             for (const auto& [name, v] : value.object) {

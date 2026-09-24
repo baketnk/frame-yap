@@ -112,9 +112,11 @@ silently takes a game's button away. Check action activity and neutral rearm.
 
 OpenVR 2.15.6 documents experimental overlay action-set priorities
 `0x01000000..0x01FFFFFF`, gated by SteamVR's **Experimental overlay input overrides**
-setting. This can selectively override scene input, but is not guaranteed enabled
-or usable on this Frame. Do not toggle it automatically. Begin with overlay mic
-controls; validate a global PTT binding separately with a scene active, dashboard
+setting. FrameYap now requests the minimum experimental priority when its config
+has `"input_priority": "experimental"`; the default is `"normal"` (priority zero).
+This can selectively override scene input, but delivered input and dashboard
+coexistence still need testing on Frame. FrameYap only reads the SteamVR permission
+setting and never toggles it automatically. Validate bindings with a scene active, dashboard
 open/closed, lost tracking, and reconnection. Overlay interactivity/input ownership
 is distinct from OS keyboard focus.
 

@@ -34,6 +34,11 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   panel colors, a font path and Frame controller button mappings; missing fonts
   fall back to bundled Inconsolata. The installer creates/checks this file and
   backs it up before repairs. See [overlay configuration](docs/overlay.md#user-theme-and-controller-configuration).
+- **Experimental input priority:** set `"input_priority": "experimental"` in
+  that config and enable SteamVR's Developer option **Enable global input from
+  overlays**. FrameYap then requests priority for its bound controller sources.
+  This may consume controls used by games or the dashboard; coexistence on Frame
+  is under test. The default is `"normal"`; restart FrameYap after changing it.
 - **Review-first:** focus your destination, then press Insert. No automatic insertion
   or submission. Maximum clip 20 seconds; accidental taps under 200 ms are discarded.
 - While the native app is Ready, it keeps the mic device open and discards idle
