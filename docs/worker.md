@@ -26,7 +26,8 @@ are deliberately generic.
 The private pipes use unsigned LE32 payload lengths (1..65536), a one-byte
 message type and, for requests/replies, unsigned LE64 request ID. `T` + ID
 requests reading the fixed clip; `Y` means ready; `F` means load failure
-(optional `M` for missing model, `D` for runtime failure); `R` + ID + UTF-8
+(`M` for missing/mismatched pinned model or private clip directory, `I` for a
+missing Python dependency, `D` for runtime/model load failure); `R` + ID + UTF-8
 text and `E` + ID + generic UTF-8 error are replies. Text is at most 4096
 bytes. An unexpected or duplicate reply, wrong ID, extra frame, closed pipe
 or oversized frame stops the worker. Warmup deadline is 120 s, transcription

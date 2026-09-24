@@ -32,8 +32,9 @@ def fake_child():
     parser.add_argument("--threads", required=True)
     parser.add_argument("--clip-dir", required=True)
     args = parser.parse_args()
-    if args.model == "fail":
-        worker.send_frame(1, b"F")
+    if args.model in ("fail", "missing-model", "missing-import"):
+        worker.send_frame(1, b"F", {"fail": b"", "missing-model": b"M",
+                                      "missing-import": b"I"}[args.model])
         return
     if args.model == "crash":
         return
@@ -106,7 +107,7 @@ class WorkerTests(unittest.TestCase):
 
     def test_missing_weights_no_dependency_import(self):
         with tempfile.TemporaryDirectory() as path:
-            with self.assertRaisesRegex(ValueError, "weights missing"):
+            with self.assertRaisesRegex(worker.LocalModelError, "weights missing"):
                 worker.local_model(path)
             with patch.dict(sys.modules, {"moondream": None}):
                 with self.assertRaises(ValueError):

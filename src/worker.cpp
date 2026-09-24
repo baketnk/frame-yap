@@ -268,8 +268,10 @@ std::optional<WorkerReply> Worker::poll() {
                 }
                 if (type == 'F' && !s.loaded) {
                     if (size == 2 && s.input[5] == 'M')
-                        throw std::runtime_error("worker missing local model weights or private clip directory");
-                    throw std::runtime_error("worker failed to load local CPU model/runtime");
+                        throw std::runtime_error("Missing/mismatched pinned local model weights or private clip directory; check --model");
+                    if (size == 2 && s.input[5] == 'I')
+                        throw std::runtime_error("Authorized Python lacks compatible CPU moondream/torch dependencies; check --python");
+                    throw std::runtime_error("Local Redux model failed to load; check authorized CPU runtime and weights");
                 }
                 if ((type != 'R' && type != 'E') || size < 9 || !s.loaded || !s.pending ||
                     get64(s.input.data() + 5) != *s.pending || size - 9 > max_text)

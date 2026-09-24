@@ -290,6 +290,40 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(probe.stdout.startswith("--check-controls\n--assets\n"))
         self.assertNotIn("--python", probe.stdout)
 
+    def test_external_runtime_paths_config_and_legacy_launcher_migration(self):
+        import shutil
+        shutil.rmtree(self.stage / "runtime")
+        native = self.stage / "bin/frameyap"
+        native.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+        native.chmod(0o755)
+        a, h = self.package("external", "--external-runtime")
+        self.install("external", a, h)
+        root = self.data / "frameyap"
+        launcher = self.home / ".local/bin/frameyap"
+        # A pre-config release launcher may be upgraded only when its exact
+        # bytes match the managed legacy template, not just its marker.
+        launcher.write_bytes(installer.desired_launcher(root, legacy=True))
+        self.install("external", a, h)
+        self.assertEqual(launcher.read_bytes(), installer.desired_launcher(root))
+        config = self.home / ".config/frameyap/paths.conf"
+        config.parent.mkdir(parents=True)
+        config.write_text("# Literal paths, not shell code\npython=/opt/approved python/bin/python3\n"
+                          "model=/opt/$(printf not-executed)/local model\n")
+        run = subprocess.run([str(launcher)], capture_output=True, text=True, check=True)
+        self.assertIn("--python\n/opt/approved python/bin/python3\n"
+                      "--model\n/opt/$(printf not-executed)/local model\n", run.stdout)
+        override = subprocess.run([str(launcher)], capture_output=True, text=True, check=True,
+                                  env={**os.environ, "FRAMEYAP_PYTHON": "/other/python"})
+        self.assertIn("--python\n/other/python\n--model\n/opt/$(printf not-executed)/local model\n", override.stdout)
+        config.unlink()
+        config.symlink_to(self.stage / "model/weights.bin")
+        symlinked = subprocess.run([str(launcher)], capture_output=True, text=True, check=True)
+        self.assertIn(f"--model\n{root}/current/model\n", symlinked.stdout)
+        # A user-modified launcher must remain protected, even with the marker.
+        launcher.write_bytes(installer.desired_launcher(root, legacy=True) + b"# changed\n")
+        with self.assertRaisesRegex(ValueError, "foreign file"):
+            self.install("external", a, h)
+
     def test_package_rejects_symlink(self):
         (self.stage / "lib/link.so").symlink_to("libtest.so")
         result = subprocess.run([sys.executable, str(REPO / "scripts/package-release.py"), "--stage", str(self.stage),
@@ -297,6 +331,15 @@ class InstallTests(unittest.TestCase):
             "--model-revision", "test"], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("links and special files forbidden", result.stderr)
+
+    def test_utc_timestamp_release_tag_roundtrip(self):
+        version = "2026-09-24T162712Z-g417f81c-dirty"
+        archive, digest = self.package(version)
+        self.assertEqual(archive.name, f"frameyap-{version}-linux-aarch64.tar.gz")
+        self.install(version, archive, digest)
+        root = self.data / "frameyap"
+        self.assertEqual(os.readlink(root / "current"), f"versions/{version}")
+        self.assertEqual(json.loads((root / "current/release.json").read_text())["version"], version)
 
 
 if __name__ == "__main__":

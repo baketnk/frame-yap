@@ -189,7 +189,7 @@ def select(root, link, target):
         temp.unlink(missing_ok=True)
 
 
-def desired_launcher(root):
+def desired_launcher(root, legacy=False):
     import shlex
     q = lambda path: shlex.quote(str(path))
     font = root / "current/fonts/font.ttf"
@@ -197,11 +197,29 @@ def desired_launcher(root):
     flags = ["--assets", base / "assets", "--font", font,
              "--worker", base / "python/frameyap/worker.py"]
     args = " ".join(q(item) for item in flags)
+    # Parse two literal absolute paths, never source/eval this user-owned file.
+    # Environment overrides remain useful for a one-off explicit launch.
+    config = ('' if legacy else
+              'CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}/frameyap/paths.conf\n'
+              'CONFIG_PYTHON= CONFIG_MODEL=\n'
+              'if [ -f "$CONFIG" ] && [ ! -L "$CONFIG" ]; then\n'
+              '  while IFS= read -r line || [ -n "$line" ]; do\n'
+              '    case "$line" in\n'
+              '      python=/*) CONFIG_PYTHON=${line#python=};;\n'
+              '      model=/*) CONFIG_MODEL=${line#model=};;\n'
+              '    esac\n'
+              '  done < "$CONFIG"\n'
+              'fi\n')
+    python_default = (q(base / "runtime/bin/python3") if legacy else
+                      '${CONFIG_PYTHON:-' + q(base / "runtime/bin/python3") + '}')
+    model_default = (q(base / "model") if legacy else
+                     '${CONFIG_MODEL:-' + q(base / "model") + '}')
     return ("#!/bin/sh\n" + MARKER + 'export PYTHONDONTWRITEBYTECODE=1\n'
             + f'export FRAMEYAP_INSTALL_ROOT={q(root)}\n'
             + f'export LD_LIBRARY_PATH={q(base / "lib")}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\n'
-            + f'PYTHON=${{FRAMEYAP_PYTHON:-{q(base / "runtime/bin/python3")}}}\n'
-            + f'MODEL=${{FRAMEYAP_MODEL:-{q(base / "model")}}}\n'
+            + config
+            + f'PYTHON=${{FRAMEYAP_PYTHON:-{python_default}}}\n'
+            + f'MODEL=${{FRAMEYAP_MODEL:-{model_default}}}\n'
             + 'if [ "$#" -eq 0 ]; then set -- --run; fi\n'
             + 'case "$1" in\n'
             + '  --run)\n'
@@ -231,21 +249,22 @@ def desired_desktop(launcher):
             f'Exec="{executable}"\nTerminal=false\nCategories=Utility;\n').encode()
 
 
-def check_owned_file(path, expected):
+def check_owned_file(path, expected, alternatives=()):
     if path.is_symlink():
         fail(f"refusing foreign symlink: {path}")
     if path.exists():
         if not path.is_file():
             fail(f"refusing foreign path: {path}")
         data = path.read_bytes()
-        if data != expected:
+        if data != expected and data not in alternatives:
             fail(f"refusing to replace modified/foreign file: {path}")
 
 
 def check_wrappers(root, launcher):
     manifest = root / "frameyap.vrmanifest"
     desired = (json.dumps(desired_manifest(launcher), sort_keys=True, indent=2) + "\n").encode()
-    check_owned_file(launcher, desired_launcher(root))
+    # Accept only the exact earlier managed script for migration.
+    check_owned_file(launcher, desired_launcher(root), (desired_launcher(root, legacy=True),))
     check_owned_file(manifest, desired)
     check_owned_file(desktop_path(root), desired_desktop(launcher))
     return manifest, desired
@@ -376,7 +395,7 @@ def uninstall(root, launcher):
     manifest = root / "frameyap.vrmanifest"
     desired = (json.dumps(desired_manifest(launcher), sort_keys=True, indent=2) + "\n").encode()
     check_owned_file(manifest, desired)
-    check_owned_file(launcher, desired_launcher(root))
+    check_owned_file(launcher, desired_launcher(root), (desired_launcher(root, legacy=True),))
     desktop = desktop_path(root)
     check_owned_file(desktop, desired_desktop(launcher))
     versions = root / "versions"

@@ -25,6 +25,10 @@ except ImportError:  # direct executable script
     from model_files import REVISION, FILES
 
 
+class LocalModelError(ValueError):
+    """Missing, incomplete or wrong pinned local weights (never a download cue)."""
+
+
 def read_exact(fd, count):
     parts = bytearray()
     while len(parts) < count:
@@ -72,17 +76,17 @@ def local_model(path):
     """Require a real local directory with weight file(s), never a hub identifier."""
     root = Path(path)
     if not root.is_absolute() or not root.is_dir() or root.is_symlink():
-        raise ValueError("absolute local model directory required")
+        raise LocalModelError("absolute local model directory required")
     for name, (size, expected) in FILES.items():
         file = root / name
         if not file.is_file() or file.is_symlink() or file.stat().st_size != size:
-            raise ValueError("pinned local Redux model weights missing or incomplete")
+            raise LocalModelError("pinned local Redux model weights missing or incomplete")
         digest = hashlib.sha256()
         with file.open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
         if digest.hexdigest() != expected:
-            raise ValueError("local Redux model does not match pinned revision")
+            raise LocalModelError("local Redux model does not match pinned revision")
     return str(root)
 
 
@@ -170,14 +174,17 @@ def main(argv=None):
     try:
         try:
             private_dir(args.clip_dir)
-            # The full hash validation occurs exactly once in load_model.
-            if not Path(args.model).is_dir():
-                raise ValueError("missing model")
         except Exception:
             send_frame(protocol_fd, b"F", b"M")
             return 1
         try:
             model = load_model(args.model, args.threads)
+        except LocalModelError:
+            send_frame(protocol_fd, b"F", b"M")
+            return 1
+        except ImportError:
+            send_frame(protocol_fd, b"F", b"I")
+            return 1
         except Exception:
             send_frame(protocol_fd, b"F", b"D")
             return 1

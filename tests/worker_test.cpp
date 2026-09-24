@@ -63,6 +63,17 @@ int main(int argc, char** argv) {
             return failed;
         });
         assert(!worker.ready());
+        for (const auto& [mode, message] : std::vector<std::pair<const char*, const char*>>{
+                 {"missing-model", "check --model"}, {"missing-import", "check --python"}}) {
+            worker.start(argv[1], argv[2], mode, 2);
+            failed = false;
+            until([&] {
+                try { worker.poll(); }
+                catch (const std::runtime_error& e) { failed = std::string(e.what()).find(message) != std::string::npos; }
+                return failed;
+            });
+            assert(!worker.ready());
+        }
         worker.start(argv[1], argv[2], "stale", 2);
         until([&] { worker.poll(); return worker.ready(); });
         worker.submit(4, clip);
