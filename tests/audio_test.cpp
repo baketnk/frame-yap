@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -51,6 +52,31 @@ int main() {
         audio.cancel(); assert(current->queued.empty());
         feed(0.9f, 100); audio.start(); feed(0.4f, 3200);
         clip = audio.finish(); assert(clip.size() == 3200 && clip.front() == 0.4f);
+        assert(opens == 1 && closes == 0 && resumes == 1);
+        // Real float capture can exceed full scale. Both poll and finish must
+        // saturate finite peaks without changing ordinary samples or clip size.
+        audio.start();
+        feed(1.01f, 1600); feed(-1.25f, 1600); audio.poll();
+        feed(std::numeric_limits<float>::max(), 1);
+        feed(-std::numeric_limits<float>::max(), 1);
+        feed(1.f, 1); feed(-1.f, 1); feed(.25f, 1); feed(0.f, 1);
+        clip = audio.finish();
+        assert(clip.size() == 3206);
+        assert(std::all_of(clip.begin(), clip.begin() + 1600, [](float x) { return x == 1.f; }));
+        assert(std::all_of(clip.begin() + 1600, clip.begin() + 3200, [](float x) { return x == -1.f; }));
+        assert(clip[3200] == 1.f && clip[3201] == -1.f && clip[3202] == 1.f && clip[3203] == -1.f);
+        assert(clip[3204] == .25f && clip[3205] == 0.f);
+        for (float invalid : {std::numeric_limits<float>::infinity(),
+                              -std::numeric_limits<float>::infinity(),
+                              std::numeric_limits<float>::quiet_NaN()}) {
+            audio.start(); feed(.2f, 3200); feed(invalid, 1);
+            bool rejected = false;
+            try { (void)audio.finish(); } catch (const std::runtime_error&) { rejected = true; }
+            assert(rejected && !audio.recording() && current->queued.empty());
+            audio.start(); feed(.3f, 3200);
+            clip = audio.finish();
+            assert(clip.size() == 3200 && clip.front() == .3f); // no failed clip tail leaks
+        }
         assert(opens == 1 && closes == 0 && resumes == 1);
         removed = true;
         bool failed = false;

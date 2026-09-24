@@ -47,8 +47,13 @@ void Audio::drain() {
         if (bytes % sizeof(float)) throw std::runtime_error("Misaligned microphone samples");
         if (recording_) {
             const auto retain = std::min(std::size_t(bytes) / sizeof(float), 320000 - pcm_.size());
-            for (std::size_t i = 0; i < retain; ++i)
+            for (std::size_t i = 0; i < retain; ++i) {
                 if (!std::isfinite(chunk[i])) throw std::runtime_error("Invalid microphone samples");
+                // Floating-point capture/resampling can exceed full scale. The
+                // ASR API requires normalized PCM; saturate peaks, never scale
+                // the whole clip or silently turn nonfinite input into speech.
+                chunk[i] = std::clamp(chunk[i], -1.0f, 1.0f);
+            }
             pcm_.insert(pcm_.end(), chunk.begin(), chunk.begin() + retain);
         }
         last_data_ = std::chrono::steady_clock::now();

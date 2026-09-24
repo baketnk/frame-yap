@@ -10,7 +10,7 @@ public:
     void prepare(); // open/resume once, while app is ready; never retain idle samples
     void start(); // arm the already-running stream without touching the device
     bool poll(); // drain even while idle; true at 20s limit; throws on loss/stall
-    std::vector<float> finish();
+    std::vector<float> finish(); // finite PCM saturated to [-1, 1] for the ASR API
     void cancel(); // discard current clip, leave the device running
     void close(); // release device on shutdown or capture failure
     bool recording() const { return recording_; }

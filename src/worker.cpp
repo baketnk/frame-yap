@@ -353,7 +353,9 @@ void Worker::submit(uint64_t id, const std::vector<float>& pcm) {
     auto& s = *state_;
     if (!ready() || s.pending) throw std::logic_error("worker not ready or request already pending");
     if (pcm.size() < 3200 || pcm.size() > 320000) throw std::invalid_argument("clip must be 0.2..20 seconds at 16 kHz");
-    for (float value : pcm) if (!std::isfinite(value)) throw std::invalid_argument("nonfinite PCM sample");
+    for (float value : pcm)
+        if (!std::isfinite(value) || value < -1.0f || value > 1.0f)
+            throw std::invalid_argument("PCM samples must be finite and in [-1, 1]");
     const std::string path = s.dir + "/clip.raw";
     int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
     if (fd < 0) throw std::runtime_error("cannot create exclusive private clip");

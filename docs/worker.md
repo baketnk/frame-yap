@@ -15,8 +15,11 @@ cancellation; this component does not implement focus or delivery policy.
 The adapter requires an existing absolute, owner-private `$XDG_RUNTIME_DIR`
 (no symlink at the final component), creates its own 0700 `mkdtemp` directory,
 and writes only `clip.raw` with `O_EXCL|O_NOFOLLOW`, mode 0600. Clips are
-3200..320000 finite float samples, mono 16 kHz, stored as little-endian IEEE
-float32 (0.2..20 s). Files are unlinked after replies or shutdown, and the
+3200..320000 finite float samples in `[-1, 1]`, mono 16 kHz, stored as
+little-endian IEEE float32 (0.2..20 s). The microphone adapter saturates finite
+capture/resampler overshoot to this range without rescaling the rest of the
+clip; NaN/infinity are rejected. `Worker::submit` independently rejects samples
+outside this contract before writing a clip or request. Files are unlinked after replies or shutdown, and the
 private directory is removed. Private clips are not encrypted against the
 account owner/root; do not use an untrusted runtime directory. The caller
 should pass a trusted interpreter and script. By default audio/transcripts are

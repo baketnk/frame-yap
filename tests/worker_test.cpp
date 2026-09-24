@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <functional>
 #include <fstream>
+#include <limits>
 #include <sys/stat.h>
 #include <stdexcept>
 #include <string>
@@ -40,6 +41,15 @@ int main(int argc, char** argv) {
         try { worker.submit(1, std::vector<float>(3199)); }
         catch (const std::invalid_argument&) { rejected = true; }
         assert(rejected);
+        for (float value : {1.01f, -1.01f, std::numeric_limits<float>::infinity(),
+                            std::numeric_limits<float>::quiet_NaN()}) {
+            auto invalid = clip; invalid.back() = value;
+            rejected = false;
+            try { worker.submit(99, invalid); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            assert(rejected && worker.ready()); // rejection happens before clip/IPC mutation
+        }
+        clip.front() = -1.f; clip.back() = 1.f; // full-scale boundaries are valid
         worker.submit(100, clip);
         rejected = false;
         try { worker.submit(101, clip); }
