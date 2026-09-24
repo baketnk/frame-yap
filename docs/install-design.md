@@ -1,8 +1,11 @@
 # Installation and distribution goal
 
 **User goal:** install from GitHub with a `curl … | bash`-style command, without a
-Steam store AppID. This is a requirement for the future release, not a working
-installer. No release artifacts or functional installer are published yet.
+Steam store AppID. An idempotent archive installer and native-only local artifacts
+are now implemented/tested; no public release is published. The full bundled-ASR
+experience remains blocked on runtime permission. This document retains the target
+design; see [current packaging](packaging.md), [POC evidence](evidence/poc-cpu-overlay-2026-09-24.md)
+and [third-party boundary](third-party.md).
 
 The read-only `scripts/install-preflight.sh` checks whether a host appears suitable
 for the **proposed** Linux ARM64 glibc package format and has the expected basic
@@ -18,7 +21,7 @@ be certified until release artifacts are chosen and tested.
 OpenVR overlay applications do not require a Steam store AppID or Steamworks.
 The native executable initializes as `VRApplication_Overlay`. For discoverability
 and optional autolaunch, register an OpenVR application manifest with a stable,
-project-owned **string application key** (proposed: `local.frame-dictation.overlay`).
+project-owned **string application key** (proposed: `local.frameyap.overlay`).
 That key is not a numeric Steam AppID. No purchase/store listing or non-Steam Steam
 library shortcut should be necessary for the normal route.
 
@@ -39,7 +42,7 @@ restarting SteamVR behind the user's back.
 1. Run one documented command from the eventual GitHub repository/release.
 2. Installer identifies native Linux ARM64 Frame, resolves a pinned release and
    explains/downloads the application, compatible CPU runtime and pinned model.
-3. User-local installation provides a simple `frame-dictation` launcher, desktop
+3. User-local installation provides a simple `frameyap` launcher, desktop
    entry where supported, and an OpenVR manifest. No compiler, engine checkout,
    Python dependency troubleshooting or separate ASR server for ordinary users.
 4. The user explicitly launches/enables dictation. No installation-time microphone
@@ -65,8 +68,8 @@ confirmation from stdin while the installer itself is arriving through that pipe
   attribution. A documented `--without-model` option can defer the large download.
   No surprise first-utterance downloads. Licensing may require obtaining particular
   runtime components from their vendor instead of redistributing them in our tarball.
-- Install under `$XDG_DATA_HOME/frame-dictation` (default `~/.local/share/...`),
-  configuration under `$XDG_CONFIG_HOME/frame-dictation`, optional launcher in
+- Install under `$XDG_DATA_HOME/frameyap` (default `~/.local/share/...`),
+  configuration under `$XDG_CONFIG_HOME/frameyap`, optional launcher in
   `~/.local/bin`; transient audio stays in a private `$XDG_RUNTIME_DIR` directory.
 - No sudo, OS read-only-root changes, package-manager installs, udev changes,
   `/dev/uinput` permission changes or modifications to unrelated launchers.

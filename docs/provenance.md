@@ -1,9 +1,10 @@
 # Technical provenance and limits
 
-Frame Dictation is a standalone scaffold and proposal. No external application
-source, build tree, assets, Python environment, model weights or binaries are
-included. The dated [device probe](evidence/frame-dictation-apis-2026-09-24.md)
-records limited historical observations; its fixture code and private logs are
+FrameYap is a standalone native POC. No unrelated application's source, build
+tree, assets or Python environment is included. No model weights or runtime
+binaries are in Git. The included Gamescope XML's provenance and separately
+licensed build inputs are recorded in [third-party notes](third-party.md).
+The dated [device probe](evidence/frameyap-apis-2026-09-24.md) records limited historical observations; its fixture code and private logs are
 not part of this repository. No current device availability or release install
 can be inferred from those observations.
 
@@ -20,7 +21,9 @@ A preliminary, unpublished desktop benchmark used Python 3.12.13, moondream
 median/p95 were 61/137 ms and raw WER 11.11% on just 25 reviewed clips / 189
 words. This is not a general accuracy estimate or Frame latency prediction. The
 CPU-selected desktop process also occupied GPU memory; GPU-free operation was
-not established. No Frame inference benchmark exists yet.
+not established in that earlier desktop trial. A later isolated ARM64 CPU-only
+public-clip trial is recorded in [POC observations](evidence/poc-cpu-overlay-2026-09-24.md);
+it does not establish live-microphone/headset acceptance or distribution permission.
 
 ## Public platform references
 

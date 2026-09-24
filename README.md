@@ -1,53 +1,84 @@
-# Frame Dictation
+# FrameYap
 
-Standalone, on-device voice typing for Steam Frame.
+Standalone, on-device voice typing POC for Steam Frame. **MIT licensed.**
 
-**Status: project scaffold and design only.** The executable prints help/version;
-it does not yet render an overlay, open a microphone, load a model or type text.
+Implemented: native OpenVR overlay, remappable grip controls, bounded SDL3 capture,
+persistent local Parakeet Redux worker, preview/explicit insertion through Gamescope,
+and an idempotent user-local installer. No Steam store AppID, sudo, desktop ASR
+server, cloud fallback or unrelated application dependency.
 
-Planned path: **OpenVR overlay → local Parakeet Redux CPU inference → Gamescope
-Unicode input**. No external application checkout, library, submodule, desktop
-inference server or running scene host is required.
+**Status:** native ARM64 build, CPU inference on a public clip, overlay visibility,
+Gamescope discovery and native-only installation have been exercised on Frame.
+Live microphone → reviewed text → real target delivery is **not yet accepted**.
 
-**Distribution goal:** one-command installation from GitHub releases, entirely
-user-local, with no Steam store AppID. See the [installer design](docs/install-design.md).
-There is no working installer or published release yet.
+**Runtime licensing remains unresolved.** Redux weights are CC-BY-4.0, but the
+observed Kestrel kernel runtime requires separate permission. We are checking with
+the vendor. Current native-only packages do **not** bundle or download that
+runtime; an independently authorized Python environment must be supplied.
+See [third-party notes](docs/third-party.md). No GitHub release is published yet.
 
-For a read-only check of proposed release prerequisites on a Frame, run
-`sh scripts/install-preflight.sh`. It checks Linux AArch64/glibc and bootstrap
-tools, reports system Python (3.12+ for a possible source worker), Git and uv.
-Git and uv are not required for the planned bundled release. This check downloads
-and installs nothing; passing it does **not** mean an install or dictation works.
+## Controls
 
-## Build the scaffold
+- **Right grip:** short tap, then hold the second squeeze to record; release to
+  transcribe. Remappable through SteamVR bindings; separate hold-to-talk action too.
+- **Left grip:** double-tap to explicitly send Enter. Never inferred from speech.
+- **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
+  Dashboard lasers provide clickable controls without forcing global laser mode.
+- **Review-first:** focus your destination, then press Insert. No automatic insertion
+  or submission. Maximum clip 20 seconds; accidental taps under 200 ms are discarded.
+- Other apps may still hear/transmit your voice. FrameYap does not mute them.
 
-Requirements: CMake 3.20+ and a C++20 compiler. No third-party packages or downloads.
+Physical gesture timing, global bindings during games, mic capture, target-app
+compatibility and headset comfort still need coordinated validation. Successful
+API initialization is not delivered input or human acceptance.
+
+## Build and test offline
+
+CMake 3.20+, C++20 compiler. Python 3.10+ runs the additional hardware-free tests.
 
 ```sh
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
-./build/frame-dictation --help
+./build/frameyap --help
 ```
 
-This is a host-native scaffold build, not an ARM64 deployment or headset test.
-Future OpenVR, audio and inference integrations must be explicitly configured;
-configuration/build/tests must never install packages or launch SteamVR implicitly.
+Default build has no hardware backends. It never downloads packages/models or
+initializes SteamVR, a microphone or input injection. Native dependencies and
+explicit launch/check commands are documented in [the POC guide](docs/poc.md).
+
+## Installation
+
+The real installer accepts a versioned, checksummed prebuilt ARM64 archive:
+
+```sh
+sh install.sh --archive /path/to/frameyap-VERSION-linux-aarch64.tar.gz \
+  --sha256 ARCHIVE_SHA256 --version VERSION
+```
+
+This is the **local-artifact command shape**, not an available public download.
+Installation is user-local, retains rollback, refuses active-app upgrades and
+foreign files, and does not launch or register automatically. Registration uses
+OpenVR application key `local.frameyap.overlay`, not a Steam store AppID.
+Autolaunch is opt-in. See [packaging and lifecycle](docs/packaging.md).
+
+A pinned GitHub one-command route is implemented in `install.sh --version TAG`,
+but **do not advertise or run it as a working public installation until a vetted
+release exists**. Native-only artifacts support the overlay/checks without an
+end-user compiler; full bundled-ASR distribution awaits runtime permission.
 
 ## Project map
 
-- [Design](docs/design.md): UI, local inference, input backend and acceptance gates.
-- [Frame API evidence](docs/evidence/frame-dictation-apis-2026-09-24.md): successful
-  mixed-script Unicode test and overlay-client initialization; known limits.
-- [Installer design](docs/install-design.md): GitHub install, standalone OpenVR
-  identity, packaging, upgrades and uninstall.
-- [Provenance](docs/provenance.md): origin of the investigation, model/runtime pins.
-- `src/main.cpp`: inert CLI entry point.
-- `tests/cli.cmake`: hardware-free scaffold smoke test.
-- `scripts/install-preflight.sh`: read-only proposed packaging prerequisite check.
-- [Agent guidance](AGENTS.md): project boundaries and safe validation.
+- [POC guide](docs/poc.md): implemented boundaries, build, controls, explicit tests.
+- [Design](docs/design.md): full target design; some features remain proposed.
+- [Installer design](docs/install-design.md) and [packaging](docs/packaging.md).
+- [Current POC observations](docs/evidence/poc-cpu-overlay-2026-09-24.md): measured
+  CPU behavior and native installation checks, with acceptance limits.
+- [Earlier API evidence](docs/evidence/frameyap-apis-2026-09-24.md) and
+  [provenance](docs/provenance.md): historical investigation, not live authority.
+- [Overlay](docs/overlay.md), [worker protocol](docs/worker.md),
+  [dependency/license inventory](docs/third-party.md).
 
-First implementation gate: an isolated ARM64 CPU trial of the pinned Redux model.
-Then a minimal overlay and explicit insertion into a disposable target. Neither
-inference nor an overlay is implemented here yet. No model weights, recordings,
-credentials, engine assets or runtime binaries are included.
+No recordings, transcripts, private logs, model weights or runtime binaries are
+committed. The worker boundary is intentionally small for forks experimenting
+with other models/APIs; the default remains local-only Redux.

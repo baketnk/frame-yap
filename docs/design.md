@@ -1,8 +1,13 @@
-# Native Frame dictation overlay — proposal
+# FrameYap native dictation overlay — proposal
 
 Standalone project design; see
-[provenance](provenance.md) and [historical Frame probes](evidence/frame-dictation-apis-2026-09-24.md).
-Only the inert build scaffold is implemented. This document describes proposed runtime behavior.
+[provenance](provenance.md) and [historical Frame probes](evidence/frameyap-apis-2026-09-24.md).
+This document is the full target design, not a blanket implementation claim.
+The native POC now implements overlay/actions, bounded SDL3 capture, a persistent
+Redux adapter, review-first Gamescope insertion and a user-local archive installer.
+Quick typing/focus-generation tracking, polished status-chip UX and full hardware
+acceptance remain proposed. See [current scope](poc.md), [device observations](evidence/poc-cpu-overlay-2026-09-24.md)
+and [runtime licensing boundary](third-party.md).
 
 ## Recommendation
 
@@ -52,7 +57,10 @@ Recording…  00:04           [ Cancel ]
 
 - States: disabled, warming, ready, recording, transcribing, review, inserted,
   unavailable/error. Recording uses visible icon + text, not color alone.
-- Hold to speak, release to finish. A click-to-start/stop overlay button provides
+- Default POC binding: tap right grip briefly, then hold the second squeeze to
+  speak; release to finish. Double-tap left grip is a separate explicit Enter.
+  Both are remappable, with a separate named hold-to-talk action available.
+  A click-to-start/stop overlay button provides
   a binding-independent alternative. Bound recording to 20 seconds; discard
   accidental taps (initial threshold: 200 ms).
 - **Quick typing:** insert on completion only when the explicitly armed target
@@ -67,7 +75,7 @@ Recording…  00:04           [ Cancel ]
 
 ## Host and rendering boundary
 
-Implement the standalone `frame-dictation` executable, initialized
+Implement the standalone `frameyap` executable, initialized
 with `VRApplication_Overlay`. Frame accepted that application type and
 `IVROverlay_028` in the probe. Use `CreateOverlay`, tracked-device-relative
 transform, `ShowOverlay`/`HideOverlay`, and `PollNextOverlayEvent` for the panel.
@@ -213,7 +221,7 @@ Suggested ownership, introduced only as implementation needs it:
 - `src/audio.*`: explicit SDL capture and bounded mono PCM.
 - `src/worker.*`: one local child process, bounded requests/replies, timeout/reaping.
 - `src/text_input.*`: Gamescope protocol, focus observation and delivery policy.
-- `python/frame_dictation/`: persistent CPU Redux worker, no external application imports.
+- `python/frameyap/`: persistent CPU Redux worker, no external application imports.
 
 The worker reads a fixed private clip and returns an ID-correlated literal string;
 one request at a time, 64 KiB framed messages, 4096-byte transcript, and a bounded
@@ -280,10 +288,11 @@ without moving recognition off Frame. It is not part of this initial design.
 
 ## Standalone dependency and test policy
 
-The scaffold currently needs only CMake and a C++20 compiler. Later integrations
-will explicitly select OpenVR, SDL3, Wayland client/protocol bindings and a Python
-Redux environment. Pin revisions and review licenses when introduced. No automatic
-fetch/install in configure or normal tests; no external checkout discovery.
+The default hardware-free build needs only CMake and a C++20 compiler (Python
+runs additional offline tests). `FRAMEYAP_NATIVE=ON` explicitly selects OpenVR,
+SDL3, FreeType and Wayland client/generated protocol bindings. A separately
+authorized Python Redux environment is explicitly supplied at launch. Pin revisions
+and review licenses when introduced. No automatic fetch/install in configure or normal tests; no external checkout discovery.
 
 Hardware-free tests should cover state transitions, bounded PCM/transcripts,
 worker framing/timeout/cancellation, duplicate/stale replies and focus generations
