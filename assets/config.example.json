@@ -1,6 +1,7 @@
 {
   "font": "",
   "input_priority": "normal",
+  "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
   "theme": {
     "background": "#0c101b",
     "card": "#141c2b",

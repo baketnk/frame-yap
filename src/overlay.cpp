@@ -215,13 +215,13 @@ struct Overlay::Impl {
                 overlay_check(overlay->SetOverlayTransformAbsolute(handle, vr::TrackingUniverseStanding, &world_transform), overlay,
                               "SetOverlayTransformAbsolute");
             } else {
-                const auto pose = relative_mount_pose(effective);
+                const auto pose = relative_mount_pose(effective, config.wrist);
                 vr::HmdMatrix34_t transform{};
                 for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = pose[r][c];
                 overlay_check(overlay->SetOverlayTransformTrackedDeviceRelative(handle, target, &transform), overlay,
                               "SetOverlayTransformTrackedDeviceRelative");
             }
-            overlay_check(overlay->SetOverlayWidthInMeters(handle, mount_width(effective)), overlay, "SetOverlayWidthInMeters");
+            overlay_check(overlay->SetOverlayWidthInMeters(handle, mount_width(effective, config.wrist)), overlay, "SetOverlayWidthInMeters");
             applied_mount = effective;
             anchor = target;
         }

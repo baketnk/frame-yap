@@ -74,6 +74,7 @@ installer creates one with defaults on first install. Copy the shipped
 {
   "font": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
   "input_priority": "normal",
+  "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
   "theme": {
     "background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
     "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
@@ -142,8 +143,22 @@ rather than placing a menu at the world origin. A tracking-origin reset requests
 a fresh placement. Settings → Recenter in front deliberately resamples the pose.
 
 Settings offers World space, Left wrist, Right wrist and Head on that same canvas.
-World/head width is 0.85 m; wrist width is 0.42 m with mirrored controller-relative
-offsets. A missing/untracked selected wrist temporarily falls back to world space,
+World/head width is 0.85 m; wrist width defaults to 0.30 m. Both wrists use
+VR Workspace's fallback watch-face axes: panel-right points toward the fingers
+(controller -Z), panel-up points out of the back of the hand (controller +Y),
+and panel-front points toward controller +X. Its controller-relative center is
+(0, 0.18, 0.089) m, approximating the compact HUD's surface center: its
+0.12 m wrist lift, 0.09 m bottom anchor and ~0.03 m panel-center correction;
+Z combines the fallback 0.054 m wrist calibration and 0.035 m finger-back offset. This copies placement geometry, not
+VR Workspace's avatar-dependent wrist calibration or its head-facing fade.
+
+To tune the selected wrist, set `wrist` in `config.json` as in the example above:
+`x`, `y`, `z` are controller-local meters (each -0.3 to 0.3), `width` is panel
+width in meters (0.15 to 0.6), and `roll_degrees` rotates about controller -Z
+(-180 to 180) before applying the offset. These settings apply to both wrists,
+are read at startup, and do not alter world/head placement. Invalid values
+fail direct native startup; the installer backs up and repairs invalid entries.
+A missing/untracked selected wrist temporarily falls back to world space,
 with a visible explanation in Settings, then reattaches when tracking returns.
 The saved preference is not replaced by the fallback. These offsets and sizes are
 initial choices, **not headset-comfort acceptance**.

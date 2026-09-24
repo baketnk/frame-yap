@@ -28,10 +28,12 @@ int main(int argc, char** argv) {
     ::setenv("XDG_CONFIG_HOME", dir.c_str(), 1);
     assert(load_config(path).buttons.empty());
     assert(!load_config(path).experimental_input_priority);
+    assert(load_config(path).wrist.width == .30f);
     auto example = load_config(std::filesystem::path(argv[1]) / "config.example.json");
     assert(example.buttons.at("ptt") == "/user/hand/right/input/x");
     assert(example.font.empty());
     assert(!example.experimental_input_priority);
+    assert(example.wrist.y == .18f && example.wrist.z == .089f);
     std::filesystem::create_directories(path.parent_path());
     put(path, R"({"input_priority":"experimental"})");
     auto experimental = load_config(path);
@@ -44,6 +46,16 @@ int main(int argc, char** argv) {
                                R"({"input_priority":"highest"})", R"({"input_priority":null})"}) {
         put(path, invalid);
         fails([&] { load_config(path); });
+    }
+    put(path, R"({"wrist":{"x":-0.02,"y":0.15,"z":0.1,"width":0.35,"roll_degrees":-35}})");
+    auto tuned = load_config(path).wrist;
+    assert(tuned.x == -.02f && tuned.y == .15f && tuned.z == .1f);
+    assert(tuned.width == .35f && tuned.roll_degrees == -35.f);
+    for (const auto* invalid : {R"({"wrist":{"width":0}})", R"({"wrist":{"x":true}})",
+                               R"({"wrist":{"z":"0.1"}})", R"({"wrist":{"roll_degrees":181}})",
+                               R"({"wrist":{"extra":1}})", R"({"wrist":null})",
+                               R"({"wrist":{"x":1e999}})"}) {
+        put(path, invalid); fails([&] { load_config(path); });
     }
     put(path, R"({"theme":{"background":"#123ABC","accent":"#abcdef","frame_end":"#010203"},"font":"/nonexistent/face.ttf","buttons":{"ptt":"/user/hand/left/input/y","cancel":"/user/hand/right/input/b","right_grip":""}})");
     auto config = load_config(path);

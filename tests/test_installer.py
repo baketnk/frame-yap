@@ -125,16 +125,18 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["theme"]["card"], installer.CONFIG_DEFAULTS["theme"]["card"])
         self.assertEqual(fixed["buttons"]["cancel"], "")
         self.assertEqual(fixed["input_priority"], "normal")
+        self.assertEqual(fixed["wrist"], installer.CONFIG_DEFAULTS["wrist"])
         backups = list(config.parent.glob("config.json.backup-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), original)
         fixed["input_priority"] = "experimental"
+        fixed["wrist"]["y"] = 0.2
         compact = json.dumps(fixed, separators=(",", ":")).encode()
         config.write_bytes(compact)
         self.install("v1", archive, digest)
         self.assertEqual(config.read_bytes(), compact)
         self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), 1)
-        original = b'{"font":"/system/face.ttf","input_priority":"highest","theme":{"ink":"bad","retired":"#123456"},"buttons":{"ptt":"/user/hand/left/input/grip"},"old_option":4}'
+        original = b'{"font":"/system/face.ttf","input_priority":"highest","wrist":{"x":0.04,"y":true,"width":100,"obsolete":4},"theme":{"ink":"bad","retired":"#123456"},"buttons":{"ptt":"/user/hand/left/input/grip"},"old_option":4}'
         config.write_bytes(original)
         self.install("v1", archive, digest)
         fixed = json.loads(config.read_text())
@@ -142,6 +144,10 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["theme"]["ink"], installer.CONFIG_DEFAULTS["theme"]["ink"])
         self.assertEqual(fixed["buttons"], installer.CONFIG_DEFAULTS["buttons"])  # colliding paths reset
         self.assertEqual(fixed["input_priority"], "normal")
+        self.assertEqual(fixed["wrist"]["x"], 0.04)
+        self.assertEqual(fixed["wrist"]["y"], 0.18)
+        self.assertEqual(fixed["wrist"]["width"], 0.30)
+        self.assertNotIn("obsolete", fixed["wrist"])
         self.assertNotIn("old_option", fixed)
         self.assertEqual(sorted(p.read_bytes() for p in config.parent.glob("config.json.backup-*")), sorted([backups[0].read_bytes(), original]))
         original = b'{"font":"one","font":"two"'

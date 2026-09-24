@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <stdexcept>
@@ -12,7 +13,7 @@ namespace {
 struct Json {
     std::string value;
     std::map<std::string, Json> object;
-    bool is_string = false, is_object = false;
+    bool is_string = false, is_object = false, is_number = false;
 };
 struct Parser {
     std::string_view s;
@@ -104,6 +105,10 @@ struct Parser {
             }
         }
         if (pos == start) fail();
+        if (s[start] == '-' || (s[start] >= '0' && s[start] <= '9')) {
+            result.is_number = true;
+            result.value = s.substr(start, pos - start);
+        }
         return result;
     }
 };
@@ -123,6 +128,13 @@ Rgba color(const Json& json) {
         c[i] = static_cast<unsigned char>(hi * 16 + lo);
     }
     return c;
+}
+float bounded_number(const Json& json, std::string_view name, float lower, float upper) {
+    if (!json.is_number) throw std::runtime_error("Config wrist " + std::string(name) + " must be a number");
+    const float value = std::strtof(json.value.c_str(), nullptr);
+    if (!std::isfinite(value) || value < lower || value > upper)
+        throw std::runtime_error("Config wrist " + std::string(name) + " out of range");
+    return value;
 }
 std::filesystem::path xdg_root(const char* variable, const char* fallback) {
     const char* env = std::getenv(variable);
@@ -177,6 +189,16 @@ Config load_config(const std::filesystem::path& path) {
             if (!value.is_string || (value.value != "normal" && value.value != "experimental"))
                 throw std::runtime_error("Config input_priority must be normal or experimental");
             config.experimental_input_priority = value.value == "experimental";
+        } else if (key == "wrist") {
+            if (!value.is_object) throw std::runtime_error("Config wrist must be an object");
+            for (const auto& [name, v] : value.object) {
+                if (name == "x") config.wrist.x = bounded_number(v, name, -.3f, .3f);
+                else if (name == "y") config.wrist.y = bounded_number(v, name, -.3f, .3f);
+                else if (name == "z") config.wrist.z = bounded_number(v, name, -.3f, .3f);
+                else if (name == "width") config.wrist.width = bounded_number(v, name, .15f, .6f);
+                else if (name == "roll_degrees") config.wrist.roll_degrees = bounded_number(v, name, -180.f, 180.f);
+                else throw std::runtime_error("Unknown wrist placement key: " + name);
+            }
         } else if (key == "theme") {
             if (!value.is_object) throw std::runtime_error("Config theme must be an object");
             for (const auto& [name, v] : value.object) {
