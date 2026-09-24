@@ -1,9 +1,8 @@
 #include "overlay.hpp"
 #include "gestures.hpp"
+#include "panel_surface.hpp"
 
 #include <openvr.h>
-#include <ft2build.h>
-#include FT_FREETYPE_H
 
 #include <algorithm>
 #include <array>
@@ -31,19 +30,7 @@ void configure_registry() {
     if (root.is_absolute() && std::filesystem::is_regular_file(registry))
         ::setenv("VR_PATHREG_OVERRIDE", registry.c_str(), 0);
 }
-constexpr int W = 900, H = 500;
-struct Rect { int x, y, w, h; bool contains(int px, int py) const {
-    return px >= x && px < x + w && py >= y && py < y + h;
-} };
-struct Button { Rect bounds; const char* label; UiAction action; };
-constexpr std::array<Button, 6> buttons{{
-    {{24, 422, 130, 58}, "Prev", UiAction::Toggle}, // handled as page navigation, not a toggle
-    {{168, 422, 130, 58}, "Record", UiAction::Record},
-    {{312, 422, 130, 58}, "Cancel", UiAction::Cancel},
-    {{456, 422, 130, 58}, "Insert", UiAction::Insert},
-    {{600, 422, 130, 58}, "Enter", UiAction::Enter},
-    {{744, 422, 130, 58}, "Quit", UiAction::Quit},
-}};
+constexpr int W = PanelSurface::width, H = PanelSurface::height;
 void overlay_check(vr::EVROverlayError err, vr::IVROverlay* api, const char* op) {
     if (err != vr::VROverlayError_None)
         throw std::runtime_error(std::string(op) + ": " + api->GetOverlayErrorNameFromEnum(err));
@@ -52,24 +39,6 @@ std::filesystem::path absolute_file(const std::filesystem::path& p) {
     auto result = std::filesystem::absolute(p);
     if (!std::filesystem::is_regular_file(result)) throw std::runtime_error("Missing file: " + result.string());
     return result;
-}
-// A strict, bounded UTF-8 decoder: malformed input is shown as replacement glyphs.
-uint32_t next_codepoint(std::string_view s, size_t& i) {
-    const unsigned char a = static_cast<unsigned char>(s[i++]);
-    if (a < 0x80) return a;
-    int count = a >= 0xc2 && a <= 0xdf ? 1 : a >= 0xe0 && a <= 0xef ? 2 : a >= 0xf0 && a <= 0xf4 ? 3 : 0;
-    if (!count || i + count > s.size()) return 0xfffd;
-    uint32_t value = a & (count == 1 ? 0x1f : count == 2 ? 0x0f : 0x07);
-    for (int k = 0; k < count; ++k) {
-        unsigned char b = static_cast<unsigned char>(s[i + k]);
-        if ((b & 0xc0) != 0x80) return 0xfffd;
-        value = (value << 6) | (b & 0x3f);
-    }
-    if ((count == 1 && value < 0x80) || (count == 2 && value < 0x800) ||
-        (count == 3 && value < 0x10000) || (value >= 0xd800 && value <= 0xdfff) || value > 0x10ffff)
-        return 0xfffd;
-    i += count;
-    return value;
 }
 } // namespace
 
@@ -80,32 +49,29 @@ struct Overlay::Impl {
     vr::VROverlayHandle_t handle = vr::k_ulOverlayHandleInvalid;
     vr::VRActionSetHandle_t action_set = vr::k_ulInvalidActionSetHandle;
     std::array<vr::VRActionHandle_t, 6> actions{};
-    FT_Library library = nullptr;
-    FT_Face face = nullptr;
-    std::vector<unsigned char> pixels = std::vector<unsigned char>(W * H * 4);
+    std::filesystem::path settings_path;
+    Mount mount;
+    PanelSurface surface;
     Panel panel;
-    bool hand = false;
+    bool save_failed = false;
+    bool world_ready = false, placed = false, has_texture = false, shown = false;
+    vr::HmdMatrix34_t world_transform{};
+    std::optional<Mount> applied_mount;
     vr::TrackedDeviceIndex_t anchor = vr::k_unTrackedDeviceIndexInvalid;
     DoubleTap left;
     GripRecord right;
     std::array<NeutralEdge, 4> edges{};
-    std::array<int, 2> pressed_button{{-1, -1}};
     std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> poses{};
-    std::vector<std::string> pages;
-    size_t page = 0;
-    bool drawn = false;
     bool grip_capture = false, ptt_capture = false;
     bool focus = true;
-    static constexpr Rect next_page{754, 292, 112, 30};
 
-    Impl(const std::string& assets, const std::string& font, bool attach) : hand(attach) {
+    Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested)
+        : settings_path(default_mount_settings_path()),
+          mount(requested ? *requested : load_mount(settings_path)),
+          surface(font.empty() ? (std::filesystem::path(assets) / "fonts/Inconsolata-Regular.ttf").string() : font, mount) {
         const auto action_path = absolute_file(std::filesystem::path(assets) / "actions.json");
         absolute_file(std::filesystem::path(assets) / "bindings_knuckles.json");
-        const auto font_path = absolute_file(font);
-        if (FT_Init_FreeType(&library)) throw std::runtime_error("FreeType initialization failed");
         try {
-            if (FT_New_Face(library, font_path.c_str(), 0, &face) || FT_Set_Pixel_Sizes(face, 0, 31))
-                throw std::runtime_error("Could not load specified font");
             configure_registry();
             vr::EVRInitError err = vr::VRInitError_None;
             system = vr::VR_Init(&err, vr::VRApplication_Overlay);
@@ -136,6 +102,7 @@ struct Overlay::Impl {
             overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_VisibleInDashboard, true), overlay, "VisibleInDashboard");
             vr::HmdVector2_t mouse_scale{{float(W), float(H)}};
             overlay_check(overlay->SetOverlayMouseScale(handle, &mouse_scale), overlay, "SetOverlayMouseScale");
+            system->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses.data(), uint32_t(poses.size()));
             place();
             draw(Panel{"Disabled", "", "Record to start local worker", false, false});
         } catch (...) { cleanup(); throw; }
@@ -148,140 +115,71 @@ struct Overlay::Impl {
             handle = vr::k_ulOverlayHandleInvalid;
         }
         if (system) { vr::VR_Shutdown(); system = nullptr; overlay = nullptr; input = nullptr; }
-        if (face) { FT_Done_Face(face); face = nullptr; }
-        if (library) { FT_Done_FreeType(library); library = nullptr; }
+    }
+    void visibility() {
+        const bool wanted = placed && has_texture;
+        if (wanted == shown) return;
+        overlay_check(wanted ? overlay->ShowOverlay(handle) : overlay->HideOverlay(handle), overlay, "Overlay visibility");
+        shown = wanted;
     }
     void place() {
+        Mount effective = mount;
         vr::TrackedDeviceIndex_t target = vr::k_unTrackedDeviceIndex_Hmd;
-        if (hand) {
-            const auto left_index = system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
-            if (left_index != vr::k_unTrackedDeviceIndexInvalid && left_index < poses.size() &&
-                poses[left_index].bPoseIsValid && system->IsTrackedDeviceConnected(left_index))
-                target = left_index;
+        if (mount == Mount::LeftWrist || mount == Mount::RightWrist) {
+            target = system->GetTrackedDeviceIndexForControllerRole(mount == Mount::LeftWrist
+                ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand);
+            if (target >= poses.size() || !poses[target].bPoseIsValid || !system->IsTrackedDeviceConnected(target))
+                effective = Mount::World;
         }
-        if (anchor == target) return;
-        vr::HmdMatrix34_t transform{{{1.f, 0.f, 0.f, target == vr::k_unTrackedDeviceIndex_Hmd ? 0.f : 0.13f},
-                                      {0.f, 1.f, 0.f, target == vr::k_unTrackedDeviceIndex_Hmd ? -0.16f : 0.12f},
-                                      {0.f, 0.f, 1.f, target == vr::k_unTrackedDeviceIndex_Hmd ? -1.05f : -0.18f}}};
-        overlay_check(overlay->SetOverlayTransformTrackedDeviceRelative(handle, target, &transform), overlay, "SetOverlayTransformTrackedDeviceRelative");
-        anchor = target;
-    }
-    void rect(Rect r, std::array<unsigned char, 4> c) {
-        for (int y = std::max(r.y, 0); y < std::min(H, r.y + r.h); ++y)
-            for (int x = std::max(r.x, 0); x < std::min(W, r.x + r.w); ++x) {
-                const size_t p = (size_t(y) * W + x) * 4;
-                std::copy(c.begin(), c.end(), pixels.begin() + p);
+        if (effective == Mount::World && applied_mount && *applied_mount != Mount::World)
+            world_ready = false; // a fresh world fallback near the wearer, not an old room location
+        std::string note = save_failed ? "Preference could not be saved; using it for this session." : "";
+        if (effective != mount) note = save_failed ? "Wrist untracked; world fallback. Preference not saved." :
+                                                     "Wrist not tracked - using world space until it returns.";
+        if (effective == Mount::World && !world_ready) {
+            const auto& hmd = poses[vr::k_unTrackedDeviceIndex_Hmd];
+            Matrix34 pose{};
+            for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) pose[r][c] = hmd.mDeviceToAbsoluteTracking.m[r][c];
+            const auto world = hmd.bPoseIsValid && hmd.bDeviceIsConnected ? world_mount_pose(pose) : std::nullopt;
+            if (!world) {
+                placed = false;
+                surface.set_placement_note("Waiting for headset tracking to place the menu.");
+                visibility();
+                return;
             }
-    }
-    void text(std::string_view s, int x, int baseline, int max_x, int max_y, int max_bytes) {
-        size_t i = 0;
-        int used = 0;
-        while (i < s.size() && used < max_bytes && baseline < max_y) {
-            const size_t before = i;
-            const auto cp = next_codepoint(s, i);
-            used += int(i - before);
-            if (cp == '\n') { x = 28; baseline += 39; continue; }
-            if (cp == '\r' || cp == '\t') continue;
-            if (FT_Load_Char(face, cp, FT_LOAD_RENDER)) continue;
-            const auto glyph = face->glyph;
-            if (x + (glyph->advance.x >> 6) >= max_x) { x = 28; baseline += 39; }
-            if (baseline >= max_y) break;
-            const auto& b = glyph->bitmap;
-            for (unsigned row = 0; row < b.rows; ++row)
-                for (unsigned col = 0; col < b.width; ++col) {
-                    int px = x + glyph->bitmap_left + int(col);
-                    int py = baseline - glyph->bitmap_top + int(row);
-                    if (px < 0 || px >= W || py < 0 || py >= max_y) continue;
-                    const unsigned char alpha = b.buffer[int(row) * b.pitch + int(col)];
-                    auto* dst = pixels.data() + (size_t(py) * W + px) * 4;
-                    for (int c = 0; c < 3; ++c)
-                        dst[c] = static_cast<unsigned char>((unsigned(dst[c]) * (255 - alpha) + 240u * alpha) / 255);
-                }
-            x += glyph->advance.x >> 6;
+            for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) world_transform.m[r][c] = (*world)[r][c];
+            world_ready = true;
+            applied_mount.reset();
         }
-    }
-    bool available(UiAction a) const {
-        switch (a) {
-        case UiAction::Toggle: return page > 0;
-        case UiAction::Quit: case UiAction::Record: case UiAction::Cancel: return true;
-        case UiAction::BeginRecord: case UiAction::EndRecord: return true;
-        case UiAction::Enter: return panel.enabled;
-        case UiAction::Insert: return panel.enabled && !panel.transcript.empty();
-        }
-        return false;
-    }
-    // Split by rendered glyph advances, never by byte count or arbitrary characters.
-    // UTF-8 slices remain intact; all bytes (including invalid UTF-8) stay visible.
-    std::vector<std::string> paginate(std::string_view s, int lines, int right) {
-        std::vector<std::string> out;
-        size_t start = 0, i = 0;
-        int x = 28, line = 0;
-        while (i < s.size()) {
-            size_t before = i;
-            auto cp = next_codepoint(s, i);
-            if (cp == '\n') {
-                if (++line == lines) {
-                    out.emplace_back(s.substr(start, i - start));
-                    start = i; line = 0;
-                }
-                x = 28;
-                continue;
+        surface.set_placement_note(note);
+        if (applied_mount != effective || (effective != Mount::World && anchor != target)) {
+            surface.reset_pointers(); // a release on a relocated surface cannot activate an old press
+            if (effective == Mount::World) {
+                overlay_check(overlay->SetOverlayTransformAbsolute(handle, vr::TrackingUniverseStanding, &world_transform), overlay,
+                              "SetOverlayTransformAbsolute");
+            } else {
+                const auto pose = relative_mount_pose(effective);
+                vr::HmdMatrix34_t transform{};
+                for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = pose[r][c];
+                overlay_check(overlay->SetOverlayTransformTrackedDeviceRelative(handle, target, &transform), overlay,
+                              "SetOverlayTransformTrackedDeviceRelative");
             }
-            int advance = 0;
-            if (cp != '\r' && cp != '\t' && !FT_Load_Char(face, cp, FT_LOAD_DEFAULT))
-                advance = face->glyph->advance.x >> 6;
-            if (x + advance >= right && x != 28) {
-                if (++line == lines) {
-                    out.emplace_back(s.substr(start, before - start));
-                    start = before; line = 0;
-                } else {
-                    // Add a line break in the displayed page while keeping source intact.
-                    // The renderer's own width wrapping uses the same advance rule.
-                }
-                x = 28;
-            }
-            x += advance;
+            overlay_check(overlay->SetOverlayWidthInMeters(handle, mount_width(effective)), overlay, "SetOverlayWidthInMeters");
+            applied_mount = effective;
+            anchor = target;
         }
-        if (start < s.size() || out.empty()) out.emplace_back(s.substr(start));
-        return out;
+        placed = true;
+        visibility();
     }
+    bool available(UiAction action) const { return surface.available(action); }
     void draw(const Panel& p) {
-        if (p.transcript != panel.transcript || pages.empty()) {
-            pages = paginate(p.transcript.empty() ? "Transcript preview" : p.transcript, 3, W - 28);
-            page = 0;
-            drawn = false;
-        }
-        if (drawn && p.status == panel.status && p.transcript == panel.transcript &&
-            p.detail == panel.detail && p.enabled == panel.enabled && p.recording == panel.recording) return;
         panel = p;
-        rect({0, 0, W, H}, {20, 26, 39, 255});
-        rect({0, 0, W, 12}, {static_cast<unsigned char>(p.recording ? 220 : 55),
-                              static_cast<unsigned char>(p.recording ? 82 : 135), 72, 255});
-        text(p.enabled ? "FrameYap  |  Enabled" : "FrameYap  |  Disabled", 28, 52, W - 20, 72, 128);
-        const auto status_lines = paginate(p.status, 2, 620);
-        text(status_lines[0], 28, 96, 620, 150, int(status_lines[0].size()));
-        if (status_lines.size() > 1) text("[status truncated]", 635, 140, W - 28, 150, 32);
-        rect({20, 153, W - 40, 171}, {37, 46, 63, 255});
-        text(pages[page], 28, 190, W - 28, 290, int(pages[page].size()));
-        const std::string page_label = "Page " + std::to_string(page + 1) + " / " + std::to_string(pages.size());
-        text(page_label, 383, 315, 720, 324, 64);
-        rect(next_page, page + 1 < pages.size() ? std::array<unsigned char, 4>{56, 94, 129, 255}
-                                                 : std::array<unsigned char, 4>{49, 52, 60, 255});
-        text("Next", 767, 316, 860, 324, 8);
-        const auto detail_lines = paginate(p.detail, 2, 620);
-        text(detail_lines[0], 28, 355, 620, 412, int(detail_lines[0].size()));
-        if (detail_lines.size() > 1)
-            text("[detail truncated]", 635, 405, W - 28, 412, 32);
-        for (const auto& button : buttons) {
-            const bool enabled = available(button.action);
-            rect(button.bounds, enabled ? std::array<unsigned char, 4>{56, 94, 129, 255}
-                                        : std::array<unsigned char, 4>{49, 52, 60, 255});
-            text(button.label, button.bounds.x + 10, button.bounds.y + 38,
-                 button.bounds.x + button.bounds.w - 5, H, 64);
+        if (surface.render(p)) {
+            // OpenVR's API takes void*, but does not modify the submitted RGBA bytes.
+            overlay_check(overlay->SetOverlayRaw(handle, const_cast<unsigned char*>(surface.pixels().data()), W, H, 4), overlay, "SetOverlayRaw");
+            has_texture = true;
         }
-        overlay_check(overlay->SetOverlayRaw(handle, pixels.data(), W, H, 4), overlay, "SetOverlayRaw");
-        overlay_check(overlay->ShowOverlay(handle), overlay, "ShowOverlay");
-        drawn = true;
+        visibility();
     }
     void reset_input(std::vector<UiAction>& result) {
         left.reset();
@@ -291,7 +189,7 @@ struct Overlay::Impl {
         ptt_capture = false;
         if (lost_grip || lost_ptt) result.push_back(UiAction::Cancel);
         for (size_t i = 1; i < edges.size(); ++i) edges[i].reset();
-        pressed_button.fill(-1);
+        surface.reset_pointers();
     }
     // Bound actions are accepted only with a connected tracked source. A held input
     // following loss of activity must return to neutral before generating an edge.
@@ -318,6 +216,9 @@ struct Overlay::Impl {
         vr::VREvent_t event{};
         while (system->PollNextEvent(&event, sizeof(event))) {
             if (event.eventType == vr::VREvent_Quit) result.push_back(UiAction::Quit);
+            if (event.eventType == vr::VREvent_SeatedZeroPoseReset || event.eventType == vr::VREvent_ChaperoneUniverseHasChanged) {
+                world_ready = false; applied_mount.reset(); surface.reset_pointers();
+            }
             if (event.eventType == vr::VREvent_TrackedDeviceDeactivated ||
                 event.eventType == vr::VREvent_InputFocusCaptured) reset_input(result);
         }
@@ -337,36 +238,30 @@ struct Overlay::Impl {
                 // activity. Cancel the old gesture, then require neutral rearm;
                 // do not permanently latch global grip actions off.
                 reset_input(result); break;
-            case vr::VREvent_MouseButtonDown: {
-                const auto& m = event.data.mouse;
-                if (m.button != vr::VRMouseButton_Left || m.cursorIndex >= pressed_button.size()) break;
-                const int x = int(m.x), y = H - int(m.y);
-                pressed_button[m.cursorIndex] = -1;
-                for (size_t i = 0; i < buttons.size(); ++i)
-                    if (buttons[i].bounds.contains(x, y) && available(buttons[i].action)) {
-                        pressed_button[m.cursorIndex] = int(i); break;
+            case vr::VREvent_MouseMove:
+                surface.pointer_move(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
+                break;
+            case vr::VREvent_MouseButtonDown:
+                if (event.data.mouse.button == vr::VRMouseButton_Left)
+                    surface.pointer_down(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
+                break;
+            case vr::VREvent_MouseButtonUp:
+                if (event.data.mouse.button == vr::VRMouseButton_Left) {
+                    auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
+                    if (event_result.action) result.push_back(*event_result.action);
+                    if (event_result.mount) {
+                        mount = *event_result.mount;
+                        save_failed = !save_mount(settings_path, mount);
+                        world_ready = false;
+                        applied_mount.reset();
                     }
-                if (next_page.contains(x, y) && page + 1 < pages.size())
-                    pressed_button[m.cursorIndex] = int(buttons.size());
+                    if (event_result.recenter) { world_ready = false; applied_mount.reset(); }
+                }
                 break;
-            }
-            case vr::VREvent_MouseButtonUp: {
-                const auto& m = event.data.mouse;
-                if (m.button != vr::VRMouseButton_Left || m.cursorIndex >= pressed_button.size()) break;
-                const int index = pressed_button[m.cursorIndex];
-                pressed_button[m.cursorIndex] = -1;
-                if (index == int(buttons.size()) && next_page.contains(int(m.x), H - int(m.y)) &&
-                    page + 1 < pages.size()) { ++page; drawn = false; }
-                else if (index == 0 && buttons[0].bounds.contains(int(m.x), H - int(m.y)) && page > 0) {
-                    --page; drawn = false;
-                } else if (index > 0 && index < int(buttons.size()) &&
-                    buttons[index].bounds.contains(int(m.x), H - int(m.y)) &&
-                    available(buttons[index].action)) result.push_back(buttons[index].action);
-                break;
-            }
             default: break;
             }
         }
+        place();
         vr::VRActiveActionSet_t set{};
         set.ulActionSet = action_set;
         set.ulRestrictedToDevice = vr::k_ulInvalidInputValueHandle;
@@ -377,7 +272,7 @@ struct Overlay::Impl {
         auto [la, ld] = digital(0);
         auto [ra, rd] = digital(1);
         const auto now = DoubleTap::Clock::now();
-        if (left.update(la && focus, ld, panel.enabled, now)) result.push_back(UiAction::Enter);
+        if (left.update(la && focus, ld, available(UiAction::Enter), now)) result.push_back(UiAction::Enter);
         switch (right.update(ra && focus, rd, now)) {
         case GripRecord::Change::Begin: grip_capture = true; result.push_back(UiAction::BeginRecord); break;
         case GripRecord::Change::End: grip_capture = false; result.push_back(UiAction::EndRecord); break;
@@ -405,8 +300,8 @@ struct Overlay::Impl {
     }
 };
 
-Overlay::Overlay(const std::string& assets, const std::string& font, bool hand)
-    : impl_(std::make_unique<Impl>(assets, font, hand)) {}
+Overlay::Overlay(const std::string& assets, const std::string& font, std::optional<Mount> mount)
+    : impl_(std::make_unique<Impl>(assets, font, mount)) {}
 Overlay::~Overlay() = default;
 std::vector<UiAction> Overlay::poll() { return impl_->poll(); }
 void Overlay::draw(const Panel& panel) { impl_->draw(panel); }

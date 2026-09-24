@@ -16,7 +16,29 @@ with SteamOS; compatibility must be rechecked.
 
 Frame controller bindings were authored here using the observed public input
 profile names (`frame_controller`, `/input/grip`, `click`); no SteamVR driver code,
-images, protected kernels or another application's assets were extracted.
+images, protected kernels or another application's assets were extracted for these bindings.
+
+## Bundled font and UI reference
+
+`assets/fonts/Inconsolata-Regular.ttf` is an unmodified copy of the typeface used
+by kouseki's editor and VR canvas, extracted from its `assets/fonts` directory at
+checkout revision `738569f4c41ff4c8fc9edd5bfff9c861957ea39e`.
+SHA-256: `e0267abf9d734e2b9f766f8cb7a496b552c57cdfeacfa0efdc5bfd21940ae145`.
+Copyright 2006 The Inconsolata Project Authors; **SIL Open Font License 1.1**,
+retained in `assets/fonts/OFL-Inconsolata.txt` (line endings and trailing whitespace
+normalized; license text unchanged). The reviewed OFL permits
+bundling and redistribution with its copyright/license notice; the font remains
+OFL, not MIT, and is not sold by itself. Upstream: <https://github.com/googlefonts/Inconsolata>.
+The TTF is unchanged. No MSDF atlas, icons, engine code or renderer dependencies
+were copied. Unicode coverage is finite; missing glyphs use the face's notdef glyph.
+
+Visual references: kouseki's `apps/vr_workspace/hud.cpp` (rounded mint-to-blue
+perimeter and curved accent) and `menu_tablet.hpp` (dark cards, highlighted
+selection). FrameYap implements those design ideas independently on a single
+CPU RGBA surface. Building, installing and running require no kouseki checkout.
+CMake installs the font and OFL with assets; native staging defaults to that
+font, places the launcher copy at `fonts/font.ttf`, and includes its license in
+`THIRD_PARTY_NOTICES.txt`. Custom staging fonts still require an explicit license.
 
 ## Explicit native build inputs (not vendored)
 
@@ -25,8 +47,9 @@ images, protected kernels or another application's assets were extracted.
 - SDL3: zlib license; device trial used SDL 3.2.16 built in a private user prefix.
 - Wayland client and scanner: retain upstream MIT-style notices.
 - FreeType: choose and comply with its applicable FTL/GPL licensing option.
-- Font: explicit user-supplied path; observed device check used system Hack Regular.
-  A release must include the selected font's own license and assess glyph coverage.
+- Optional font override: the earlier device check used system Hack Regular.
+  A custom release font must include its own license and assessed glyph coverage;
+  new builds default to the bundled Inconsolata described above.
 - Compiler runtime, libc minimum and transitive shared libraries require a release
   dependency audit. Passing a developer build is not a portable-runtime guarantee.
 

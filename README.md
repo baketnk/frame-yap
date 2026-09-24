@@ -23,6 +23,8 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   transcribe. Remappable through SteamVR bindings; separate hold-to-talk action too.
 - **Left grip:** double-tap to explicitly send Enter. Never inferred from speech.
 - **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
+  Review and settings share one Inconsolata/neon-framed surface. World-space by
+  default; settings offer left wrist, right wrist and head mounting, plus recenter.
   Dashboard lasers provide clickable controls without forcing global laser mode.
 - **Review-first:** focus your destination, then press Insert. No automatic insertion
   or submission. Maximum clip 20 seconds; accidental taps under 200 ms are discarded.

@@ -40,7 +40,7 @@ int run(const Options& options) {
     auto old_int = std::signal(SIGINT, signal_stop);
     auto old_term = std::signal(SIGTERM, signal_stop);
     struct Restore { decltype(old_int) a, b; ~Restore() { std::signal(SIGINT, a); std::signal(SIGTERM, b); } } restore{old_int, old_term};
-    Overlay overlay(options.assets, options.font, options.hand);
+    Overlay overlay(options.assets, options.font, options.mount);
     Worker worker;
     Audio audio;
     Session session;
@@ -88,8 +88,9 @@ int run(const Options& options) {
         }
         // Drawing precedes input polling: Enter is disabled until Ready is visible.
         Panel panel{state_label(session.state()), session.text(), detail,
-                    session.state() != State::Error && session.state() != State::Warming,
-                    session.state() == State::Recording};
+                    session.state() != State::Error && session.state() != State::Warming && session.state() != State::Transcribing,
+                    session.state() == State::Recording,
+                    session.state() != State::Warming && session.state() != State::Transcribing && session.state() != State::Review};
         if (panel.recording) panel.status += " - " + std::to_string(audio.seconds()) + " / 20s";
         overlay.draw(panel);
         for (auto action : overlay.poll()) {

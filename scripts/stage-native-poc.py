@@ -14,10 +14,16 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--build", type=Path, required=True)
     p.add_argument("--destination", type=Path, required=True, help="new staging directory")
-    for name in ("openvr-library", "openvr-license", "sdl-library", "sdl-license", "font", "font-license"):
+    for name in ("openvr-library", "openvr-license", "sdl-library", "sdl-license"):
         p.add_argument("--" + name, type=Path, required=True)
+    p.add_argument("--font", type=Path, help="override bundled Inconsolata (requires --font-license)")
+    p.add_argument("--font-license", type=Path)
     args = p.parse_args()
     root = Path(__file__).resolve().parents[1]
+    if bool(args.font) != bool(args.font_license):
+        p.error("a font override requires both --font and --font-license")
+    args.font = args.font or root / "assets/fonts/Inconsolata-Regular.ttf"
+    args.font_license = args.font_license or root / "assets/fonts/OFL-Inconsolata.txt"
     dest = args.destination.absolute()
     if dest.exists() or dest.is_symlink():
         p.error("destination already exists; use a new staging directory")
@@ -36,7 +42,7 @@ def main():
     shutil.copyfile(args.font, dest / "fonts/font.ttf")
     notices = ["FrameYap native-only POC. No ASR runtime or model is included.\n",
                "Original FrameYap code: MIT. System Wayland/FreeType/libstdc++/glibc are not bundled.\n",
-               "Bundled libraries: Valve OpenVR and unmodified SDL3; font supplied explicitly below.\n",
+               "Bundled libraries: Valve OpenVR and unmodified SDL3; font license included below.\n",
                "This package does not grant any rights to kestrel-kernels or provide a functioning ASR environment.\n"]
     for label, file in (("FrameYap", root / "LICENSE"), ("OpenVR", args.openvr_license),
                         ("SDL3", args.sdl_license), ("Font", args.font_license)):

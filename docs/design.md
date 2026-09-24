@@ -41,9 +41,11 @@ loaded between utterances; do not spawn Python/load 178 MB for every release.
 
 ## Minimal interaction
 
-A small hand-attached status chip while armed; a compact review panel only when
-needed. Allow head-relative placement for users who prefer it. No permanent large
-dashboard obscuring the application.
+The implemented menu consolidates review, status, controls and settings onto one
+rendering surface, with world-space placement by default. Settings offer left
+wrist, right wrist and head mounting. A smaller status-chip presentation while
+armed remains a possible refinement, not a second implemented overlay. See
+[the current UI and placement behavior](overlay.md).
 
 ```text
 [ mic ]  Ready · On-device                     [ settings ]
@@ -77,8 +79,9 @@ Recording…  00:04           [ Cancel ]
 
 Implement the standalone `frameyap` executable, initialized
 with `VRApplication_Overlay`. Frame accepted that application type and
-`IVROverlay_028` in the probe. Use `CreateOverlay`, tracked-device-relative
-transform, `ShowOverlay`/`HideOverlay`, and `PollNextOverlayEvent` for the panel.
+`IVROverlay_028` in the probe. Use one `CreateOverlay` handle, an absolute world
+transform or tracked-device-relative mount, `ShowOverlay`/`HideOverlay`, and
+`PollNextOverlayEvent` for the panel.
 Use SteamVR's overlay interaction rather than inventing scene controller rays.
 
 Do not link an external scene host or launch another application behind the
@@ -93,11 +96,12 @@ eye targets or per-eye scene rendering. Keep tracking in compositor transforms,
 not an application-rendered hand-pose animation loop. Do not promise a particular
 GPU cost until measured.
 
-A scene renderer's canvas/MSDF resources are not
-an OpenVR overlay backend and are not imported here. Use a small independently
-licensed font/icon set and minimal panel renderer. Any later source/asset reuse
-requires an explicit license-reviewed extraction, never a runtime path into the
-engine checkout.
+A scene renderer's canvas/MSDF resources are not an OpenVR overlay backend and
+are not imported here. The Inconsolata TTF used by kouseki is independently
+bundled under its retained OFL; the panel renderer is original FrameYap code.
+The neon HUD frame is a visual reference, not an engine dependency. Further
+source/asset reuse requires an explicit license-reviewed extraction, never a
+runtime path into the engine checkout.
 
 ### Controller bindings
 

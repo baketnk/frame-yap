@@ -1,4 +1,6 @@
 #pragma once
+#include "mount.hpp"
+#include <optional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,10 +13,11 @@ struct Panel {
     std::string detail;
     bool enabled = false;
     bool recording = false;
+    bool record_available = true;
 };
 class Overlay {
 public:
-    Overlay(const std::string& assets, const std::string& font, bool hand);
+    Overlay(const std::string& assets, const std::string& font = {}, std::optional<Mount> mount = {});
     ~Overlay();
     Overlay(const Overlay&) = delete;
     Overlay& operator=(const Overlay&) = delete;
