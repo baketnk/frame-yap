@@ -1,0 +1,21 @@
+{
+  "controller_type": "frame_controller",
+  "description": "Right grip: tap then hold to dictate. Left grip: double tap Enter. Remap other actions in SteamVR.",
+  "name": "FrameYap Steam Frame grips",
+  "bindings": {
+    "/actions/frameyap": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/grip",
+          "mode": "button",
+          "inputs": { "click": { "output": "/actions/frameyap/in/left_grip" } }
+        },
+        {
+          "path": "/user/hand/right/input/grip",
+          "mode": "button",
+          "inputs": { "click": { "output": "/actions/frameyap/in/right_grip" } }
+        }
+      ]
+    }
+  }
+}

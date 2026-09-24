@@ -1,0 +1,19 @@
+{
+  "source": "builtin",
+  "applications": [
+    {
+      "app_key": "local.frameyap.overlay",
+      "launch_type": "binary",
+      "binary_path_linux": "@ABSOLUTE_INSTALLED_FRAMEYAP_EXECUTABLE@",
+      "binary_path_linux_arm": "@ABSOLUTE_INSTALLED_FRAMEYAP_EXECUTABLE@",
+      "action_manifest_path": "@ABSOLUTE_INSTALLED_ACTIONS_JSON@",
+      "is_dashboard_overlay": true,
+      "strings": {
+        "en_us": {
+          "name": "FrameYap",
+          "description": "Local voice typing overlay"
+        }
+      }
+    }
+  ]
+}

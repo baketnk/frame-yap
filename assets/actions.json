@@ -1,0 +1,27 @@
+{
+  "default_bindings": [
+    { "controller_type": "frame_controller", "binding_url": "bindings_frame_controller.json" },
+    { "controller_type": "knuckles", "binding_url": "bindings_knuckles.json" }
+  ],
+  "action_sets": [
+    { "name": "/actions/frameyap", "usage": "single" }
+  ],
+  "actions": [
+    { "name": "/actions/frameyap/in/left_grip", "type": "boolean" },
+    { "name": "/actions/frameyap/in/right_grip", "type": "boolean" },
+    { "name": "/actions/frameyap/in/ptt", "type": "boolean" },
+    { "name": "/actions/frameyap/in/cancel", "type": "boolean" },
+    { "name": "/actions/frameyap/in/insert", "type": "boolean" },
+    { "name": "/actions/frameyap/in/enter", "type": "boolean" }
+  ],
+  "localization": [{
+    "language_tag": "en_US",
+    "/actions/frameyap": "FrameYap controls",
+    "/actions/frameyap/in/left_grip": "Double tap left grip: Enter (enabled only)",
+    "/actions/frameyap/in/right_grip": "Tap right grip briefly, then squeeze and hold to record; release to finish",
+    "/actions/frameyap/in/ptt": "Hold to record",
+    "/actions/frameyap/in/cancel": "Cancel recording or discard",
+    "/actions/frameyap/in/insert": "Insert reviewed text",
+    "/actions/frameyap/in/enter": "Explicit Enter"
+  }]
+}
