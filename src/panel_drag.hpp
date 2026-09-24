@@ -11,7 +11,7 @@ namespace frameyap {
 // mounting device); the 3x3 blocks are proper orthonormal rotations. +X is
 // panel right, +Y panel up, and the translation is the panel center.
 enum class PanelDragKind { Grab, Scale };
-struct PanelDragUpdate { float dx, dy, factor; };
+struct PanelDragUpdate { Matrix34 pose; float factor; };
 
 namespace panel_drag_detail {
 struct Vec3 { double x, y, z; };
@@ -47,6 +47,36 @@ inline bool rigid(const Matrix34& m) {
 }
 } // namespace panel_drag_detail
 
+// Rigid transforms only (proper orthonormal rotation, finite translation).
+// compose_pose(a, b) maps a pose in a's coordinates into a's parent frame;
+// relative_pose(a, b) expresses b in a's coordinates. Inputs must be valid
+// rigid poses in the same frame where applicable.
+inline Matrix34 compose_pose(const Matrix34& a, const Matrix34& b) {
+    using namespace panel_drag_detail;
+    Matrix34 result{};
+    for (int c = 0; c < 4; ++c) {
+        const Vec3 value = c == 3 ? rotate(a, translation(b)) + translation(a)
+                                  : rotate(a, column(b, c));
+        result[0][c] = static_cast<float>(value.x);
+        result[1][c] = static_cast<float>(value.y);
+        result[2][c] = static_cast<float>(value.z);
+    }
+    return result;
+}
+
+inline Matrix34 relative_pose(const Matrix34& a, const Matrix34& b) {
+    using namespace panel_drag_detail;
+    Matrix34 result{};
+    for (int c = 0; c < 4; ++c) {
+        const Vec3 value = inverse_rotate(a, c == 3 ? translation(b) - translation(a)
+                                                 : column(b, c));
+        result[0][c] = static_cast<float>(value.x);
+        result[1][c] = static_cast<float>(value.y);
+        result[2][c] = static_cast<float>(value.z);
+    }
+    return result;
+}
+
 class PanelDrag {
 public:
     bool begin(PanelDragKind kind, const Matrix34& panel_pose, float width, float height,
@@ -58,6 +88,15 @@ public:
             !std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0 ||
             !std::isfinite(hit_x) || !std::isfinite(hit_y) ||
             hit_x < 0 || hit_x > 1 || hit_y < 0 || hit_y > 1) return false;
+
+        if (kind == PanelDragKind::Grab) {
+            relative_panel_ = relative_pose(controller_pose, panel_pose);
+            if (!rigid(relative_panel_)) return false;
+            panel_pose_ = panel_pose;
+            kind_ = kind;
+            active_ = true;
+            return true;
+        }
 
         const Vec3 center = translation(panel_pose);
         const Vec3 right = column(panel_pose, 0), up = column(panel_pose, 1);
@@ -74,13 +113,12 @@ public:
         const double baseline_sq = dot(baseline, baseline);
         if (!finite(anchor) || !finite(down_hit) || !finite(direction) ||
             std::abs(dot(direction, normal)) < 1e-5 ||
-            (kind == PanelDragKind::Scale && (!std::isfinite(baseline_sq) || baseline_sq < 1e-16)))
+            !std::isfinite(baseline_sq) || baseline_sq < 1e-16)
             return false;
 
         kind_ = kind;
+        panel_pose_ = panel_pose;
         center_ = center;
-        right_ = right;
-        up_ = up;
         normal_ = normal;
         anchor_ = anchor;
         down_hit_ = down_hit;
@@ -93,6 +131,11 @@ public:
     std::optional<PanelDragUpdate> update(const Matrix34& controller_pose) const {
         using namespace panel_drag_detail;
         if (!active_ || !rigid(controller_pose)) return std::nullopt;
+        if (kind_ == PanelDragKind::Grab) {
+            const Matrix34 pose = compose_pose(controller_pose, relative_panel_);
+            if (!rigid(pose)) return std::nullopt;
+            return PanelDragUpdate{pose, 1.f};
+        }
         const Vec3 origin = translation(controller_pose);
         const Vec3 ray = rotate(controller_pose, local_ray_);
         const double denominator = dot(ray, normal_);
@@ -101,16 +144,10 @@ public:
         const double distance = dot(center_ - origin, normal_) / denominator;
         if (!std::isfinite(distance) || distance <= 0 || distance > 10) return std::nullopt;
         const Vec3 hit = origin + ray * distance;
-        const Vec3 delta = hit - down_hit_;
-        const double dx = kind_ == PanelDragKind::Grab ? dot(delta, right_) : 0;
-        const double dy = kind_ == PanelDragKind::Grab ? dot(delta, up_) : 0;
-        const double factor = kind_ == PanelDragKind::Scale ?
-            dot(hit - anchor_, down_hit_ - anchor_) / baseline_sq_ : 1;
-        if (!finite(hit) || !std::isfinite(dx) || !std::isfinite(dy) ||
-            !std::isfinite(factor) || !std::isfinite(static_cast<float>(dx)) ||
-            !std::isfinite(static_cast<float>(dy)) || !std::isfinite(static_cast<float>(factor)))
-            return std::nullopt;
-        return PanelDragUpdate{static_cast<float>(dx), static_cast<float>(dy), static_cast<float>(factor)};
+        const double factor = dot(hit - anchor_, down_hit_ - anchor_) / baseline_sq_;
+        if (!finite(hit) || !std::isfinite(factor) ||
+            !std::isfinite(static_cast<float>(factor))) return std::nullopt;
+        return PanelDragUpdate{panel_pose_, static_cast<float>(factor)};
     }
 
     void reset() { active_ = false; }
@@ -120,7 +157,8 @@ private:
     using Vec3 = panel_drag_detail::Vec3;
     bool active_ = false;
     PanelDragKind kind_ = PanelDragKind::Grab;
-    Vec3 center_{}, right_{}, up_{}, normal_{}, anchor_{}, down_hit_{}, local_ray_{};
+    Matrix34 panel_pose_{}, relative_panel_{};
+    Vec3 center_{}, normal_{}, anchor_{}, down_hit_{}, local_ray_{};
     double baseline_sq_ = 0;
 };
 

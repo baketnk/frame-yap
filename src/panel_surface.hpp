@@ -15,6 +15,7 @@ struct SurfaceEvent {
     std::optional<bool> lasers_anytime;
     std::optional<bool> advanced_debug;
     std::optional<bool> auto_insert;
+    std::optional<bool> lock_layout;
     std::optional<bool> clock_24h;
     std::optional<DateFormat> date_format;
     bool recenter = false;
@@ -39,6 +40,9 @@ public:
     std::optional<PanelDragKind> pointer_down(unsigned cursor, float x, float y);
     SurfaceEvent pointer_up(unsigned cursor, float x, float y);
     bool dragging(unsigned cursor) const;
+    // OpenVR intersection masks use top-left coordinates, unlike mouse events.
+    std::vector<Bounds> input_regions() const;
+    void set_layout_locked(bool locked);
     void reset_pointers();
     void set_placement_note(std::string note);
     void set_lasers_anytime(bool enabled);

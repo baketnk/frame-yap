@@ -30,13 +30,14 @@ struct Rect {
 };
 enum class Control { Review, Settings, Bindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
-                     Clock24h, Date };
+                     Clock24h, Date, LockLayout };
 enum class Tab { Review, Settings };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 20> buttons{{
+constexpr std::array<Button, 21> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
+    {{620, 138, 348, 46}, Control::LockLayout, "Lock grab/scale"},
     {{32, 406, 154, 44}, Control::Prev, "Previous"},
     {{838, 406, 130, 44}, Control::Next, "Next"},
     {{32, 574, 176, 68}, Control::Record, "Record"},
@@ -104,7 +105,7 @@ struct PanelSurface::Impl {
     Color background, card, ink, muted, cyan, pink;
     Tab tab = Tab::Review;
     bool dirty = true, lasers_anytime = false, advanced_debug = false, auto_insert = false;
-    bool clock_24h = false;
+    bool clock_24h = false, layout_locked = false;
     DateFormat date_format = DateFormat::MonthDayYear;
     std::time_t clock_time = std::time(nullptr);
     ClockLabel displayed_clock;
@@ -254,7 +255,7 @@ struct PanelSurface::Impl {
         if (c == Control::Prev || c == Control::Next) return tab == Tab::Review;
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
             c == Control::AdvancedDebug || c == Control::AutoInsert ||
-            c == Control::Clock24h || c == Control::Date) return tab == Tab::Settings;
+            c == Control::Clock24h || c == Control::Date || c == Control::LockLayout) return tab == Tab::Settings;
         return true;
     }
     bool enabled(Control c) const {
@@ -330,7 +331,8 @@ struct PanelSurface::Impl {
                             (mounting(b.id) && *mounting(b.id) == mount) ||
                             (b.id == Control::LasersAnytime && lasers_anytime) ||
                             (b.id == Control::AdvancedDebug && advanced_debug) ||
-                            (b.id == Control::AutoInsert && auto_insert);
+                            (b.id == Control::AutoInsert && auto_insert) ||
+                            (b.id == Control::LockLayout && layout_locked);
             const Color fill = !on ? mix(background, card, .40f) :
                                selected ? mix(card, cyan, .14f) : card;
             const Color accent = b.id == Control::Record && panel.recording ? pink : cyan;
@@ -347,30 +349,33 @@ struct PanelSurface::Impl {
             text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, b.id == Control::Date ? 23 : 27,
                  on ? ink : mix(background, muted, .48f), b.r.x + b.r.w - 8);
             if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
-            if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug || b.id == Control::AutoInsert) {
+            if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug || b.id == Control::AutoInsert ||
+                b.id == Control::LockLayout) {
                 bool active = b.id == Control::LasersAnytime ? lasers_anytime :
-                              b.id == Control::AutoInsert ? auto_insert : advanced_debug;
+                              b.id == Control::AutoInsert ? auto_insert :
+                              b.id == Control::LockLayout ? layout_locked : advanced_debug;
                 text(active ? "ON" : "OFF", b.r.x + b.r.w - 66, b.r.y + b.r.h / 2 + 9, 22,
                      active ? cyan : muted, b.r.x + b.r.w - 12);
             }
         }
         // Screenshot-inspired grab underline and outside corner bracket. No
         // opaque toolbar backing; broad hit targets surround the slender strokes.
-        const Color handle = theme.frame_end;
-        rounded({400, 721, 200, 6}, 3, handle, handle);
-        rounded({1008, 721, 36, 6}, 3, handle, handle);
-        rounded({1038, 691, 6, 36}, 3, handle, handle);
-        // Give each handle the same full mint-to-blue theme gradient as the
-        // main frame, without changing its antialiased alpha coverage.
-        for (Rect bounds : {Rect{400, 721, 200, 6}, Rect{1008, 691, 36, 36}})
-            for (int y = bounds.y; y < bounds.y + bounds.h; ++y)
-                for (int x = bounds.x; x < bounds.x + bounds.w; ++x) {
-                    auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
-                    if (!dst[3]) continue;
-                    const auto color = mix(theme.frame_start, theme.frame_end,
-                                           float(x - bounds.x) / (bounds.w - 1));
-                    std::copy_n(color.begin(), 3, dst);
-                }
+        if (!layout_locked) {
+            const Color handle = theme.frame_end;
+            rounded({400, 721, 200, 6}, 3, handle, handle);
+            rounded({1008, 721, 36, 6}, 3, handle, handle);
+            rounded({1038, 691, 6, 36}, 3, handle, handle);
+            // The frame gradient, without changing antialiased alpha coverage.
+            for (Rect bounds : {Rect{400, 721, 200, 6}, Rect{1008, 691, 36, 36}})
+                for (int y = bounds.y; y < bounds.y + bounds.h; ++y)
+                    for (int x = bounds.x; x < bounds.x + bounds.w; ++x) {
+                        auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
+                        if (!dst[3]) continue;
+                        const auto color = mix(theme.frame_start, theme.frame_end,
+                                               float(x - bounds.x) / (bounds.w - 1));
+                        std::copy_n(color.begin(), 3, dst);
+                    }
+        }
         dirty = false;
         return true;
     }
@@ -387,7 +392,7 @@ bool PanelSurface::dragging(unsigned cursor) const {
 std::optional<PanelDragKind> PanelSurface::pointer_down(unsigned cursor, float x, float y) {
     if (cursor >= impl_->pressed.size() || impl_->drag_cursor >= 0) return {};
     const auto contains = [&](Bounds b) { return Rect{b.x, b.y, b.w, b.h}.contains(x, y); };
-    if (contains(grab) || contains(scale)) {
+    if (!impl_->layout_locked && (contains(grab) || contains(scale))) {
         impl_->reset(); // other cursor's prior approval cannot survive relocation
         impl_->drag_cursor = int(cursor);
         return contains(grab) ? PanelDragKind::Grab : PanelDragKind::Scale;
@@ -412,6 +417,7 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
     else if (c == Control::LasersAnytime) result.lasers_anytime = !impl_->lasers_anytime;
     else if (c == Control::AdvancedDebug) result.advanced_debug = !impl_->advanced_debug;
     else if (c == Control::AutoInsert) result.auto_insert = !impl_->auto_insert;
+    else if (c == Control::LockLayout) result.lock_layout = !impl_->layout_locked;
     else if (c == Control::Clock24h) result.clock_24h = !impl_->clock_24h;
     else if (c == Control::Date) result.date_format = static_cast<DateFormat>((static_cast<int>(impl_->date_format) + 1) % 4);
     else if (c == Control::Bindings) { result.open_bindings = true; impl_->reset(); }
@@ -427,6 +433,16 @@ void PanelSurface::set_binding_note(std::string note) {
     if (impl_->binding_note != note) { impl_->binding_note = std::move(note); impl_->dirty = true; }
 }
 void PanelSurface::reset_pointers() { impl_->reset(); }
+std::vector<PanelSurface::Bounds> PanelSurface::input_regions() const {
+    std::vector<Bounds> result{{10, 10, CW - 20, CH - 20}};
+    if (!impl_->layout_locked) { result.push_back(grab); result.push_back(scale); }
+    return result;
+}
+void PanelSurface::set_layout_locked(bool locked) {
+    if (impl_->layout_locked != locked) {
+        impl_->layout_locked = locked; impl_->reset(); impl_->dirty = true;
+    }
+}
 void PanelSurface::set_placement_note(std::string note) {
     if (impl_->placement_note != note) { impl_->placement_note = std::move(note); impl_->dirty = true; }
 }

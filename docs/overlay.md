@@ -105,6 +105,7 @@ installer creates one with defaults on first install. Copy the shipped
   "input_priority": "normal",
   "advanced_debug": false,
   "auto_insert": false,
+  "lock_layout": false,
   "clock_24h": false,
   "date_format": "mdy",
   "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
@@ -223,19 +224,32 @@ lower-right corner, visually modeled on the user's Steam terminal-window screens
 These are original FrameYap controls, not Steam private UI components. RGBA alpha
 leaves their surrounding area transparent; an explicit OpenVR intersection mask
 excludes empty margins from laser hit testing (the slender strokes have larger hit
-targets). The extra canvas area does not shrink the main panel's physical width.
+targets). Both handles use the configured mint-to-blue frame gradient. The extra
+canvas area does not shrink the main panel's physical width. Intersection rectangles
+use top-left pixel coordinates; only mouse events need the bottom-left GL Y flip.
+The first deployed pass incorrectly flipped the mask, leaving the scale corner
+outside its input region; this version corrects that mapping.
 
-Hold the laser's primary click on the bar and move to translate the panel **in its
-plane**; this does not change depth or orientation. Drag the corner bracket to scale
-between half and twice the configured width. The original upper-left corner remains
-fixed relative to the chosen mount. Both work on either tab and all mounts. Movement
-is bounded to two meters per axis; mount changes/recenter clear movement, while mount
-changes retain the size factor. Restart restores configured position/size defaults.
+Hold the laser's primary click on the bar to **freely position and rotate** the
+panel with the controller, including depth, pitch, yaw and roll. Grab captures
+`inverse(controller_down) * panel_down` and applies that unchanged relative pose
+to each controller pose, so grabbing does not snap or reset the panel orientation.
+Release leaves the last pose in the chosen mount frame; head/wrist mounts continue
+following that anchor afterward. Mount changes/recenter reset the pose, while
+retaining the size factor. Restart restores configured position/size defaults.
 
-A drag freezes its initial plane and calibrates a ray from the source controller to
-the initial hit. Subsequent tracked poses determine translation/scale, even beyond
-the original texture bounds; changing overlay coordinates never feed back into the
-drag. For head/wrist mounts, geometry stays in the anchor-device coordinate frame.
+Drag the corner bracket to scale between half and twice the configured width.
+Scaling freezes its initial plane and calibrates a ray from the source controller
+to the initial hit. The top-left corner of the current, potentially rotated panel
+stays fixed, including after repeated grab/scale operations. Changing overlay
+coordinates never feed back into the calculation. Both controls work on either tab;
+for head/wrist mounts, geometry stays in the anchor-device coordinate frame.
+
+Settings → **Lock grab/scale** (`"lock_layout": true`, default false) hides both
+handles and removes their hit regions, cancels an active drag and prevents new
+manipulation. Unlock remains accessible in Settings. The boolean is saved across
+restarts/upgrades; failed saves leave a visible session-only warning. It does not
+disable explicit mount/recenter choices or freeze normal head/wrist tracking.
 The event's controller is used, with the primary dashboard device as the single-cursor
 fallback when the event omits it. No guessed controller or desktop pointer fallback.
 Release, changed UI authorization, tracking loss, hidden overlay, relocation, invalid
@@ -304,9 +318,11 @@ coexistence remains unverified.
 ### Hardware-free UI checks
 
 The default build tests mount parsing, laser preference persistence, pose geometry
-and captured-ray grab/scale math without any native dependencies. Drag tests cover
-stationary stability, independent axes, rotated/relative mounts, out-of-bounds hits,
-invalid rays and no feedback from prior updates. A FreeType-only opt-in build exercises the actual renderer,
+and controller-relative grab/captured-ray scale math without any native dependencies.
+Drag tests cover XYZ translation, pitch/yaw/roll and lever-arm rotation, re-grabbing
+a moved panel, stationary stability, relative mounts, out-of-bounds scale hits,
+invalid poses/rays and no feedback from prior updates. UI/config/installer tests
+cover hidden/disabled handles, top-left mask regions, lock persistence and repair. A FreeType-only opt-in build exercises the actual renderer,
 pointer gating, tab switches, pagination, recording state and redraw invalidation:
 
 ```sh

@@ -30,10 +30,12 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
 - **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
   Review and settings share one Inconsolata/neon-framed surface. The header
   shows local time/date; Settings selects 12/24-hour time and date format/off.
-  Drag the thin bar below the panel to move it in its plane; drag the external
-  lower-right corner bracket to scale it (world, head or wrist). Both sit in
-  transparent margins, like Steam's window handles. Scaling keeps the upper-left
-  corner anchored. Position/size changes last for this run only.
+  Hold the thin bar below the panel to freely move and rotate it with your
+  controller; release to leave it at that pose. Drag the external lower-right
+  bracket to scale it (world, head or wrist), keeping the upper-left anchored.
+  Both handles use the app's gradient in transparent margins, like Steam's
+  window handles. Settings → **Lock grab/scale** hides and disables both handles;
+  the lock is saved. Position/size changes last for this run only.
   Wrist mounting fades the panel as its full orientation turns away from an
   upright viewer-facing pose (60°–75°), hiding interaction past that angle;
   world and head mounting do not fade.

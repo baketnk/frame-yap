@@ -36,6 +36,7 @@ CONFIG_DEFAULTS = {
     "input_priority": "normal",
     "advanced_debug": False,
     "auto_insert": False,
+    "lock_layout": False,
     "clock_24h": False,
     "date_format": "mdy",
     "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
@@ -100,6 +101,8 @@ def normalized_config(data):
     fixed["advanced_debug"] = debug if type(debug) is bool else False
     automatic = data.get("auto_insert", False)
     fixed["auto_insert"] = automatic if type(automatic) is bool else False
+    layout = data.get("lock_layout", False)
+    fixed["lock_layout"] = layout if type(layout) is bool else False
     clock = data.get("clock_24h", False)
     fixed["clock_24h"] = clock if type(clock) is bool else False
     date = data.get("date_format", "mdy")

@@ -10,12 +10,33 @@ constexpr Matrix34 identity{{{{1.f, 0.f, 0.f, 0.f}},
                               {{0.f, 1.f, 0.f, 0.f}},
                               {{0.f, 0.f, 1.f, 0.f}}}};
 void near(float actual, float expected) { assert(std::abs(actual - expected) < 1e-4f); }
+void near_pose(const Matrix34& actual, const Matrix34& expected) {
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 4; ++col)
+            near(actual[row][col], expected[row][col]);
+}
 Matrix34 translated(Matrix34 pose, float x, float y, float z) {
     pose[0][3] += x; pose[1][3] += y; pose[2][3] += z;
     return pose;
 }
 Matrix34 controller_at(float x, float y, float z = 1.f) {
     return translated(identity, x, y, z);
+}
+// Right-handed +90 degree rotations around each world axis.
+Matrix34 pitch() {
+    return Matrix34{{{{1.f, 0.f, 0.f, 0.f}},
+                     {{0.f, 0.f, -1.f, 0.f}},
+                     {{0.f, 1.f, 0.f, 0.f}}}};
+}
+Matrix34 yaw() {
+    return Matrix34{{{{0.f, 0.f, 1.f, 0.f}},
+                     {{0.f, 1.f, 0.f, 0.f}},
+                     {{-1.f, 0.f, 0.f, 0.f}}}};
+}
+Matrix34 roll() {
+    return Matrix34{{{{0.f, -1.f, 0.f, 0.f}},
+                     {{1.f, 0.f, 0.f, 0.f}},
+                     {{0.f, 0.f, 1.f, 0.f}}}};
 }
 void scale_case(float x, float y, float factor) {
     // 1 m square, top-left (-.5,+.5); shift controller and hence its
@@ -24,16 +45,30 @@ void scale_case(float x, float y, float factor) {
     PanelDrag drag;
     assert(drag.begin(PanelDragKind::Scale, identity, 1.f, 1.f, x, y, down));
     const auto same = drag.update(down);
-    assert(same); near(same->factor, 1.f); near(same->dx, 0); near(same->dy, 0);
+    assert(same); near(same->factor, 1.f); near_pose(same->pose, identity);
     const auto changed = drag.update(translated(down, (factor - 1.f) * x, (1.f - factor) * y, 0));
-    assert(changed); near(changed->factor, factor);
-    near(changed->dx, 0); near(changed->dy, 0);
+    assert(changed); near(changed->factor, factor); near_pose(changed->pose, identity);
 }
-// Yaw +90 degrees: panel right=-Z, up=+Y, normal=+X.
-Matrix34 yawed_panel() {
-    return Matrix34{{{{0.f, 0.f, 1.f, 2.f}},
-                     {{0.f, 1.f, 0.f, 3.f}},
-                     {{-1.f, 0.f, 0.f, 4.f}}}};
+void grab_rotation_case(const Matrix34& rotation, const Matrix34& expected) {
+    PanelDrag drag;
+    // Nonzero lever arm: rotation must turn the panel position as well as its axes.
+    const auto down = controller_at(0, 0);
+    const auto panel = translated(identity, .25f, .4f, -.3f);
+    assert(drag.begin(PanelDragKind::Grab, panel, 1, 1, .7f, .3f, down));
+    auto turned = rotation;
+    turned[2][3] = 1.f;
+    const auto update = drag.update(turned);
+    assert(update); near(update->factor, 1.f); near_pose(update->pose, expected);
+    // No accumulation: moving back to down restores the exact initial pose.
+    drag.reset();
+    assert(!drag.update(turned));
+    // Release while turned, then pick that rotated panel up again elsewhere.
+    const auto second_down = translated(turned, .12f, -.08f, .2f);
+    assert(drag.begin(PanelDragKind::Grab, update->pose, 1, 1, .4f, .6f, second_down));
+    const auto restored = drag.update(second_down);
+    assert(restored); near_pose(restored->pose, update->pose);
+    const auto shifted = drag.update(translated(second_down, 0.f, 0.f, -.4f));
+    assert(shifted); near_pose(shifted->pose, translated(update->pose, 0.f, 0.f, -.4f));
 }
 } // namespace
 
@@ -41,16 +76,37 @@ int main() {
     PanelDrag drag;
     assert(!drag.active()); assert(!drag.update(controller_at(0, 0)));
     const auto down = controller_at(0, 0);
-    assert(drag.begin(PanelDragKind::Grab, identity, 1.f, 1.f, .5f, .5f, down));
+    auto panel = translated(identity, .25f, .4f, -.3f);
+    assert(drag.begin(PanelDragKind::Grab, panel, 1.f, 1.f, .5f, .5f, down));
     assert(drag.active());
-    const auto still = drag.update(down);
-    assert(still); near(still->dx, 0); near(still->dy, 0); near(still->factor, 1);
-    auto moved = drag.update(controller_at(.23f, -.16f));
-    assert(moved); near(moved->dx, .23f); near(moved->dy, -.16f); near(moved->factor, 1);
-    // The original plane is fixed: the ray may hit outside the initial canvas.
-    moved = drag.update(controller_at(2.f, 1.f));
-    assert(moved); near(moved->dx, 2.f); near(moved->dy, 1.f);
+    for (int i = 0; i < 10; ++i) {
+        const auto still = drag.update(down);
+        assert(still); near_pose(still->pose, panel); near(still->factor, 1.f);
+    }
+    auto moved = drag.update(controller_at(.23f, -.16f, 1.45f));
+    assert(moved); near_pose(moved->pose, translated(panel, .23f, -.16f, .45f));
+    const auto released_pose = moved->pose;
     drag.reset(); assert(!drag.active()); assert(!drag.update(down));
+    // A subsequent grab begins at the dropped position and orientation, not the
+    // old calibration; releasing leaves the caller's last pose unchanged.
+    const auto rotated_pose = compose_pose(translated(yaw(), 0.f, .1f, 0.f), released_pose);
+    const auto second_down = controller_at(-.2f, .1f, .9f);
+    assert(drag.begin(PanelDragKind::Grab, rotated_pose, 1, 1, .5f, .5f, second_down));
+    moved = drag.update(second_down);
+    assert(moved); near_pose(moved->pose, rotated_pose);
+    moved = drag.update(translated(second_down, -.1f, .2f, -.3f));
+    assert(moved); near_pose(moved->pose, translated(rotated_pose, -.1f, .2f, -.3f));
+    drag.reset(); assert(!drag.update(second_down));
+
+    grab_rotation_case(pitch(), Matrix34{{{{1.f, 0.f, 0.f, .25f}},
+                                                {{0.f, 0.f, -1.f, 1.3f}},
+                                                {{0.f, 1.f, 0.f, 1.4f}}}});
+    grab_rotation_case(yaw(), Matrix34{{{{0.f, 0.f, 1.f, -1.3f}},
+                                              {{0.f, 1.f, 0.f, .4f}},
+                                              {{-1.f, 0.f, 0.f, .75f}}}});
+    grab_rotation_case(roll(), Matrix34{{{{0.f, -1.f, 0.f, -.4f}},
+                                               {{1.f, 0.f, 0.f, .25f}},
+                                               {{0.f, 0.f, 1.f, -.3f}}}});
 
     // Independent horizontal, vertical, and diagonal anchor-based scaling;
     // both contraction and growth, including intersections outside the panel.
@@ -59,14 +115,12 @@ int main() {
         scale_case(0.f, .5f, factor);
         scale_case(.5f, .5f, factor);
     }
-    assert(drag.begin(PanelDragKind::Scale, identity, 1, 1, .5f, .5f,
-                      controller_at(0, 0)));
-    // A perpendicular offset does not alter projected scale.
-    moved = drag.update(controller_at(.25f, .25f));
+    assert(drag.begin(PanelDragKind::Scale, identity, 1, 1, .5f, .5f, down));
+    moved = drag.update(controller_at(.25f, .25f)); // perpendicular to anchor vector
     assert(moved); near(moved->factor, 1);
     moved = drag.update(controller_at(.5f, -.5f));
     assert(moved); near(moved->factor, 2);
-    moved = drag.update(controller_at(0, 0)); // no feedback from the previous size
+    moved = drag.update(down); // no feedback from previous size
     assert(moved); near(moved->factor, 1);
     drag.reset();
     assert(!drag.begin(PanelDragKind::Scale, identity, 1, 1, 0, 0,
@@ -74,49 +128,40 @@ int main() {
     assert(drag.begin(PanelDragKind::Grab, identity, 1, 1, 0, 0,
                       controller_at(-.5f, .5f)));
 
-    // Rotating the controller changes the calibrated ray even without moving
-    // its origin. The initial ray is (.25,0,-1), rotated 90 degrees about Z.
+    // Scaling still uses the captured controller-local ray, not the grab pose.
     auto angled_down = controller_at(0, 0);
-    assert(drag.begin(PanelDragKind::Grab, identity, 1, 1, .75f, .5f, angled_down));
+    assert(drag.begin(PanelDragKind::Scale, identity, 1, 1, .75f, .5f, angled_down));
     auto turned = angled_down;
     turned[0][0] = 0; turned[0][1] = -1;
     turned[1][0] = 1; turned[1][1] = 0;
     moved = drag.update(turned);
-    assert(moved); near(moved->dx, -.25f); near(moved->dy, .25f);
+    assert(moved); near(moved->factor, .5f / .8125f); near_pose(moved->pose, identity);
 
-    const auto panel = yawed_panel();
-    // Use the same rotated basis for both controller and panel; a 0.2 m shift
-    // along panel right (-Z) yields panel-right grab displacement.
-    auto rotated_down = panel;
-    rotated_down[0][3] += 1.f;
-    assert(drag.begin(PanelDragKind::Grab, panel, 1, 1, .5f, .5f, rotated_down));
-    moved = drag.update(translated(rotated_down, 0, -.15f, -.2f));
-    assert(moved); near(moved->dx, .2f); near(moved->dy, -.15f);
-    auto corner_ray = rotated_down;
-    corner_ray[1][3] += .25f;
-    corner_ray[2][3] += .25f; // initial hit at x=.25, y=.25
-    assert(drag.begin(PanelDragKind::Scale, panel, 1, 1, .25f, .25f, corner_ray));
+    const auto yawed_panel = translated(yaw(), 2.f, 3.f, 4.f);
+    auto corner_ray = translated(yawed_panel, 1.f, .25f, .25f);
+    assert(drag.begin(PanelDragKind::Scale, yawed_panel, 1, 1, .25f, .25f, corner_ray));
     moved = drag.update(translated(corner_ray, 0, -.25f, -.25f));
-    assert(moved); near(moved->factor, 2.f);
+    assert(moved); near(moved->factor, 2.f); near_pose(moved->pose, yawed_panel);
 
-    // Relative poses are valid without converting them to world space: both
-    // inputs here share a rotated/translated parent coordinate system.
-    auto relative_panel = identity;
-    relative_panel[0][3] = -.3f; relative_panel[1][3] = .1f;
-    auto relative_controller = translated(relative_panel, 0, 0, .8f);
+    // The identical grab in a device-relative frame and under an arbitrary
+    // rigid parent in world space must produce equivalent world panel poses.
+    const auto parent = translated(compose_pose(yaw(), pitch()), 2.f, 3.f, 4.f);
+    const auto relative_panel = translated(roll(), -.3f, .1f, -.1f);
+    const auto relative_controller = controller_at(.1f, -.2f, .8f);
+    const auto relative_next = compose_pose(translated(yaw(), .08f, -.04f, .2f), relative_controller);
     assert(drag.begin(PanelDragKind::Grab, relative_panel, .4f, .2f,
                       .5f, .5f, relative_controller));
-    moved = drag.update(translated(relative_controller, .08f, -.04f, 0));
-    assert(moved); near(moved->dx, .08f); near(moved->dy, -.04f);
-    // Express the same poses in world coordinates under a yawed parent:
-    // (x, y, z) -> (2+z, 3+y, 4-x). The update is invariant.
-    auto world_panel = yawed_panel();
-    world_panel[1][3] += .1f; world_panel[2][3] += .3f;
-    auto world_controller = translated(world_panel, .8f, 0, 0);
+    moved = drag.update(relative_next);
+    assert(moved);
+    const auto relative_result = moved->pose;
+    const auto world_panel = compose_pose(parent, relative_panel);
+    const auto world_controller = compose_pose(parent, relative_controller);
     assert(drag.begin(PanelDragKind::Grab, world_panel, .4f, .2f,
                       .5f, .5f, world_controller));
-    moved = drag.update(translated(world_controller, 0, -.04f, -.08f));
-    assert(moved); near(moved->dx, .08f); near(moved->dy, -.04f);
+    moved = drag.update(compose_pose(parent, relative_next));
+    assert(moved); near_pose(moved->pose, compose_pose(parent, relative_result));
+    near_pose(relative_pose(parent, moved->pose), relative_result);
+    near_pose(compose_pose(world_controller, relative_pose(world_controller, world_panel)), world_panel);
 
     const float nan = std::numeric_limits<float>::quiet_NaN();
     const float inf = std::numeric_limits<float>::infinity();
@@ -133,24 +178,36 @@ int main() {
     assert(!drag.begin(PanelDragKind::Grab, identity, inf, 1, .5f, .5f, down));
     assert(!drag.begin(PanelDragKind::Grab, identity, 1, 1, nan, .5f, down));
     assert(!drag.begin(PanelDragKind::Grab, identity, 1, 1, -1, .5f, down));
-    assert(!drag.begin(PanelDragKind::Grab, identity, 1, 1, .5f, .5f, identity)); // zero ray
-    assert(!drag.begin(PanelDragKind::Grab, identity, 1, 1, .5f, .5f,
+    // Both inputs are finite but their relative translation cannot fit in Matrix34.
+    const float max = std::numeric_limits<float>::max();
+    assert(!drag.begin(PanelDragKind::Grab, translated(identity, -max, 0, 0),
+                       1, 1, .5f, .5f, translated(identity, max, 0, 0)));
+    assert(!drag.active()); assert(!drag.update(down));
+    assert(drag.begin(PanelDragKind::Grab, identity, 1, 1, .5f, .5f, identity));
+    assert(drag.update(identity)); // grab does not require a ray to the panel
+    drag.reset();
+    assert(!drag.begin(PanelDragKind::Scale, identity, 1, 1, .5f, .5f, identity)); // zero ray
+    assert(!drag.begin(PanelDragKind::Scale, identity, 1, 1, .5f, .5f,
                        controller_at(1.f, 0.f, 1e-7f))); // near parallel at down
-    assert(!drag.begin(PanelDragKind::Grab, identity, 1, 1, .5f, .5f,
+    assert(!drag.begin(PanelDragKind::Scale, identity, 1, 1, .5f, .5f,
                        controller_at(0, 0, 11.f))); // beyond 10 m
-    assert(drag.begin(PanelDragKind::Grab, identity, 1, 1, .5f, .5f, down));
+    assert(drag.begin(PanelDragKind::Scale, identity, 1, 1, .5f, .5f, down));
     bad = down; bad[1][2] = inf;
     assert(!drag.update(bad));
     bad = down; bad[0][0] = 0;
     assert(!drag.update(bad));
     assert(!drag.update(controller_at(0, 0, -1.f))); // behind ray source
     assert(!drag.update(controller_at(0, 0, 11.f))); // beyond 10 m
-    // Rotate -Z to -X: ray parallel to initial panel plane.
     bad = down;
     bad[0][0] = 0; bad[0][2] = 1;
     bad[2][0] = -1; bad[2][2] = 0;
-    assert(!drag.update(bad));
+    assert(!drag.update(bad)); // ray parallel to initial panel plane
     assert(drag.active()); // invalid update leaves original calibration intact
     assert(drag.update(down));
-    drag.reset(); assert(!drag.active());
+    drag.reset(); assert(!drag.active()); assert(!drag.update(down));
+    assert(drag.begin(PanelDragKind::Grab, identity, 1, 1, .5f, .5f, down));
+    bad = down; bad[2][3] = nan;
+    assert(!drag.update(bad));
+    assert(drag.update(down));
+    drag.reset(); assert(!drag.update(down));
 }

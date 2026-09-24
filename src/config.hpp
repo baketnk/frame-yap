@@ -21,6 +21,7 @@ struct Config {
     bool experimental_input_priority = false;
     bool advanced_debug = false; // opt-in full diagnostic logging; never raw audio recording
     bool auto_insert = false; // opt-in; runtime also requires uninterrupted verified Xwayland focus
+    bool lock_layout = false; // hide the grab and scale handles when enabled
     bool clock_24h = false;
     DateFormat date_format = DateFormat::MonthDayYear;
     WristPlacement wrist;
@@ -33,6 +34,7 @@ Config load_config(const std::filesystem::path& path);
 // Other user customizations and formatting are retained; creates a minimal config if absent.
 bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept;
+bool save_lock_layout(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_clock_24h(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_date_format(const std::filesystem::path& path, DateFormat format) noexcept;
 std::string resolve_font(const std::string& assets, const std::string& requested);

@@ -42,6 +42,7 @@ int main(int argc, char** argv) {
     assert(!load_config(path).experimental_input_priority);
     assert(!load_config(path).advanced_debug);
     assert(!load_config(path).auto_insert);
+    assert(!load_config(path).lock_layout);
     assert(!load_config(path).clock_24h);
     assert(load_config(path).date_format == DateFormat::MonthDayYear);
     assert(load_config(path).wrist.width == .30f);
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
     assert(!example.experimental_input_priority);
     assert(!example.advanced_debug);
     assert(!example.auto_insert);
+    assert(!example.lock_layout);
     assert(!example.clock_24h && example.date_format == DateFormat::MonthDayYear);
     assert(example.wrist.y == .18f && example.wrist.z == .089f);
     std::filesystem::create_directories(path.parent_path());
@@ -63,6 +65,10 @@ int main(int argc, char** argv) {
     assert(load_config(path).auto_insert);
     assert(save_auto_insert(path, false));
     assert(!load_config(path).auto_insert);
+    assert(save_lock_layout(path, true));
+    assert(load_config(path).lock_layout);
+    assert(save_lock_layout(path, false));
+    assert(!load_config(path).lock_layout);
     assert(save_clock_24h(path, true) && load_config(path).clock_24h);
     assert(save_date_format(path, DateFormat::Iso) && load_config(path).date_format == DateFormat::Iso);
     assert(save_date_format(path, DateFormat::Off) && load_config(path).date_format == DateFormat::Off);
@@ -97,6 +103,7 @@ int main(int argc, char** argv) {
     std::filesystem::create_symlink(path, link);
     assert(!save_advanced_debug(link, false));
     assert(!save_auto_insert(link, true));
+    assert(!save_lock_layout(link, true));
     assert(get(path) == before);
     std::filesystem::remove(link);
     put(path, R"({"font":")" + std::string(4090, 'x') + R"("})");
@@ -124,6 +131,26 @@ int main(int argc, char** argv) {
     assert(save_auto_insert(path, true));
     assert(load_config(path).auto_insert);
     assert(get(path) == R"({"auto_insert":true,"font":"kept"})");
+    for (const auto* invalid : {R"({"lock_layout":"true"})", R"({"lock_layout":1})",
+                               R"({"lock_layout":null})", R"({"lock_layout":[]})",
+                               R"({"lock_layout":{}})"}) {
+        put(path, invalid);
+        fails([&] { load_config(path); });
+        assert(!save_lock_layout(path, true));
+        assert(get(path) == invalid);
+    }
+    put(path, R"({"lock_layout":false,"font":"kept","date_format":"iso"})");
+    assert(save_lock_layout(path, true));
+    assert(load_config(path).lock_layout);
+    assert(get(path) == R"({"lock_layout":true,"font":"kept","date_format":"iso"})");
+    before = get(path);
+    assert(save_lock_layout(path, true) && get(path) == before);
+    assert(save_lock_layout(path, false));
+    assert(get(path) == R"({"lock_layout":false,"font":"kept","date_format":"iso"})");
+    put(path, R"({"font":"escaped \u0061","theme":{"ink":"#123ABC"},"auto_insert":true})");
+    assert(save_lock_layout(path, true));
+    assert(get(path) == R"({"font":"escaped \u0061","theme":{"ink":"#123ABC"},"auto_insert":true,"lock_layout":true})");
+    assert(load_config(path).lock_layout && load_config(path).auto_insert);
     put(path, R"({"input_priority":"normal"})");
     assert(!load_config(path).experimental_input_priority);
     for (const auto* invalid : {R"({"input_priority":true})", R"({"input_priority":16777216})",

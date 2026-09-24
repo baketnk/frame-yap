@@ -14,7 +14,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
 }
 void no_action(const SurfaceEvent& event) {
     assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
-           !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings);
+           !event.lock_layout && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -109,6 +109,21 @@ int main(int argc, char** argv) {
     assert(channel(1012, 723, 0) > 220 && channel(1040, 705, 2) > 220);
     assert(channel(1030, 704, 3) == 0 && channel(800, 724, 3) == 0);
     assert(channel(401, 721, 3) == alpha(401, 721));
+    auto regions = surface.input_regions();
+    assert(regions.size() == 3);
+    assert(regions[2].x == 996 && regions[2].y == 680); // masks use TOP-left, not GL mouse Y
+    surface.pointer_down(0, 500, 724);
+    surface.set_layout_locked(true);
+    assert(!surface.dragging(0));
+    assert(surface.render(p));
+    assert(alpha(500, 723) == 0 && alpha(1040, 705) == 0);
+    assert(surface.input_regions().size() == 1);
+    assert(!surface.pointer_down(0, 500, 724));
+    assert(!surface.pointer_down(0, 1028, 712));
+    no_action(surface.pointer_up(0, 900, 610));
+    assert(!surface.render(p));
+    surface.set_layout_locked(false); assert(surface.render(p));
+    assert(alpha(500, 723) == 255 && alpha(1040, 705) == 255);
 
     p.enabled = true;
     p.record_available = false;
@@ -148,6 +163,13 @@ int main(int argc, char** argv) {
     surface.render(p);
     surface.reset_pointers(); surface.render(p);
     if (argc >= 3) snapshot(surface, std::string(argv[2]) + "-settings.ppm");
+    auto lock = click(surface, 790, 160);
+    assert(lock.lock_layout == true && !lock.action);
+    assert(!surface.render(p)); // caller applies/persists the requested lock
+    surface.set_layout_locked(true); assert(surface.render(p));
+    lock = click(surface, 790, 160);
+    assert(lock.lock_layout == false); // unlock stays accessible in Settings
+    surface.set_layout_locked(false); assert(surface.render(p));
     assert(click(surface, 200, 420).recenter);
     auto event = click(surface, 180, 332);
     assert(event.mount == Mount::LeftWrist && !event.action);
@@ -206,6 +228,7 @@ int main(int argc, char** argv) {
     no_action(click(surface, 680, 420)); // laser toggle only exists on Settings
     no_action(click(surface, 680, 474)); // debug toggle only exists on Settings
     no_action(click(surface, 200, 474)); // auto insert only exists on Settings
+    no_action(click(surface, 790, 160)); // layout lock only exists on Settings
     no_action(click(surface, 200, 528)); // clock/date controls only exist on Settings
     no_action(click(surface, 680, 528));
 

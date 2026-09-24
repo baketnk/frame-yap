@@ -43,13 +43,6 @@ Matrix34 matrix(const vr::HmdMatrix34_t& value) {
     for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) result[r][c] = value.m[r][c];
     return result;
 }
-Matrix34 relative_to(const Matrix34& pose, const Matrix34& parent) {
-    Matrix34 result{}; // inverse rigid parent * pose
-    for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c)
-        for (int k = 0; k < 3; ++k)
-            result[r][c] += parent[k][r] * (pose[k][c] - (c == 3 ? parent[k][3] : 0.f));
-    return result;
-}
 constexpr std::array<const char*, 6> action_names{{"left_grip", "right_grip", "ptt", "cancel", "insert", "enter"}};
 void overlay_check(vr::EVROverlayError err, vr::IVROverlay* api, const char* op) {
     if (err != vr::VROverlayError_None)
@@ -90,19 +83,18 @@ struct Overlay::Impl {
     Config config;
     PanelSurface surface;
     Panel panel;
-    bool save_failed = false, debug_save_failed = false, auto_save_failed = false;
+    bool save_failed = false, debug_save_failed = false, auto_save_failed = false, layout_save_failed = false;
     bool world_ready = false, placed = false, has_texture = false, shown = false;
     float published_alpha = -1.f;
     float size_scale = 1.f;
-    bool size_changed = false;
-    float move_x = 0.f, move_y = 0.f;
-    Matrix34 canvas_pose{};
+    bool placement_dirty = false;
+    Matrix34 canvas_pose{}, drag_canvas{};
     PanelDrag drag;
     PanelDragKind drag_kind = PanelDragKind::Grab;
     unsigned drag_cursor = 0;
     vr::TrackedDeviceIndex_t drag_device = vr::k_unTrackedDeviceIndexInvalid;
     bool drag_trigger_observed = false;
-    float drag_scale = 1.f, drag_x = 0.f, drag_y = 0.f;
+    float drag_scale = 1.f;
     std::chrono::steady_clock::time_point drag_started{};
     vr::HmdMatrix34_t world_transform{};
     std::optional<Mount> applied_mount;
@@ -180,21 +172,13 @@ struct Overlay::Impl {
             surface.set_lasers_anytime(lasers_anytime);
             surface.set_advanced_debug(config.advanced_debug);
             surface.set_auto_insert(config.auto_insert);
+            surface.set_layout_locked(config.lock_layout);
             surface.set_clock_24h(config.clock_24h);
             surface.set_date_format(config.date_format);
             overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_VisibleInDashboard, true), overlay, "VisibleInDashboard");
             vr::HmdVector2_t mouse_scale{{float(W), float(H)}};
             overlay_check(overlay->SetOverlayMouseScale(handle, &mouse_scale), overlay, "SetOverlayMouseScale");
-            // Alpha is visual, not an input mask. Exclude the empty margins from
-            // laser intersection rather than blocking neighboring windows there.
-            std::array<vr::VROverlayIntersectionMaskPrimitive_t, 3> mask{};
-            const std::array<PanelSurface::Bounds, 3> regions{{{10, 10, CW - 20, CH - 20}, PanelSurface::grab, PanelSurface::scale}};
-            for (size_t i = 0; i < mask.size(); ++i) {
-                const auto b = regions[i];
-                mask[i].m_nPrimitiveType = vr::OverlayIntersectionPrimitiveType_Rectangle;
-                mask[i].m_Primitive.m_Rectangle = {float(b.x), float(H - b.y - b.h), float(b.w), float(b.h)};
-            }
-            overlay_check(overlay->SetOverlayIntersectionMask(handle, mask.data(), uint32_t(mask.size())), overlay, "SetOverlayIntersectionMask");
+            update_intersection_mask();
             system->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses.data(), uint32_t(poses.size()));
             place();
             draw(Panel{"Disabled", "", "Record to start local worker", false, false});
@@ -202,6 +186,19 @@ struct Overlay::Impl {
         } catch (...) { cleanup(); throw; }
     }
     ~Impl() { cleanup(); }
+    void update_intersection_mask() {
+        const auto regions = surface.input_regions();
+        std::vector<vr::VROverlayIntersectionMaskPrimitive_t> mask(regions.size());
+        for (size_t i = 0; i < mask.size(); ++i) {
+            const auto b = regions[i];
+            mask[i].m_nPrimitiveType = vr::OverlayIntersectionPrimitiveType_Rectangle;
+            // Mask rectangles are TOP-left pixel coordinates. Mouse events are
+            // bottom-left GL coordinates; flipping this mask makes the outside
+            // scale corner unclickable while the body happens to cover Grab.
+            mask[i].m_Primitive.m_Rectangle = {float(b.x), float(b.y), float(b.w), float(b.h)};
+        }
+        overlay_check(overlay->SetOverlayIntersectionMask(handle, mask.data(), uint32_t(mask.size())), overlay, "SetOverlayIntersectionMask");
+    }
     void cleanup() {
         if (overlay && handle != vr::k_ulOverlayHandleInvalid) {
             overlay->HideOverlay(handle);
@@ -245,7 +242,8 @@ struct Overlay::Impl {
         }
         if (effective == Mount::World && applied_mount && *applied_mount != Mount::World)
             world_ready = false; // a fresh world fallback near the wearer, not an old room location
-        std::string note = auto_save_failed ? "Auto insert preference not saved; using it only for this session." :
+        std::string note = layout_save_failed ? "Layout lock not saved; using it only for this session." :
+                           auto_save_failed ? "Auto insert preference not saved; using it only for this session." :
                            debug_save_failed ? "Debug preference not saved; using it only for this session." :
                            laser_change_failed ? "SteamVR declined the laser mode change." :
                            save_failed ? "Preference could not be saved; using it for this session." : "";
@@ -267,23 +265,24 @@ struct Overlay::Impl {
             applied_mount.reset();
         }
         surface.set_placement_note(note);
-        if (applied_mount != effective || (effective != Mount::World && anchor != target) || size_changed) {
-            if (applied_mount != effective || anchor != target) {
-                surface.reset_pointers(); drag.reset();
-                move_x = move_y = 0.f;
-            }
+        const bool relocated = applied_mount != effective || anchor != target;
+        if (relocated || placement_dirty) {
             const float base_width = mount_width(effective, config.wrist);
-            auto pose = effective == Mount::World ? matrix(world_transform) : relative_mount_pose(effective, config.wrist);
-            pose = resized_mount_pose(pose, base_width, size_scale, float(CH) / CW);
-            // Keep the original content width/center; transparent right/bottom
-            // margins extend the canvas, not the main panel's physical size.
-            const float meters_per_pixel = base_width * size_scale / CW;
-            const float dx = move_x + (W - CW) * .5f * meters_per_pixel;
-            const float dy = move_y - (H - CH) * .5f * meters_per_pixel;
-            for (int r = 0; r < 3; ++r) pose[r][3] += pose[r][0] * dx + pose[r][1] * dy;
-            canvas_pose = pose;
+            if (relocated) {
+                surface.reset_pointers(); drag.reset();
+                auto pose = effective == Mount::World ? matrix(world_transform) : relative_mount_pose(effective, config.wrist);
+                pose = resized_mount_pose(pose, base_width, size_scale, float(CH) / CW);
+                // Preserve main-panel dimensions when adding transparent margins.
+                const float meters_per_pixel = base_width * size_scale / CW;
+                const float dx = (W - CW) * .5f * meters_per_pixel;
+                const float dy = -(H - CH) * .5f * meters_per_pixel;
+                for (int r = 0; r < 3; ++r) pose[r][3] += pose[r][0] * dx + pose[r][1] * dy;
+                canvas_pose = pose;
+            }
+            // After a grab, keep the full released pose. Never rebuild it from
+            // a planar offset or configured orientation on the next poll.
             vr::HmdMatrix34_t transform{};
-            for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = pose[r][c];
+            for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = canvas_pose[r][c];
             if (effective == Mount::World)
                 overlay_check(overlay->SetOverlayTransformAbsolute(handle, vr::TrackingUniverseStanding, &transform), overlay,
                               "SetOverlayTransformAbsolute");
@@ -293,7 +292,7 @@ struct Overlay::Impl {
             overlay_check(overlay->SetOverlayWidthInMeters(handle, base_width * size_scale * W / CW), overlay, "SetOverlayWidthInMeters");
             applied_mount = effective;
             anchor = target;
-            size_changed = false;
+            placement_dirty = false;
         }
         placed = true;
         visibility();
@@ -306,11 +305,12 @@ struct Overlay::Impl {
         auto pose = matrix(poses[drag_device].mDeviceToAbsoluteTracking);
         if (*applied_mount != Mount::World) {
             if (!tracked(anchor)) return {};
-            pose = relative_to(pose, matrix(poses[anchor].mDeviceToAbsoluteTracking));
+            pose = relative_pose(matrix(poses[anchor].mDeviceToAbsoluteTracking), pose);
         }
         return pose;
     }
     void begin_drag(PanelDragKind kind, const vr::VREvent_t& event) {
+        if (config.lock_layout) { surface.reset_pointers(); drag.reset(); return; }
         drag_device = event.trackedDeviceIndex;
         drag_cursor = event.data.mouse.cursorIndex;
         // Single-cursor overlay: some runtime mouse events omit the source.
@@ -329,7 +329,7 @@ struct Overlay::Impl {
             last_pointer_event = "drag source unavailable";
             return;
         }
-        drag_scale = size_scale; drag_x = move_x; drag_y = move_y;
+        drag_scale = size_scale; drag_canvas = canvas_pose;
         drag_started = std::chrono::steady_clock::now();
         vr::VRControllerState_t state{};
         drag_trigger_observed = system->GetControllerState(drag_device, &state, sizeof(state)) &&
@@ -354,10 +354,11 @@ struct Overlay::Impl {
         const auto change = drag.update(*source);
         if (!change) { surface.reset_pointers(); drag.reset(); return; }
         const float scale = drag_kind == PanelDragKind::Scale ? std::clamp(drag_scale * change->factor, .5f, 2.f) : size_scale;
-        const float x = drag_kind == PanelDragKind::Grab ? std::clamp(drag_x + change->dx, -2.f, 2.f) : move_x;
-        const float y = drag_kind == PanelDragKind::Grab ? std::clamp(drag_y + change->dy, -2.f, 2.f) : move_y;
-        if (scale != size_scale || x != move_x || y != move_y) {
-            size_scale = scale; move_x = x; move_y = y; size_changed = true;
+        const auto pose = drag_kind == PanelDragKind::Grab ? change->pose :
+            resized_mount_pose(drag_canvas, mount_width(*applied_mount, config.wrist) * drag_scale * W / CW,
+                               scale / drag_scale, float(H) / W);
+        if (scale != size_scale || pose != canvas_pose) {
+            size_scale = scale; canvas_pose = pose; placement_dirty = true;
         }
     }
     bool available(UiAction action) const { return surface.available(action); }
@@ -477,7 +478,7 @@ struct Overlay::Impl {
                 last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.advanced_debug || event_result.auto_insert || event_result.clock_24h || event_result.date_format) ++pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.advanced_debug || event_result.auto_insert || event_result.lock_layout || event_result.clock_24h || event_result.date_format) ++pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
                     if (event_result.clock_24h) {
                         config.clock_24h = *event_result.clock_24h;
@@ -491,6 +492,14 @@ struct Overlay::Impl {
                         save_failed = persist_mount && !save_date_format(default_config_path(), config.date_format);
                         surface.set_date_format(config.date_format);
                         reset_input(result);
+                        return result;
+                    }
+                    if (event_result.lock_layout) {
+                        config.lock_layout = *event_result.lock_layout;
+                        surface.set_layout_locked(config.lock_layout);
+                        update_intersection_mask();
+                        layout_save_failed = persist_mount && !save_lock_layout(default_config_path(), config.lock_layout);
+                        reset_input(result); drag.reset();
                         return result;
                     }
                     if (event_result.auto_insert) {

@@ -200,6 +200,9 @@ Config load_config(const std::filesystem::path& path) {
         } else if (key == "auto_insert") {
             if (!value.is_bool) throw std::runtime_error("Config auto_insert must be a boolean");
             config.auto_insert = value.value == "true";
+        } else if (key == "lock_layout") {
+            if (!value.is_bool) throw std::runtime_error("Config lock_layout must be a boolean");
+            config.lock_layout = value.value == "true";
         } else if (key == "clock_24h") {
             if (!value.is_bool) throw std::runtime_error("Config clock_24h must be a boolean");
             config.clock_24h = value.value == "true";
@@ -305,6 +308,9 @@ bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexce
 }
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "auto_insert", enabled);
+}
+bool save_lock_layout(const std::filesystem::path& path, bool enabled) noexcept {
+    return save_bool_option(path, "lock_layout", enabled);
 }
 bool save_clock_24h(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "clock_24h", enabled);

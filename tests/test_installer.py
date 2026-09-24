@@ -75,6 +75,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(json.loads(config.read_text()), installer.CONFIG_DEFAULTS)
         self.assertIs(json.loads(config.read_text())["advanced_debug"], False)
         self.assertIs(json.loads(config.read_text())["auto_insert"], False)
+        self.assertIs(json.loads(config.read_text())["lock_layout"], False)
         self.assertEqual(list(config.parent.glob("config.json.backup-*")), [])
         self.assertIn("PYTHONDONTWRITEBYTECODE=1", launcher.read_text())
         self.assertTrue(os.access(root / "versions/v1/runtime/bin/helper", os.X_OK))
@@ -129,6 +130,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["input_priority"], "normal")
         self.assertIs(fixed["advanced_debug"], False)
         self.assertIs(fixed["auto_insert"], False)
+        self.assertIs(fixed["lock_layout"], False)
         self.assertIs(fixed["clock_24h"], False)
         self.assertEqual(fixed["date_format"], "mdy")
         self.assertEqual(fixed["wrist"], installer.CONFIG_DEFAULTS["wrist"])
@@ -138,6 +140,7 @@ class InstallTests(unittest.TestCase):
         fixed["input_priority"] = "experimental"
         fixed["advanced_debug"] = True
         fixed["auto_insert"] = True
+        fixed["lock_layout"] = True
         fixed["clock_24h"] = True
         fixed["date_format"] = "iso"
         fixed["buttons"]["enter"] = ""  # intentional disabling survives upgrades
@@ -148,6 +151,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(config.read_bytes(), compact)
         self.assertIs(json.loads(config.read_text())["advanced_debug"], True)
         self.assertIs(json.loads(config.read_text())["auto_insert"], True)
+        self.assertIs(json.loads(config.read_text())["lock_layout"], True)
         self.assertIs(json.loads(config.read_text())["clock_24h"], True)
         self.assertEqual(json.loads(config.read_text())["date_format"], "iso")
         self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), 1)
@@ -167,6 +171,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["input_priority"], "normal")
         self.assertIs(fixed["advanced_debug"], False)
         self.assertIs(fixed["auto_insert"], False)
+        self.assertIs(fixed["lock_layout"], False)
         self.assertEqual(fixed["wrist"]["x"], 0.04)
         self.assertEqual(fixed["wrist"]["y"], 0.18)
         self.assertEqual(fixed["wrist"]["width"], 0.30)
@@ -213,6 +218,19 @@ class InstallTests(unittest.TestCase):
             config.write_bytes(original)
             self.install("v1", archive, digest)
             self.assertIs(json.loads(config.read_text())["auto_insert"], False)
+            self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+
+    def test_lock_layout_boolean_repair_backs_up_invalid_values(self):
+        archive, digest = self.package("v1")
+        config = self.home / ".config/frameyap/config.json"
+        config.parent.mkdir(parents=True)
+        for invalid in ("true", 1, None, [], {}):
+            original = json.dumps({"lock_layout": invalid, "font": "/custom/font.ttf"}).encode()
+            config.write_bytes(original)
+            self.install("v1", archive, digest)
+            fixed = json.loads(config.read_text())
+            self.assertIs(fixed["lock_layout"], False)
+            self.assertEqual(fixed["font"], "/custom/font.ttf")
             self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
 
     def test_digest_and_same_version_mismatch_leave_previous(self):
