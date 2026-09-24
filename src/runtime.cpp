@@ -54,8 +54,11 @@ int run(const Options& options) {
     Worker worker;
     Audio audio;
     Session session;
-    std::string detail = "Review mode. Other apps may also hear your mic. Enter is explicit.";
+    std::string detail;
+    std::string status_note;
     bool quit = false;
+    bool quick_open = false;
+    size_t quick_selected = 0;
     bool advanced_debug = overlay.advanced_debug();
     bool auto_insert = overlay.auto_insert();
     std::unique_ptr<FocusGuard> armed_focus;
@@ -68,19 +71,25 @@ int run(const Options& options) {
         switch (result) {
         case DeliveryResult::Ignored: break;
         case DeliveryResult::TextQueued:
-            detail = "Text and trailing space queued to current focus. Enter remains explicit."; break;
+            detail = "Text and trailing space queued to current focus. Enter remains explicit.";
+            status_note = "Text queued - Enter not sent"; break;
         case DeliveryResult::EnterQueued:
             detail = submit ? "Explicit Enter queued to current focus; not a delivery receipt."
-                            : "Input queued to current focus; not a delivery receipt."; break;
+                            : "Input queued to current focus; not a delivery receipt.";
+            status_note = "Enter queued - check destination"; break;
         case DeliveryResult::TextUncertain:
-            detail = "Text delivery uncertain; Enter not sent. Not retried; check destination."; break;
+            detail = "Text delivery uncertain; Enter not sent. Not retried; check destination.";
+            status_note = "Text uncertain - Enter not sent"; break;
         case DeliveryResult::EnterUncertain:
-            detail = "Enter delivery uncertain; not retried. Check destination."; break;
+            detail = "Enter delivery uncertain; not retried. Check destination.";
+            status_note = "Enter uncertain - check destination"; break;
         case DeliveryResult::TextQueuedEnterUnavailable:
-            detail = "Text and trailing space queued; Enter unavailable and not sent. Check destination."; break;
+            detail = "Text queued; Enter unavailable and not sent. Check destination.";
+            status_note = "Text queued - Enter unavailable"; break;
         }
     };
     auto warm = [&] {
+        status_note.clear(); quick_open = false;
         audio.close(); worker.stop(); session = Session{}; armed_focus.reset();
         worker.start(options.python, options.worker, options.model, options.threads, advanced_debug);
         detail = "Loading local model; microphone closed. Record again when Ready.";
@@ -101,6 +110,7 @@ int run(const Options& options) {
         if (!audio.open()) audio.prepare(); // recovery only; normal PTT never opens the device
         if (session.state() == State::Error) session.cancel();
         if (!session.record()) return;
+        status_note.clear();
         armed_focus.reset();
         if (auto_insert) {
             auto candidate = std::make_unique<FocusGuard>();
@@ -173,10 +183,14 @@ int run(const Options& options) {
         // Drawing precedes input polling: Enter is disabled until Ready is visible.
         const auto status = session.state() == State::Error && worker.ready()
             ? "Retry available - local model still loaded" : state_label(session.state());
-        Panel panel{status, session.text(), detail,
+        if (quick_open && (session.state() == State::Recording || session.state() == State::Transcribing || session.state() == State::Warming || session.state() == State::Error)) quick_open = false;
+        Panel panel{quick_open ? "Quick chat" : status_note.empty() ? status : status_note, session.text(), detail,
                     session.state() != State::Error && session.state() != State::Warming && session.state() != State::Transcribing,
                     session.state() == State::Recording,
                     session.state() != State::Warming && session.state() != State::Transcribing && session.state() != State::Review};
+        panel.quick_open = quick_open;
+        panel.quick_selected = quick_selected;
+        panel.quick_inputs = overlay.quick_inputs();
         if (panel.recording) panel.status += " - " + std::to_string(audio.seconds()) + " / 20s";
         overlay.draw(panel);
         auto actions = overlay.poll();
@@ -200,11 +214,14 @@ int run(const Options& options) {
                 case UiAction::Quit: quit = true; break;
                 case UiAction::Toggle:
                 case UiAction::Record:
+                    if (quick_open) break;
                     if (session.state() == State::Recording) stop_record(); else start_record();
                     break;
-                case UiAction::BeginRecord: start_record(); break;
+                case UiAction::BeginRecord: if (!quick_open) start_record(); break;
                 case UiAction::EndRecord: stop_record(); break;
                 case UiAction::Cancel: {
+                    if (quick_open) { quick_open = false; break; }
+                    status_note.clear();
                     auto state = session.state();
                     armed_focus.reset(); audio.cancel(); session.cancel(); detail = "Discarded. Idle microphone samples are discarded.";
                     if (state == State::Warming || state == State::Transcribing) {
@@ -216,10 +233,19 @@ int run(const Options& options) {
                     break;
                 }
                 case UiAction::Insert:
-                    delivery_detail(deliver_insert(session, acquire), false);
+                    if (!quick_open) delivery_detail(deliver_insert(session, acquire), false);
                     break;
                 case UiAction::Enter:
-                    delivery_detail(deliver_enter(session, acquire), true);
+                    if (quick_open) {
+                        quick_open = false; // one authorization, no repeat on a stale input
+                        delivery_detail(deliver_quick(overlay.quick_inputs().at(quick_selected), acquire), true);
+                    } else delivery_detail(deliver_enter(session, acquire), true);
+                    break;
+                case UiAction::QuickChat:
+                    if (panel.enabled && !panel.recording && !overlay.quick_inputs().empty()) {
+                        if (quick_open) quick_selected = (quick_selected + 1) % overlay.quick_inputs().size();
+                        else { quick_selected = 0; quick_open = true; }
+                    }
                     break;
                 }
             } catch (const std::exception& e) {
@@ -228,6 +254,9 @@ int run(const Options& options) {
                 // the IPC stream was partially written.
                 if (session.state() == State::Recording || session.state() == State::Transcribing) {
                     audio.close(); session.fail();
+                    status_note.clear();
+                } else {
+                    status_note = "Input unavailable - check destination";
                 }
                 detail = e.what();
             }

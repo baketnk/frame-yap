@@ -6,6 +6,7 @@
   "lock_layout": false,
   "clock_24h": false,
   "date_format": "mdy",
+  "quick_inputs": ["/new", "/questions", "/help"],
   "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
   "theme": {
     "background": "#0c101b",
@@ -23,6 +24,7 @@
     "ptt": "/user/hand/right/input/x",
     "cancel": "/user/hand/right/input/b",
     "insert": "/user/hand/right/input/a",
-    "enter": "/user/hand/right/input/y"
+    "enter": "",
+    "quick_chat": "/user/hand/right/input/y"
   }
 }

@@ -23,11 +23,15 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   transcribe. Repeated presses reached the controls-only diagnostic on Frame;
   live mic capture through this shortcut still needs guided acceptance. This
   PTT action is remappable through SteamVR bindings.
-- **Right B:** cancel/discard. **Right A:** insert reviewed text with a trailing space.
-  **Right Y:** insert pending text, then send Enter; with no pending text, Enter only.
-  **Left grip (when active):** double-tap for the same explicit Enter action.
-  Nothing submits automatically. Auto Insert is opt-in and off by default.
-- **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
+- **Right B:** cancel/discard (or close quick chat). **Right A:** insert reviewed text with a trailing space.
+  **Right Y:** open quick chat; press again to cycle its highlighted choice.
+  **Submit** on the overlay (or double-tap left grip when active) sends that choice
+  verbatim then Enter; outside quick chat it inserts pending review + Enter, or
+  sends Enter alone when there is no text. Edit the `quick_inputs` list in
+  `$XDG_CONFIG_HOME/frameyap/config.json` (restart to apply). Nothing submits
+  automatically. Auto Insert is opt-in and off by default.
+- **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Submit and Hold Quit
+  (hold the button for 0.9 seconds before releasing).
   Review and settings share one Inconsolata/neon-framed surface. The header
   shows local time/date; Settings selects 12/24-hour time and date format/off.
   Hold the thin bar below the panel to freely move and rotate it with your

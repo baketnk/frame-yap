@@ -100,4 +100,18 @@ DeliveryResult deliver_enter(Session& session, const DeliveryFactory& acquire) {
     catch (...) { return DeliveryResult::EnterUncertain; }
     return DeliveryResult::EnterQueued;
 }
+DeliveryResult deliver_quick(std::string_view literal, const DeliveryFactory& acquire) {
+    const auto safe = literal_text(literal);
+    if (safe.empty() || safe != literal || safe.size() > 64)
+        throw std::runtime_error("Invalid quick input");
+    auto input = lease(acquire);
+    try { input->text(safe); }
+    catch (...) { return DeliveryResult::TextUncertain; }
+    input.reset(); // Gamescope leases are single-use; never retry an uncertain text send.
+    try { input = lease(acquire); }
+    catch (...) { return DeliveryResult::TextQueuedEnterUnavailable; }
+    try { input->enter(); }
+    catch (...) { return DeliveryResult::EnterUncertain; }
+    return DeliveryResult::EnterQueued;
+}
 }

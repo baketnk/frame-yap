@@ -134,6 +134,18 @@ int main(int argc, char** argv) {
     if (argc >= 3) snapshot(surface, std::string(argv[2]) + "-review.ppm");
     assert(click(surface, 480, 610).action == UiAction::Insert);
     assert(click(surface, 680, 610).action == UiAction::Enter);
+    p.quick_inputs = {"/new", "/questions", "/help"};
+    p.quick_open = true;
+    assert(surface.render(p));
+    const auto first_quick = surface.pixels();
+    no_action(click(surface, 900, 430)); // review pagination hidden behind picker
+    p.quick_selected = 1;
+    assert(surface.render(p) && surface.pixels() != first_quick);
+    assert(click(surface, 680, 610).action == UiAction::Enter);
+    assert(click(surface, 280, 610).action == UiAction::Cancel);
+    no_action(click(surface, 480, 610));
+    p.quick_open = false; p.quick_selected = 0;
+    assert(surface.render(p));
     // Down/up must use the same controller, and release rechecks availability.
     surface.pointer_down(0, 480, 610);
     no_action(surface.pointer_up(1, 480, 610));
@@ -282,8 +294,17 @@ int main(int argc, char** argv) {
     // A press does not re-upload pixels. A completed action still reaches the
     // caller; meaningful panel changes redraw.
     assert(!surface.render(p));
-    surface.pointer_down(0, 900, 610); assert(!surface.render(p));
-    assert(surface.pointer_up(0, 900, 610).action == UiAction::Quit);
+    const auto at = PanelSurface::Clock::now();
+    surface.pointer_down(0, 900, 610, at);
+    no_action(surface.pointer_up(0, 900, 610, at + PanelSurface::quit_hold - std::chrono::milliseconds(1)));
+    surface.pointer_down(0, 900, 610, at);
+    no_action(surface.pointer_up(0, 280, 610, at + PanelSurface::quit_hold));
+    surface.pointer_down(0, 900, 610, at);
+    surface.reset_pointers();
+    no_action(surface.pointer_up(0, 900, 610, at + PanelSurface::quit_hold));
+    surface.pointer_down(0, 900, 610, at);
+    assert(surface.pointer_up(0, 900, 610, at + PanelSurface::quit_hold).action == UiAction::Quit);
+    assert(surface.render(p));
     assert(!surface.render(p));
     std::cout << "panel checks passed (no OpenVR, microphone or input injection)\n";
 }

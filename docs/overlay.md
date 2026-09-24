@@ -59,18 +59,23 @@ mount choices remain in Settings.
 
 The complete transcript preview is paginated by glyph width and four-line
 height; Previous and Next navigate it without changing the source transcript.
-Long status/detail messages show a prefix with a visible truncation marker.
+Status fits on the single status line; the old bottom detail label is gone.
 The footer remains available on all tabs: Record (labelled Stop while recording),
-Cancel, Insert, Enter, Quit. Record can retry after an error; it is disabled while
-warming/transcribing and until an existing review is inserted or discarded.
-Cancel can stop worker startup. Insert and Enter are disabled during recording
-and transcription. A pointer action requires
+Cancel, Insert, Submit, Hold Quit. Hold Quit needs a 900 ms press and release on
+that same button; its thin progress bar shows the hold. Record can retry after an
+error; it is disabled while warming/transcribing and until an existing review is
+inserted or discarded. Cancel can stop worker startup. Insert and Submit are
+disabled during recording and transcription. A pointer action requires
 a press/release on the same enabled control from the same cursor; focus loss,
-tab changes, action-state changes and relocation clear pending presses. Enter is *always* a separate
+tab changes, action-state changes and relocation clear pending presses. Submit is *always* a separate
 deliberate action, not inferred from text. Insert appends a trailing space (without
-doubling an existing trailing space). Enter inserts any pending review and then
-queues Enter; with no pending text it queues Enter only. A failed text step never
-proceeds to Enter. Recording never automatically submits. Auto insert, when
+doubling an existing trailing space). Submit inserts any pending review and then
+queues Enter; with no pending text it queues Enter only. Y opens the quick-chat
+list over the review area; each further Y press cycles its highlighted choice.
+Cancel closes the picker without discarding an existing review. Submit sends the
+selected text *without* a trailing space, then Enter. The choices are short
+single-line literals, not speech commands. A failed text step never proceeds to
+Enter. Recording never automatically submits. Auto insert, when
 explicitly enabled, can queue text + space after transcription only under the
 stable Xwayland focus guard described below.
 
@@ -108,6 +113,7 @@ installer creates one with defaults on first install. Copy the shipped
   "lock_layout": false,
   "clock_24h": false,
   "date_format": "mdy",
+  "quick_inputs": ["/new", "/questions", "/help"],
   "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
   "theme": {
     "background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
@@ -118,7 +124,8 @@ installer creates one with defaults on first install. Copy the shipped
     "ptt": "/user/hand/right/input/x",
     "cancel": "/user/hand/right/input/b",
     "insert": "/user/hand/right/input/a",
-    "enter": "/user/hand/right/input/y",
+    "enter": "",
+    "quick_chat": "/user/hand/right/input/y",
     "left_grip": "/user/hand/left/input/grip",
     "right_grip": "/user/hand/right/input/grip"
   }
@@ -162,12 +169,19 @@ speech-driven Auto Insert, target coverage and headset acceptance remain
 unverified. The setting is preserved on upgrade
 and a failed preference write applies only to the current session.
 
+`quick_inputs` is an editable list of 1–6 nonempty, printable ASCII strings,
+each at most 64 characters. Edit the JSON file and restart; there is no headset
+text editor. Inputs are literal (not expanded or interpreted by FrameYap) and
+are sent to the current Gamescope focus, so check the destination before Submit.
 `buttons` maps named OpenVR actions (`left_grip`, `right_grip`, `ptt`, `cancel`,
-`insert`, `enter`) to Frame physical `/user/hand/{left|right}/input/NAME`
+`insert`, `enter`, `quick_chat`) to Frame physical `/user/hand/{left|right}/input/NAME`
 button paths. Omitted actions retain their bundled defaults; an empty string
 disables a mapping, including after an upgrade. The Frame defaults are right
-X = hold-to-talk, B = Cancel, A = Insert + space, Y = Insert + Enter. Existing
-configs with empty actions retain those disabled mappings; change them explicitly
+X = hold-to-talk, B = Cancel, A = Insert + space, Y = quick chat. Enter has no
+single-button mapping by default; the left grip double-tap still submits.
+An existing config mapping `enter` to right Y is migrated to quick chat in memory
+when `quick_chat` is absent; this does not overwrite custom mappings.
+Existing configs with empty actions retain those disabled mappings; change them explicitly
 or use SteamVR's binding editor. Paths must be distinct. Only the Frame binding is customized;
 SteamVR user overrides may still supersede it. On customized launches a generated
 action manifest and adjacent bindings are placed in `$XDG_CACHE_HOME/frameyap/bindings`

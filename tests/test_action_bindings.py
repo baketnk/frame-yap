@@ -14,12 +14,15 @@ class ActionBindingTests(unittest.TestCase):
         config = json.loads((ROOT / "assets/config.example.json").read_text())
         sources = binding["bindings"]["/actions/frameyap"]["sources"]
         self.assertEqual(len({s["path"] for s in sources}), len(sources))
-        for action, button in {"ptt": "x", "cancel": "b", "insert": "a", "enter": "y"}.items():
+        for action, button in {"ptt": "x", "cancel": "b", "insert": "a", "quick_chat": "y"}.items():
             name = f"/actions/frameyap/in/{action}"
             path = f"/user/hand/right/input/{button}"
             self.assertIn({"name": name, "type": "boolean"}, manifest["actions"])
             self.assertEqual(config["buttons"][action], path)
             self.assertEqual([s["path"] for s in sources if s["inputs"]["click"]["output"] == name], [path])
+        self.assertEqual(config["buttons"]["enter"], "")
+        self.assertFalse(any(s["inputs"]["click"]["output"] == "/actions/frameyap/in/enter" for s in sources))
+        self.assertEqual(config["quick_inputs"], ["/new", "/questions", "/help"])
 
     def test_right_x_is_hold_to_talk(self):
         manifest = json.loads((ROOT / "assets/actions.json").read_text())

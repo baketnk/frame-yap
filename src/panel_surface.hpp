@@ -3,6 +3,7 @@
 #include "config.hpp"
 #include "panel_drag.hpp"
 #include <ctime>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -37,8 +38,10 @@ public:
     bool render(const Panel& panel);
     const std::vector<unsigned char>& pixels() const;
     // Handles capture one cursor and never authorize a UI action on release.
-    std::optional<PanelDragKind> pointer_down(unsigned cursor, float x, float y);
-    SurfaceEvent pointer_up(unsigned cursor, float x, float y);
+    using Clock = std::chrono::steady_clock;
+    static constexpr auto quit_hold = std::chrono::milliseconds(900);
+    std::optional<PanelDragKind> pointer_down(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
+    SurfaceEvent pointer_up(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
     bool dragging(unsigned cursor) const;
     // OpenVR intersection masks use top-left coordinates, unlike mouse events.
     std::vector<Bounds> input_regions() const;

@@ -43,7 +43,7 @@ Matrix34 matrix(const vr::HmdMatrix34_t& value) {
     for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) result[r][c] = value.m[r][c];
     return result;
 }
-constexpr std::array<const char*, 6> action_names{{"left_grip", "right_grip", "ptt", "cancel", "insert", "enter"}};
+constexpr std::array<const char*, 7> action_names{{"left_grip", "right_grip", "ptt", "cancel", "insert", "enter", "quick_chat"}};
 void overlay_check(vr::EVROverlayError err, vr::IVROverlay* api, const char* op) {
     if (err != vr::VROverlayError_None)
         throw std::runtime_error(std::string(op) + ": " + api->GetOverlayErrorNameFromEnum(err));
@@ -75,7 +75,7 @@ struct Overlay::Impl {
     vr::VROverlayHandle_t handle = vr::k_ulOverlayHandleInvalid;
     std::unique_ptr<OverlayTexture> gpu_texture;
     vr::VRActionSetHandle_t action_set = vr::k_ulInvalidActionSetHandle;
-    std::array<vr::VRActionHandle_t, 6> actions{};
+    std::array<vr::VRActionHandle_t, 7> actions{};
     std::filesystem::path settings_path;
     std::filesystem::path laser_settings_path;
     Mount mount;
@@ -101,7 +101,7 @@ struct Overlay::Impl {
     vr::TrackedDeviceIndex_t anchor = vr::k_unTrackedDeviceIndexInvalid;
     DoubleTap left;
     GripRecord right;
-    std::array<NeutralEdge, 4> edges{};
+    std::array<NeutralEdge, 5> edges{};
     std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> poses{};
     bool grip_capture = false, ptt_capture = false;
     bool focus = true;
@@ -577,19 +577,19 @@ struct Overlay::Impl {
         auto [ra, rd] = digital(1);
         const auto now = DoubleTap::Clock::now();
         if (left.update(la && focus, ld, available(UiAction::Enter), now)) result.push_back(UiAction::Enter);
-        switch (right.update(ra && focus, rd, now)) {
+        switch (right.update(ra && focus && !panel.quick_open, rd, now)) {
         case GripRecord::Change::Begin: grip_capture = true; result.push_back(UiAction::BeginRecord); break;
         case GripRecord::Change::End: grip_capture = false; result.push_back(UiAction::EndRecord); break;
         case GripRecord::Change::Cancel: grip_capture = false; result.push_back(UiAction::Cancel); break;
         case GripRecord::Change::None: break;
         }
-        constexpr std::array<UiAction, 4> mapped{{UiAction::Record, UiAction::Cancel, UiAction::Insert, UiAction::Enter}};
+        constexpr std::array<UiAction, 5> mapped{{UiAction::Record, UiAction::Cancel, UiAction::Insert, UiAction::Enter, UiAction::QuickChat}};
         for (size_t i = 0; i < edges.size(); ++i) {
             auto [active, down] = digital(i + 2);
-            if (i == 0 && (!active || !focus || !panel.enabled) && edges[i].reset()) {
+            if (i == 0 && (!active || !focus || !panel.enabled || panel.quick_open) && edges[i].reset()) {
                 ptt_capture = false; result.push_back(UiAction::Cancel);
             }
-            auto change = edges[i].update(active && focus && (panel.enabled || i == 1), down);
+            auto change = edges[i].update(active && focus && ((panel.enabled && (i != 0 || !panel.quick_open)) || i == 1), down);
             if (i == 0) {
                 if (change == NeutralEdge::Change::Down) {
                     ptt_capture = true; result.push_back(UiAction::BeginRecord);
@@ -611,6 +611,7 @@ std::vector<UiAction> Overlay::poll() { return impl_->poll(); }
 void Overlay::draw(const Panel& panel) { impl_->draw(panel); }
 bool Overlay::advanced_debug() const { return impl_->config.advanced_debug; }
 bool Overlay::auto_insert() const { return impl_->config.auto_insert; }
+const std::vector<std::string>& Overlay::quick_inputs() const { return impl_->config.quick_inputs; }
 std::string Overlay::controls_status() {
     // Compare the same actions across modes, before and after our pose/role gate.
     // IsInputAvailable and a successful UpdateActionState are not delivery proof.

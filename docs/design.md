@@ -61,8 +61,10 @@ Recording…  00:04           [ Cancel ]
 - States: disabled, warming, ready, recording, transcribing, review, inserted,
   unavailable/error. Recording uses visible icon + text, not color alone.
 - Default Frame bindings: hold right X to speak, release to finish; B cancels,
-  A inserts with a trailing space, Y inserts pending text then sends Enter.
-  The alternate right-grip tap-then-hold gesture and left-grip double-tap Enter
+  A inserts with a trailing space, Y opens/cycles the quick-chat selection.
+  Overlay Submit or left-grip double-tap submits the selected literal + Enter,
+  or pending review + Enter, or Enter alone if neither is present.
+  The alternate right-grip tap-then-hold gesture and left-grip double-tap Submit
   remain available. All are remappable through the Bindings button's SteamVR editor.
   A click-to-start/stop overlay button provides
   a binding-independent alternative. Bound recording to 20 seconds; discard
@@ -71,7 +73,7 @@ Recording…  00:04           [ Cancel ]
   uninterrupted Xwayland target observation remains valid. **Review mode (default):**
   wait for Insert. Bring up review on uncertainty rather than silently losing a
   transcript or typing into a new target. Live Frame acceptance remains open.
-- Enter requires its own explicit control activation: insert pending review with
+- Submit requires its own explicit control activation: insert pending review with
   a trailing space, then queue Enter only if the text step succeeds. With no
   review, it queues only Enter. Never interpret "submit", "delete" or other speech
   as commands. Transcription completion never auto-submits.

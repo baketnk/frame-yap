@@ -31,8 +31,8 @@ void help() {
                  "SteamVR Developer setting Enable global input from overlays.\n"
                  "Right X: hold to speak, release to review (default Frame binding).\n"
                  "Grip gestures are remappable but may be unavailable in the dashboard.\n"
-                 "Right B: cancel; A: insert + space; Y: insert pending text + Enter.\n"
-                 "Left grip: double-tap for the same explicit Enter action when active.\n"
+                 "Right B: cancel; A: insert + space; Y: quick chat picker.\n"
+                 "Left grip: double-tap to Submit (Enter alone when no review).\n"
                  "Review by default. Auto insert requires uninterrupted verified Xwayland focus.\n"
                  "Insert approves current focus; Enter is never automatic.\n"
                  "No device access unless an explicit runtime/check/registration mode is used.\n";
@@ -110,7 +110,8 @@ int main(int argc, char** argv) {
                         case frameyap::UiAction::Record: return "Record";
                         case frameyap::UiAction::Cancel: return "Cancel";
                         case frameyap::UiAction::Insert: return "Insert";
-                        case frameyap::UiAction::Enter: return "Enter";
+                        case frameyap::UiAction::Enter: return "Submit";
+                        case frameyap::UiAction::QuickChat: return "QuickChat";
                         case frameyap::UiAction::Quit: return "Quit";
                         case frameyap::UiAction::Toggle: return "Toggle";
                         }

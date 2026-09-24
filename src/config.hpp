@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace frameyap {
 using Rgba = std::array<unsigned char, 4>;
@@ -27,6 +28,7 @@ struct Config {
     WristPlacement wrist;
     // OpenVR action name -> physical Frame controller input path; empty disables it.
     std::map<std::string, std::string> buttons;
+    std::vector<std::string> quick_inputs{"/new", "/questions", "/help"};
 };
 std::filesystem::path default_config_path();
 Config load_config(const std::filesystem::path& path);

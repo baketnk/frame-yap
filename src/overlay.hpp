@@ -3,17 +3,26 @@
 #include <optional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace frameyap {
-enum class UiAction { Toggle, Record, BeginRecord, EndRecord, Cancel, Insert, Enter, Quit };
+enum class UiAction { Toggle, Record, BeginRecord, EndRecord, Cancel, Insert, Enter, QuickChat, Quit };
 struct Panel {
+    Panel() = default;
+    Panel(std::string status, std::string transcript, std::string detail,
+          bool enabled, bool recording, bool record_available = true)
+        : status(std::move(status)), transcript(std::move(transcript)), detail(std::move(detail)),
+          enabled(enabled), recording(recording), record_available(record_available) {}
     std::string status;
     std::string transcript;
     std::string detail;
     bool enabled = false;
     bool recording = false;
     bool record_available = true;
+    bool quick_open = false;
+    size_t quick_selected = 0;
+    std::vector<std::string> quick_inputs;
 };
 class Overlay {
 public:
@@ -26,6 +35,7 @@ public:
     void draw(const Panel& panel);
     bool advanced_debug() const;
     bool auto_insert() const;
+    const std::vector<std::string>& quick_inputs() const;
     std::string controls_status(); // diagnostic only, no input delivery
     std::string pointer_status() const; // diagnostic counters, no input delivery
 private:

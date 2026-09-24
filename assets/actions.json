@@ -12,7 +12,8 @@
     { "name": "/actions/frameyap/in/ptt", "type": "boolean" },
     { "name": "/actions/frameyap/in/cancel", "type": "boolean" },
     { "name": "/actions/frameyap/in/insert", "type": "boolean" },
-    { "name": "/actions/frameyap/in/enter", "type": "boolean" }
+    { "name": "/actions/frameyap/in/enter", "type": "boolean" },
+    { "name": "/actions/frameyap/in/quick_chat", "type": "boolean" }
   ],
   "localization": [{
     "language_tag": "en_US",
@@ -22,6 +23,7 @@
     "/actions/frameyap/in/ptt": "Hold right X to record (default; remappable)",
     "/actions/frameyap/in/cancel": "Cancel recording or discard",
     "/actions/frameyap/in/insert": "Insert reviewed text + trailing space",
-    "/actions/frameyap/in/enter": "Insert pending text + Enter (Enter only if no text)"
+    "/actions/frameyap/in/enter": "Submit: pending text + Enter, or Enter alone",
+    "/actions/frameyap/in/quick_chat": "Open quick chat / cycle selection"
   }]
 }

@@ -133,7 +133,14 @@ class InstallTests(unittest.TestCase):
         self.assertIs(fixed["lock_layout"], False)
         self.assertIs(fixed["clock_24h"], False)
         self.assertEqual(fixed["date_format"], "mdy")
+        self.assertEqual(fixed["quick_inputs"], ["/new", "/questions", "/help"])
+        self.assertEqual(fixed["buttons"]["quick_chat"], "/user/hand/right/input/y")
         self.assertEqual(fixed["wrist"], installer.CONFIG_DEFAULTS["wrist"])
+        legacy = installer.normalized_config({"buttons": {"enter": "/user/hand/right/input/y"}})
+        self.assertEqual(legacy["buttons"]["enter"], "")
+        self.assertEqual(legacy["buttons"]["quick_chat"], "/user/hand/right/input/y")
+        self.assertEqual(installer.normalized_config({"quick_inputs": ["oops\n"]})["quick_inputs"],
+                         ["/new", "/questions", "/help"])
         backups = list(config.parent.glob("config.json.backup-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), original)
@@ -144,6 +151,7 @@ class InstallTests(unittest.TestCase):
         fixed["clock_24h"] = True
         fixed["date_format"] = "iso"
         fixed["buttons"]["enter"] = ""  # intentional disabling survives upgrades
+        fixed["quick_inputs"] = ["/new", "/questions", "hello there"]
         fixed["wrist"]["y"] = 0.2
         compact = json.dumps(fixed, separators=(",", ":")).encode()
         config.write_bytes(compact)
@@ -168,6 +176,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["font"], "/system/face.ttf")
         self.assertEqual(fixed["theme"]["ink"], installer.CONFIG_DEFAULTS["theme"]["ink"])
         self.assertEqual(fixed["buttons"], installer.CONFIG_DEFAULTS["buttons"])  # colliding paths reset
+        self.assertEqual(fixed["quick_inputs"], installer.CONFIG_DEFAULTS["quick_inputs"])
         self.assertEqual(fixed["input_priority"], "normal")
         self.assertIs(fixed["advanced_debug"], False)
         self.assertIs(fixed["auto_insert"], False)

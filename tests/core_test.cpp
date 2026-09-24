@@ -42,6 +42,26 @@ Session review(std::string_view transcript) {
 }
 void delivery_checks() {
     {
+        auto s = review("pending review"); FakeDelivery fake;
+        CHECK(deliver_quick("/questions", fake.factory()) == DeliveryResult::EnterQueued);
+        CHECK((fake.events == std::vector<std::string>{"text:/questions", "enter"}));
+        CHECK(fake.acquisitions == 2 && fake.active_leases == 0);
+        CHECK(s.state() == State::Review && s.text() == "pending review");
+        for (auto bad : {"", " ", "two\nlines", "\x1b[0m"}) {
+            try { (void)deliver_quick(bad, fake.factory()); CHECK(false); }
+            catch (const std::runtime_error&) {}
+        }
+        CHECK(fake.acquisitions == 2);
+    }
+    {
+        FakeDelivery fake; fake.fail_text = true;
+        CHECK(deliver_quick("/new", fake.factory()) == DeliveryResult::TextUncertain);
+        CHECK((fake.events == std::vector<std::string>{"text:/new"}));
+        FakeDelivery unavailable; unavailable.fail_acquisition = 2;
+        CHECK(deliver_quick("/new", unavailable.factory()) == DeliveryResult::TextQueuedEnterUnavailable);
+        CHECK((unavailable.events == std::vector<std::string>{"text:/new"}));
+    }
+    {
         auto s = review("Hello 世界"); FakeDelivery fake;
         CHECK(deliver_insert(s, fake.factory()) == DeliveryResult::TextQueued);
         CHECK((fake.events == std::vector<std::string>{"text:Hello 世界 "}));

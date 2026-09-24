@@ -39,6 +39,7 @@ int main(int argc, char** argv) {
     assert(default_config_path().empty());
     ::setenv("XDG_CONFIG_HOME", dir.c_str(), 1);
     assert(load_config(path).buttons.empty());
+    assert((load_config(path).quick_inputs == std::vector<std::string>{"/new", "/questions", "/help"}));
     assert(!load_config(path).experimental_input_priority);
     assert(!load_config(path).advanced_debug);
     assert(!load_config(path).auto_insert);
@@ -48,6 +49,9 @@ int main(int argc, char** argv) {
     assert(load_config(path).wrist.width == .30f);
     auto example = load_config(std::filesystem::path(argv[1]) / "config.example.json");
     assert(example.buttons.at("ptt") == "/user/hand/right/input/x");
+    assert(example.buttons.at("quick_chat") == "/user/hand/right/input/y");
+    assert(example.buttons.at("enter").empty());
+    assert(example.quick_inputs.size() == 3);
     assert(example.font.empty());
     assert(!example.experimental_input_priority);
     assert(!example.advanced_debug);
@@ -183,6 +187,7 @@ int main(int argc, char** argv) {
     assert(generated.find("/actions/frameyap/in/right_grip") == std::string::npos);
     assert(generated.find("/user/hand/right/input/a") != std::string::npos);
     assert(generated.find("/user/hand/right/input/y") != std::string::npos);
+    assert(generated.find("/actions/frameyap/in/quick_chat") != std::string::npos);
     config.buttons["cancel"] = ""; config.buttons["insert"] = ""; config.buttons["enter"] = "";
     auto disabled = action_manifest(argv[1], config);
     generated = get(disabled.parent_path() / "bindings_frame_controller.json");
@@ -190,6 +195,17 @@ int main(int argc, char** argv) {
     assert(generated.find("/actions/frameyap/in/insert") == std::string::npos);
     assert(generated.find("/actions/frameyap/in/enter") == std::string::npos);
     assert(action_manifest(argv[1], {}) == std::filesystem::absolute(std::filesystem::path(argv[1]) / "actions.json"));
+    put(path, R"({"buttons":{"enter":"/user/hand/right/input/y"}})");
+    generated = get(action_manifest(argv[1], load_config(path)).parent_path() / "bindings_frame_controller.json");
+    assert(generated.find("/actions/frameyap/in/quick_chat") != std::string::npos);
+    assert(generated.find("/actions/frameyap/in/enter") == std::string::npos);
+    put(path, R"({"quick_inputs":["/new","custom phrase"]})");
+    assert((load_config(path).quick_inputs == std::vector<std::string>{"/new", "custom phrase"}));
+    for (const auto* invalid : {R"({"quick_inputs":[]})", R"({"quick_inputs":[42]})",
+                               R"({"quick_inputs":["line\nfeed"]})", R"({"quick_inputs":["\u001b"]})",
+                               R"({"quick_inputs":["", "/new"]})", R"({"quick_inputs":"/new"})"}) {
+        put(path, invalid); fails([&] { load_config(path); });
+    }
     put(path, R"({"buttons":{"ptt":"/user/hand/left/input/grip"}})");
     fails([&] { action_manifest(argv[1], load_config(path)); }); // overlapping bindings are never silently chosen
     put(path, R"({"buttons":{"ptt":"/user/hand/left/input/x\"}hack"}})");

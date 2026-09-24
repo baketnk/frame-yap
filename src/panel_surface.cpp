@@ -43,8 +43,8 @@ constexpr std::array<Button, 21> buttons{{
     {{32, 574, 176, 68}, Control::Record, "Record"},
     {{222, 574, 176, 68}, Control::Cancel, "Cancel"},
     {{412, 574, 176, 68}, Control::Insert, "Insert"},
-    {{602, 574, 176, 68}, Control::Enter, "Enter"},
-    {{792, 574, 176, 68}, Control::Quit, "Quit"},
+    {{602, 574, 176, 68}, Control::Enter, "Submit"},
+    {{792, 574, 176, 68}, Control::Quit, "Hold Quit"},
     {{32, 234, 454, 58}, Control::World, "World space"},
     {{514, 234, 454, 58}, Control::Head, "Head"},
     {{32, 308, 454, 58}, Control::Left, "Left wrist"},
@@ -111,6 +111,8 @@ struct PanelSurface::Impl {
     ClockLabel displayed_clock;
     std::string placement_note, binding_note;
     std::array<int, 2> pressed{{-1, -1}};
+    std::array<PanelSurface::Clock::time_point, 2> press_time{};
+    int hold_progress = 0;
     int drag_cursor = -1;
     std::vector<std::string> lines;
     size_t page = 0;
@@ -245,14 +247,16 @@ struct PanelSurface::Impl {
     }
     size_t page_count() const { return std::max(size_t(1), (lines.size() + lines_per_page - 1) / lines_per_page); }
     bool available(UiAction a) const {
-        if (a == UiAction::Record) return panel.recording || panel.record_available;
-        if (a == UiAction::Insert) return panel.enabled && !panel.recording && !panel.transcript.empty();
+        if (a == UiAction::Record) return !panel.quick_open && (panel.recording || panel.record_available);
+        if (a == UiAction::Insert) return !panel.quick_open && panel.enabled && !panel.recording && !panel.transcript.empty();
         if (a == UiAction::Enter) return panel.enabled && !panel.recording;
+        if (a == UiAction::QuickChat) return panel.enabled && !panel.recording && !panel.quick_inputs.empty();
         if (a == UiAction::Toggle) return false;
         return true;
     }
     bool visible(Control c) const {
-        if (c == Control::Prev || c == Control::Next) return tab == Tab::Review;
+        if (panel.quick_open && c != Control::Cancel && c != Control::Enter && c != Control::Quit) return false;
+        if (c == Control::Prev || c == Control::Next) return tab == Tab::Review && !panel.quick_open;
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
             c == Control::AdvancedDebug || c == Control::AutoInsert ||
             c == Control::Clock24h || c == Control::Date || c == Control::LockLayout) return tab == Tab::Settings;
@@ -284,9 +288,18 @@ struct PanelSurface::Impl {
             lines = wrap(p.transcript.empty() ? "Your words will appear here.\nReview them, then choose Insert." : p.transcript, 32, 904);
             page = 0; dirty = true;
         }
-        if (p.status != panel.status || p.detail != panel.detail || p.enabled != panel.enabled || p.recording != panel.recording)
+        if (p.status != panel.status || p.enabled != panel.enabled || p.recording != panel.recording ||
+            p.quick_open != panel.quick_open || p.quick_selected != panel.quick_selected || p.quick_inputs != panel.quick_inputs)
             dirty = true;
+        if (p.quick_open != panel.quick_open) reset();
         panel = p;
+        if (panel.quick_open && tab != Tab::Review) { tab = Tab::Review; dirty = true; }
+        int progress = 0;
+        for (size_t cursor = 0; cursor < pressed.size(); ++cursor)
+            if (pressed[cursor] == 10)
+                progress = std::max(progress, std::clamp(int(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    PanelSurface::Clock::now() - press_time[cursor]).count() / 100) + 1, 1, 10));
+        if (progress != hold_progress) { hold_progress = progress; dirty = true; }
         auto label = panel_clock(clock_time, clock_24h, date_format);
         if (label.time != displayed_clock.time || label.date != displayed_clock.date) dirty = true;
         if (!dirty) return false;
@@ -305,16 +318,22 @@ struct PanelSurface::Impl {
         auto status = wrap(panel.status, 27, 790);
         text(status.front(), 70, 109, 27, ink, 844);
         if (status.size() > 1) text("[...]", 864, 109, 23, muted, 968);
-        if (tab == Tab::Review) {
+        if (tab == Tab::Review && panel.quick_open) {
+            rounded({32, 212, 936, 324}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
+            text("QUICK CHAT    Y: NEXT   SUBMIT: SEND   CANCEL: CLOSE", 48, 243, 22, cyan, 952);
+            for (size_t i = 0; i < panel.quick_inputs.size() && i < 6; ++i) {
+                const Rect row{48, 254 + int(i) * 45, 904, 40};
+                const bool selected = i == panel.quick_selected;
+                rounded(row, 9, selected ? mix(card, cyan, .22f) : card,
+                        selected ? cyan : mix(card, muted, .4f), selected ? .2f : 0.f, selected ? 2 : 1);
+                text(panel.quick_inputs[i], 66, row.y + 28, 26, selected ? ink : muted, 930);
+            }
+        } else if (tab == Tab::Review) {
             rounded({32, 212, 936, 178}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
             for (size_t i = 0; i < lines_per_page && page * lines_per_page + i < lines.size(); ++i)
                 text(lines[page * lines_per_page + i], 48, 246 + int(i) * 40, 32,
                      panel.transcript.empty() ? muted : ink, 952);
             text("PAGE " + std::to_string(page + 1) + " / " + std::to_string(page_count()), 416, 436, 23, muted, 790);
-            auto detail = wrap(panel.detail, 24, 904);
-            for (size_t i = 0; i < std::min(size_t(2), detail.size()); ++i)
-                text(detail[i], 32, 486 + int(i) * 30, 24, muted, 936);
-            if (detail.size() > 2) text("[detail truncated]", 730, 546, 22, pink, 968);
             if (!binding_note.empty()) text(binding_note, 32, 203, 20, muted, 968);
         } else {
             text("Auto insert needs stable X focus; debug logs may contain speech.", 32, 204, 18, pink, 968);
@@ -341,6 +360,12 @@ struct PanelSurface::Impl {
             rounded(b.r, std::min(16, b.r.h / 3), fill,
                     !on ? mix(card, muted, .13f) : highlighted ? accent : mix(card, muted, .38f),
                     highlighted ? .23f : 0.f, highlighted ? 2 : 1);
+            if (b.id == Control::Quit && (pressed[0] == int(i) || pressed[1] == int(i))) {
+                const int cursor = pressed[0] == int(i) ? 0 : 1;
+                const float fraction = std::clamp(float(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    PanelSurface::Clock::now() - press_time[cursor]).count()) / PanelSurface::quit_hold.count(), 0.f, 1.f);
+                rect({b.r.x + 7, b.r.y + b.r.h - 9, int((b.r.w - 14) * fraction), 3}, pink);
+            }
             const std::string label = b.id == Control::Record && panel.recording ? "Stop" :
                 b.id == Control::Clock24h ? (clock_24h ? "Clock: 24 hour" : "Clock: 12 hour") :
                 b.id == Control::Date ? (date_format == DateFormat::Off ? "Date: Off" :
@@ -389,7 +414,7 @@ bool PanelSurface::available(UiAction a) const { return impl_->available(a); }
 bool PanelSurface::dragging(unsigned cursor) const {
     return cursor < impl_->pressed.size() && int(cursor) == impl_->drag_cursor;
 }
-std::optional<PanelDragKind> PanelSurface::pointer_down(unsigned cursor, float x, float y) {
+std::optional<PanelDragKind> PanelSurface::pointer_down(unsigned cursor, float x, float y, Clock::time_point now) {
     if (cursor >= impl_->pressed.size() || impl_->drag_cursor >= 0) return {};
     const auto contains = [&](Bounds b) { return Rect{b.x, b.y, b.w, b.h}.contains(x, y); };
     if (!impl_->layout_locked && (contains(grab) || contains(scale))) {
@@ -398,9 +423,11 @@ std::optional<PanelDragKind> PanelSurface::pointer_down(unsigned cursor, float x
         return contains(grab) ? PanelDragKind::Grab : PanelDragKind::Scale;
     }
     impl_->pressed[cursor] = impl_->hit(x, y);
+    impl_->press_time[cursor] = now;
+    if (impl_->pressed[cursor] == 10) impl_->dirty = true;
     return {};
 }
-SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
+SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::time_point now) {
     SurfaceEvent result;
     if (cursor >= impl_->pressed.size()) return result;
     if (impl_->drag_cursor >= 0) {
@@ -408,8 +435,10 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
         return result;
     }
     int index = std::exchange(impl_->pressed[cursor], -1);
+    if (index == 10) impl_->dirty = true;
     if (index < 0 || impl_->hit(x, y) != index) return result;
     auto c = buttons[index].id;
+    if (c == Control::Quit && now - impl_->press_time[cursor] < quit_hold) return result;
     if (c == Control::Record) result.action = impl_->panel.recording ? UiAction::EndRecord : UiAction::BeginRecord;
     else if (auto a = action(c)) result.action = a;
     else if (auto m = mounting(c)) { impl_->mount = *m; result.mount = *m; impl_->reset(); impl_->dirty = true; }

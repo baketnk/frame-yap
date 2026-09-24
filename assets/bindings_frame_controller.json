@@ -1,6 +1,6 @@
 {
   "controller_type": "frame_controller",
-  "description": "Right X: hold to dictate. B: cancel. A: insert + space. Y: insert + Enter. Remap in SteamVR.",
+  "description": "Right X: hold to dictate. B: cancel. A: insert + space. Y: quick chat. Left grip double-tap: submit.",
   "name": "FrameYap Steam Frame controls",
   "bindings": {
     "/actions/frameyap": {
@@ -33,7 +33,7 @@
         {
           "path": "/user/hand/right/input/y",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/enter" } }
+          "inputs": { "click": { "output": "/actions/frameyap/in/quick_chat" } }
         }
       ]
     }

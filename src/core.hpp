@@ -48,4 +48,6 @@ DeliveryResult deliver_insert(Session& session, const DeliveryFactory& acquire);
 // Review: insert text plus a trailing space, then explicitly send Enter only
 // after successful text delivery. Ready/Queued: Enter alone.
 DeliveryResult deliver_enter(Session& session, const DeliveryFactory& acquire);
+// Explicit quick input: exact configured literal, then Enter (no trailing space).
+DeliveryResult deliver_quick(std::string_view literal, const DeliveryFactory& acquire);
 }

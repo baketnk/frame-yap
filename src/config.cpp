@@ -13,7 +13,8 @@ namespace {
 struct Json {
     std::string value;
     std::map<std::string, Json> object;
-    bool is_string = false, is_object = false, is_number = false, is_bool = false;
+    std::vector<Json> array;
+    bool is_string = false, is_object = false, is_array = false, is_number = false, is_bool = false;
     size_t start = 0, end = 0; // original value span for non-destructive config updates
 };
 struct Parser {
@@ -88,8 +89,9 @@ struct Parser {
             fail();
         }
         if (eat('[')) {
+            result.is_array = true;
             if (eat(']')) return done();
-            do { parse(depth + 1); if (eat(']')) return done(); } while (eat(','));
+            do { result.array.push_back(parse(depth + 1)); if (eat(']')) return done(); } while (eat(','));
             fail();
         }
         size_t start = pos;
@@ -217,6 +219,18 @@ Config load_config(const std::filesystem::path& path) {
             if (!value.is_string || (value.value != "normal" && value.value != "experimental"))
                 throw std::runtime_error("Config input_priority must be normal or experimental");
             config.experimental_input_priority = value.value == "experimental";
+        } else if (key == "quick_inputs") {
+            if (!value.is_array || value.array.empty() || value.array.size() > 6)
+                throw std::runtime_error("Config quick_inputs must have 1 to 6 entries");
+            config.quick_inputs.clear();
+            for (const auto& entry : value.array) {
+                // Short single-line literals: no hidden control or normalization.
+                if (!entry.is_string || entry.value.empty() || entry.value.size() > 64 ||
+                    !std::all_of(entry.value.begin(), entry.value.end(), [](unsigned char c) { return c >= 32 && c <= 126; }) ||
+                    entry.value.find_first_not_of(' ') == std::string::npos)
+                    throw std::runtime_error("Config quick_inputs entries must be 1-64 printable ASCII characters");
+                config.quick_inputs.push_back(entry.value);
+            }
         } else if (key == "wrist") {
             if (!value.is_object) throw std::runtime_error("Config wrist must be an object");
             for (const auto& [name, v] : value.object) {
@@ -245,7 +259,7 @@ Config load_config(const std::filesystem::path& path) {
         } else if (key == "buttons") {
             if (!value.is_object) throw std::runtime_error("Config buttons must be an object");
             for (const auto& [name, v] : value.object) {
-                if (name != "left_grip" && name != "right_grip" && name != "ptt" && name != "cancel" && name != "insert" && name != "enter")
+                if (name != "left_grip" && name != "right_grip" && name != "ptt" && name != "cancel" && name != "insert" && name != "enter" && name != "quick_chat")
                     throw std::runtime_error("Unknown OpenVR button action: " + name);
                 if (!v.is_string) throw std::runtime_error("Button path must be a string");
                 auto path = v.value;
@@ -342,8 +356,12 @@ std::filesystem::path action_manifest(const std::string& assets, const Config& c
     std::map<std::string, std::string> buttons{{"left_grip", "/user/hand/left/input/grip"},
         {"right_grip", "/user/hand/right/input/grip"}, {"ptt", "/user/hand/right/input/x"},
         {"cancel", "/user/hand/right/input/b"}, {"insert", "/user/hand/right/input/a"},
-        {"enter", "/user/hand/right/input/y"}};
+        {"enter", ""}, {"quick_chat", "/user/hand/right/input/y"}};
     for (const auto& [key, path] : config.buttons) buttons[key] = path;
+    // Existing configs may explicitly repeat the old default Y -> enter.
+    // Migrate that default in memory; do not rewrite the user's file.
+    if (!config.buttons.contains("quick_chat") && buttons["enter"] == "/user/hand/right/input/y")
+        buttons["enter"].clear();
     std::string binding = "{\"controller_type\":\"frame_controller\",\"name\":\"FrameYap configured controls\",\"bindings\":{\"/actions/frameyap\":{\"sources\":[";
     std::map<std::string, std::string> used;
     for (const auto& [action, path] : buttons) {

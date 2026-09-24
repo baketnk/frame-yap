@@ -39,6 +39,7 @@ CONFIG_DEFAULTS = {
     "lock_layout": False,
     "clock_24h": False,
     "date_format": "mdy",
+    "quick_inputs": ["/new", "/questions", "/help"],
     "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
     "theme": {"background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
               "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
@@ -46,7 +47,8 @@ CONFIG_DEFAULTS = {
     "buttons": {"left_grip": "/user/hand/left/input/grip",
                 "right_grip": "/user/hand/right/input/grip",
                 "ptt": "/user/hand/right/input/x", "cancel": "/user/hand/right/input/b",
-                "insert": "/user/hand/right/input/a", "enter": "/user/hand/right/input/y"},
+                "insert": "/user/hand/right/input/a", "enter": "",
+                "quick_chat": "/user/hand/right/input/y"},
 }
 COLOR_RE = re.compile(r"#[0-9a-fA-F]{6}\Z")
 BUTTON_RE = re.compile(r"/user/hand/(left|right)/input/[A-Za-z0-9_]+\Z")
@@ -107,6 +109,10 @@ def normalized_config(data):
     fixed["clock_24h"] = clock if type(clock) is bool else False
     date = data.get("date_format", "mdy")
     fixed["date_format"] = date if date in ("off", "mdy", "dmy", "iso") else "mdy"
+    quick = data.get("quick_inputs", CONFIG_DEFAULTS["quick_inputs"])
+    fixed["quick_inputs"] = quick if (isinstance(quick, list) and 1 <= len(quick) <= 6
+        and all(isinstance(item, str) and 1 <= len(item) <= 64 and item.strip(" ")
+                and all(32 <= ord(ch) <= 126 for ch in item) for item in quick)) else CONFIG_DEFAULTS["quick_inputs"].copy()
     source = data.get("wrist")
     source = source if isinstance(source, dict) else {}
     fixed["wrist"] = {}
@@ -123,6 +129,8 @@ def normalized_config(data):
             valid = (isinstance(value, str) and (COLOR_RE.fullmatch(value) if section == "theme"
                      else (not value or BUTTON_RE.fullmatch(value))))
             fixed[section][name] = value if valid else default
+    if "quick_chat" not in (data.get("buttons") if isinstance(data.get("buttons"), dict) else {}) and fixed["buttons"]["enter"] == "/user/hand/right/input/y":
+        fixed["buttons"]["enter"] = ""  # former default Y is now quick chat
     paths = [value for value in fixed["buttons"].values() if value]
     if len(paths) != len(set(paths)):
         fixed["buttons"] = CONFIG_DEFAULTS["buttons"].copy()
@@ -131,6 +139,7 @@ def normalized_config(data):
         fixed["font"] = ""
     if size() > 4096:
         fixed["buttons"] = CONFIG_DEFAULTS["buttons"].copy()
+        fixed["quick_inputs"] = CONFIG_DEFAULTS["quick_inputs"].copy()
     return fixed
 
 
