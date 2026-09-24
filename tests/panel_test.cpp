@@ -34,6 +34,8 @@ int main(int argc, char** argv) {
     assert(surface.pixels()[(40 * PanelSurface::width + 40) * 4 + 3] == 255);
     // Disabled controls never emit insertion/submission. Retry/Cancel remain available.
     no_action(click(surface, 480, 610)); no_action(click(surface, 680, 610));
+    no_action(click(surface, 32, 574)); // clipped visual corners are not invisible hit targets
+    no_action(click(surface, 207, 575));
     assert(click(surface, 100, 610).action == UiAction::BeginRecord);
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     no_action(surface.pointer_up(0, 100, 610));

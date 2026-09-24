@@ -19,8 +19,11 @@ CJK coverage is claimed).
 `src/panel_surface.*` renders **one 1000×680 RGBA canvas** for review, settings,
 status and controls. One OpenVR handle receives it with `SetOverlayRaw`; tabs do
 not create extra overlays or render targets. The rounded mint-to-blue perimeter,
-shallow curved accent, and dark cards borrow kouseki's VR visual language, with
-an independently implemented CPU renderer and a baked halo rather than GPU bloom.
+shallow curved accent, and dark cards borrow kouseki's VR visual language. Rounded
+preview, status and control surfaces use independently rasterized antialiased edges
+and restrained baked neon halos rather than GPU bloom. The recording indicator and
+selected controls remain distinguishable by their labels, not color alone. Rounded
+control hit areas exclude their clipped corners.
 Rendering/uploads occur only for changed content, page, settings, or pointer
 feedback; static frames are reused. The caller may call `draw(Panel)` at 10 ms
 intervals. Tracking transforms do not require repainting the canvas.

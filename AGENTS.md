@@ -13,8 +13,12 @@ past observations; it never proves current device availability or grants a live 
   placeholder installer as functional or conflate an OpenVR app key with a store ID.
 - Default builds and tests are offline and hardware-free. No implicit package/model
   downloads, microphone recording, input injection or OpenVR initialization.
-- Hardware tests must be opt-in and distinguish API discovery from delivered input,
-  transcription quality, performance and human headset acceptance.
+- For changes intended for Frame, a local build is not completion: after offline
+  checks, upload/install the tested native build on the Frame test device and verify
+  the deployed version when device access is authorized. If unavailable, report
+  explicitly that the change is local-only; do not imply the headset was updated.
+- Live hardware tests remain opt-in and must distinguish API discovery from delivered
+  input, transcription quality, performance and human headset acceptance.
 - Preserve existing SSH and user sessions; never terminate SSH/session processes or
   use broad cleanup/restart commands. Stop only processes this project owns.
 - Keep audio, transcripts, model weights, credentials and private logs out of Git.

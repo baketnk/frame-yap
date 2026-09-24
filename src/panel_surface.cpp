@@ -15,10 +15,17 @@ using Color = std::array<unsigned char, 4>;
 constexpr Color background{12, 16, 27, 255}, card{20, 28, 43, 255};
 constexpr Color ink{230, 240, 249, 255}, muted{151, 173, 193, 255};
 constexpr Color cyan{31, 240, 164, 255}, pink{255, 110, 135, 255};
+float rounded_distance(float px, float py, int x, int y, int w, int h, float radius) {
+    const float dx = std::abs(px - (x + w / 2.f)) - (w / 2.f - radius);
+    const float dy = std::abs(py - (y + h / 2.f)) - (h / 2.f - radius);
+    return std::hypot(std::max(dx, 0.f), std::max(dy, 0.f)) +
+           std::min(std::max(dx, dy), 0.f) - radius;
+}
 struct Rect {
     int x, y, w, h;
     bool contains(float px, float py) const {
-        return std::isfinite(px) && std::isfinite(py) && px >= x && px < x + w && py >= y && py < y + h;
+        return std::isfinite(px) && std::isfinite(py) && px >= x && px < x + w && py >= y && py < y + h &&
+               rounded_distance(px, py, x, y, w, h, std::min(16, h / 3)) <= 0.f;
     }
 };
 enum class Control { Review, Settings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
@@ -117,28 +124,33 @@ struct PanelSurface::Impl {
             for (int x = std::max(r.x, 0); x < std::min(W, r.x + r.w); ++x)
                 std::copy(c.begin(), c.end(), pixels.begin() + (size_t(y) * W + x) * 4);
     }
-    void border(Rect r, Color c, int thickness = 1) {
-        rect({r.x, r.y, r.w, thickness}, c); rect({r.x, r.y + r.h - thickness, r.w, thickness}, c);
-        rect({r.x, r.y, thickness, r.h}, c); rect({r.x + r.w - thickness, r.y, thickness, r.h}, c);
+    void blend(int x, int y, Color color, float amount) {
+        auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
+        for (int k = 0; k < 3; ++k)
+            dst[k] = static_cast<unsigned char>(dst[k] * (1.f - amount) + color[k] * amount);
     }
-    void neon(Rect r, Color c) {
-        // Baked halo + bright core: no extra overlay, mesh, bloom pass or animation.
-        for (int spread = 5; spread >= 1; --spread) {
-            Color halo = background;
-            for (int k = 0; k < 3; ++k) halo[k] += (c[k] - halo[k]) / (spread * 3 + 2);
-            border({r.x - spread, r.y - spread, r.w + spread * 2, r.h + spread * 2}, halo);
-        }
-        border(r, c, 2);
+    void rounded(Rect r, int radius, Color fill, Color edge, float glow = 0.f, int stroke = 1) {
+        // Distance-field antialiasing and restrained baked glow. No second texture or GPU pass.
+        constexpr int halo = 10;
+        for (int y = std::max(0, r.y - halo); y < std::min(H, r.y + r.h + halo); ++y)
+            for (int x = std::max(0, r.x - halo); x < std::min(W, r.x + r.w + halo); ++x) {
+                const float d = rounded_distance(x + .5f, y + .5f, r.x, r.y, r.w, r.h, radius);
+                if (glow > 0.f && d > 0.f && d < halo) {
+                    const float falloff = 1.f - d / halo;
+                    blend(x, y, edge, glow * falloff * falloff);
+                }
+                if (d < .5f) blend(x, y, fill, std::clamp(.5f - d, 0.f, 1.f));
+                if (d > -stroke - .5f && d < .5f)
+                    blend(x, y, edge, std::clamp(d + stroke + .5f, 0.f, 1.f) *
+                                       std::clamp(.5f - d, 0.f, 1.f));
+            }
     }
     void frame() {
         // Independently rasterized version of kouseki's HUD visual language:
         // rounded mint-to-blue perimeter and a second shallow curved accent.
         for (int y = 0; y < H; ++y) for (int x = 0; x < W; ++x) {
             if (x > 34 && x < W - 34 && y > 34 && y < H - 34) continue;
-            const float qx = std::abs(x - W / 2.f) - (W / 2.f - 28.f);
-            const float qy = std::abs(y - H / 2.f) - (H / 2.f - 28.f);
-            const float distance = std::hypot(std::max(qx, 0.f), std::max(qy, 0.f)) +
-                                   std::min(std::max(qx, qy), 0.f) - 18.f;
+            const float distance = rounded_distance(x, y, 10, 10, W - 20, H - 20, 18.f);
             const float edge = std::abs(distance);
             const float strength = edge <= 1.f ? 1.f : .30f * std::max(0.f, 1.f - (edge - 1.f) / 6.f);
             const float t = float(x) / W;
@@ -252,14 +264,16 @@ struct PanelSurface::Impl {
         text("FrameYap", 32, 61, 40, ink, 300);
         text("ON-DEVICE / REVIEW FIRST", 280, 58, 22, muted, 720);
         text(mount_label(mount), 756, 58, 24, cyan, 968);
-        rect({32, 84, 7, 34}, panel.recording ? pink : cyan);
+        rounded({32, 78, 936, 48}, 13, {18, 31, 44, 255},
+                panel.recording ? Color{115, 64, 83, 255} : Color{45, 82, 98, 255},
+                panel.recording ? .16f : 0.f);
+        rounded({46, 95, 13, 13}, 6, panel.recording ? pink : cyan,
+                panel.recording ? pink : cyan, panel.recording ? .40f : .20f);
         auto status = wrap(panel.status, 27, 790);
-        text(status.front(), 54, 109, 27, ink, 844);
+        text(status.front(), 70, 109, 27, ink, 844);
         if (status.size() > 1) text("[...]", 864, 109, 23, muted, 968);
-        rect({32, 198, 936, 1}, {44, 61, 79, 255});
         if (!settings) {
-            rect({32, 214, 936, 176}, card);
-            rect({32, 214, 3, 176}, {50, 102, 119, 255});
+            rounded({32, 212, 936, 178}, 16, {22, 34, 49, 255}, {53, 103, 122, 255}, .18f);
             for (size_t i = 0; i < lines_per_page && page * lines_per_page + i < lines.size(); ++i)
                 text(lines[page * lines_per_page + i], 48, 246 + int(i) * 40, 32,
                      panel.transcript.empty() ? muted : ink, 952);
@@ -275,7 +289,7 @@ struct PanelSurface::Impl {
                  32, 486, 23, muted, 968);
             text("Tracking lost? Wrist placement falls back to world space.", 32, 518, 23, muted, 968);
         }
-        rect({32, 556, 936, 1}, {44, 61, 79, 255});
+        rect({32, 550, 936, 1}, {39, 65, 80, 255});
         for (size_t i = 0; i < buttons.size(); ++i) {
             const auto& b = buttons[i];
             if (!visible(b.id)) continue;
@@ -284,12 +298,14 @@ struct PanelSurface::Impl {
                             (mounting(b.id) && *mounting(b.id) == mount);
             bool hover = std::find(hovered.begin(), hovered.end(), int(i)) != hovered.end();
             bool down = std::find(pressed.begin(), pressed.end(), int(i)) != pressed.end();
-            rect(b.r, !on ? Color{18, 23, 34, 255} : down ? Color{37, 74, 89, 255} :
-                      hover || selected ? Color{27, 53, 68, 255} : card);
-            Color accent = b.id == Control::Record && panel.recording ? pink : cyan;
-            if (on && (hover || selected || b.id == Control::Record)) neon(b.r, accent);
-            else border(b.r, on ? Color{58, 79, 101, 255} : Color{30, 40, 53, 255});
-            if (selected) rect({b.r.x + 1, b.r.y + 1, 4, b.r.h - 2}, cyan);
+            const Color fill = !on ? Color{17, 23, 33, 255} : down ? Color{35, 77, 88, 255} :
+                               hover || selected ? Color{26, 55, 68, 255} : card;
+            const Color accent = b.id == Control::Record && panel.recording ? pink : cyan;
+            const bool highlighted = on && (hover || selected || b.id == Control::Record ||
+                                             (b.id == Control::Insert && panel.transcript.size()));
+            rounded(b.r, std::min(16, b.r.h / 3), fill,
+                    !on ? Color{35, 46, 59, 255} : highlighted ? accent : Color{67, 93, 112, 255},
+                    highlighted ? (hover || down ? .40f : .23f) : 0.f, highlighted ? 2 : 1);
             const auto label = b.id == Control::Record && panel.recording ? "Stop" : b.label;
             text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, 27, on ? ink : Color{81, 96, 113, 255}, b.r.x + b.r.w - 8);
             if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
