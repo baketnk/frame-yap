@@ -39,6 +39,10 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   panel colors, a font path and Frame controller button mappings; missing fonts
   fall back to bundled Inconsolata. The installer creates/checks this file and
   backs it up before repairs. See [overlay configuration](docs/overlay.md#user-theme-and-controller-configuration).
+- **Advanced debugging:** Settings toggle / `"advanced_debug": true` in config.
+  Off by default. Restarts the worker and discards current work; full exceptions,
+  worker output and transcripts go to private, bounded local logs. No raw audio
+  archive. See [diagnostics](docs/worker.md#advanced-debugging).
 - **Experimental input priority:** set `"input_priority": "experimental"` in
   that config and enable SteamVR's Developer option **Enable global input from
   overlays**. FrameYap then requests priority for its bound controller sources.

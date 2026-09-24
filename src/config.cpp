@@ -13,7 +13,8 @@ namespace {
 struct Json {
     std::string value;
     std::map<std::string, Json> object;
-    bool is_string = false, is_object = false, is_number = false;
+    bool is_string = false, is_object = false, is_number = false, is_bool = false;
+    size_t start = 0, end = 0; // original value span for non-destructive config updates
 };
 struct Parser {
     std::string_view s;
@@ -70,23 +71,25 @@ struct Parser {
         ws();
         if (pos == s.size()) fail();
         Json result;
-        if (s[pos] == '"') { result.value = str(); result.is_string = true; return result; }
+        result.start = pos;
+        auto done = [&]() { result.end = pos; return result; };
+        if (s[pos] == '"') { result.value = str(); result.is_string = true; return done(); }
         if (eat('{')) {
             result.is_object = true;
-            if (eat('}')) return result;
+            if (eat('}')) return done();
             do {
                 ws(); if (pos == s.size() || s[pos] != '"') fail();
                 auto key = str();
                 if (!eat(':')) fail();
                 auto [it, inserted] = result.object.emplace(std::move(key), parse(depth + 1));
                 if (!inserted) fail();
-                if (eat('}')) return result;
+                if (eat('}')) return done();
             } while (eat(','));
             fail();
         }
         if (eat('[')) {
-            if (eat(']')) return result;
-            do { parse(depth + 1); if (eat(']')) return result; } while (eat(','));
+            if (eat(']')) return done();
+            do { parse(depth + 1); if (eat(']')) return done(); } while (eat(','));
             fail();
         }
         size_t start = pos;
@@ -105,11 +108,15 @@ struct Parser {
             }
         }
         if (pos == start) fail();
+        if (s.substr(start, pos - start) == "true" || s.substr(start, pos - start) == "false") {
+            result.is_bool = true;
+            result.value = s.substr(start, pos - start);
+        }
         if (s[start] == '-' || (s[start] >= '0' && s[start] <= '9')) {
             result.is_number = true;
             result.value = s.substr(start, pos - start);
         }
-        return result;
+        return done();
     }
 };
 Rgba color(const Json& json) {
@@ -153,14 +160,16 @@ std::string read_file(const std::filesystem::path& p) {
     data.assign(buf, size_t(in.gcount()));
     return data;
 }
-void write_file(const std::filesystem::path& path, const std::string& content) {
+void write_file(const std::filesystem::path& path, const std::string& content, bool private_file = false) {
     auto temporary = path.string() + ".tmp." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     try {
         {
             std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
             out << content;
-            if (!out) throw std::runtime_error("Could not write generated OpenVR binding: " + path.string());
+            if (!out) throw std::runtime_error("Could not write file: " + path.string());
         }
+        if (private_file) std::filesystem::permissions(temporary, std::filesystem::perms::owner_read |
+            std::filesystem::perms::owner_write, std::filesystem::perm_options::replace);
         std::filesystem::rename(temporary, path);
     } catch (...) {
         std::error_code ignored;
@@ -185,6 +194,9 @@ Config load_config(const std::filesystem::path& path) {
         if (key == "font") {
             if (!value.is_string) throw std::runtime_error("Config font must be a path string");
             config.font = value.value;
+        } else if (key == "advanced_debug") {
+            if (!value.is_bool) throw std::runtime_error("Config advanced_debug must be a boolean");
+            config.advanced_debug = value.value == "true";
         } else if (key == "input_priority") {
             if (!value.is_string || (value.value != "normal" && value.value != "experimental"))
                 throw std::runtime_error("Config input_priority must be normal or experimental");
@@ -237,6 +249,37 @@ Config load_config(const std::filesystem::path& path) {
         } else throw std::runtime_error("Unknown FrameYap config key: " + key);
     }
     return config;
+}
+bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept {
+    try {
+        if (path.empty() || !path.is_absolute() || std::filesystem::is_symlink(path)) return false;
+        const bool existing = std::filesystem::exists(path);
+        if (existing && !std::filesystem::is_regular_file(path)) return false;
+        if (existing) load_config(path); // reject invalid/unknown settings rather than erase customizations
+        std::string bytes = existing ? read_file(path) : "{}\n";
+        Parser parser{bytes};
+        auto root = parser.parse(); parser.ws();
+        if (!root.is_object || parser.pos != bytes.size()) return false;
+        const std::string value = enabled ? "true" : "false";
+        auto it = root.object.find("advanced_debug");
+        if (it != root.object.end()) {
+            if (!it->second.is_bool) return false;
+            if (it->second.value == value) return true;
+            bytes.replace(it->second.start, it->second.end - it->second.start, value);
+        } else {
+            bytes.insert(root.end - 1, std::string(root.object.empty() ? "" : ",") +
+                "\"advanced_debug\":" + value);
+        }
+        // The native reader rejects files >=4097 bytes, even if the JSON is valid.
+        if (bytes.size() > 4096) return false;
+        const auto parent = path.parent_path();
+        if (std::filesystem::is_symlink(parent)) return false;
+        std::filesystem::create_directories(parent);
+        write_file(path, bytes, true);
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 std::string resolve_font(const std::string& assets, const std::string& requested) {
     const auto bundled = std::filesystem::path(assets) / "fonts/Inconsolata-Regular.ttf";

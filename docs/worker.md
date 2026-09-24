@@ -1,8 +1,8 @@
 # Offline Redux worker adapter (component, not an installed product)
 
 `src/worker.hpp` provides `frameyap::Worker`: call `start(python, script, model,
-threads=2)` explicitly, poll until `ready()`, then `submit(id, pcm)` and poll for
-one `WorkerReply` (text or generic per-request error). One request at a time;
+threads=2, advanced_debug=false)` explicitly, poll until `ready()`, then `submit(id, pcm)` and poll for
+one `WorkerReply` (text or privacy-safe per-request error). One request at a time;
 no queue, no capture and no input injection. `stop()` discards pending audio,
 terminates/reaps **only its direct child** (TERM, bounded 500 ms, then KILL),
 and is safe to repeat. Destruction stops it. `start()` returns without waiting
@@ -19,16 +19,19 @@ and writes only `clip.raw` with `O_EXCL|O_NOFOLLOW`, mode 0600. Clips are
 float32 (0.2..20 s). Files are unlinked after replies or shutdown, and the
 private directory is removed. Private clips are not encrypted against the
 account owner/root; do not use an untrusted runtime directory. The caller
-should pass a trusted interpreter and script. Neither audio nor transcripts
-are logged; child stderr is redirected to `/dev/null`, so worker diagnostics
-are deliberately generic.
+should pass a trusted interpreter and script. By default audio/transcripts are
+not logged and child stderr is redirected to `/dev/null`. Request errors report
+only a fixed stage (`audio`, `inference`, `response`) and built-in exception
+category, never the exception message, arbitrary class name, traceback or text.
+The native receiver allowlists those labels before displaying/logging them;
+unknown/legacy errors remain generic.
 
 The private pipes use unsigned LE32 payload lengths (1..65536), a one-byte
 message type and, for requests/replies, unsigned LE64 request ID. `T` + ID
 requests reading the fixed clip; `Y` means ready; `F` means load failure
 (`M` for missing/mismatched pinned model or private clip directory, `I` for a
 missing Python dependency, `D` for runtime/model load failure); `R` + ID + UTF-8
-text and `E` + ID + generic UTF-8 error are replies. Text is at most 4096
+text and `E` + ID + privacy-safe UTF-8 error are replies. Text is at most 4096
 bytes. An unexpected or duplicate reply, wrong ID, extra frame, closed pipe
 or oversized frame stops the worker. Warmup deadline is 120 s, transcription
 deadline 60 s; `poll()` must be called regularly to enforce deadlines. It
@@ -57,6 +60,32 @@ separate M87 Labs agreement; do not treat wheel availability as permission for u
 or bundling. See [third-party notes](third-party.md). No public runtime bundle has
 been released. Limited ARM64 measurements are in the [POC record](evidence/poc-cpu-overlay-2026-09-24.md),
 not a claim of complete headset acceptance.
+
+## Advanced debugging
+
+Explicitly set `"advanced_debug": true` in config or enable Settings → Advanced
+debugging. It is off by default. A Settings change restarts the owned worker,
+closes the microphone and discards current work/review; the replacement worker
+warms normally. Turning it off stops detailed capture but **does not delete
+previous logs**. Manual config edits take effect on application restart.
+
+With this opt-in the worker receives `--advanced-debug`: native/model stdout and
+stderr, sample counts, full exception tracebacks and recognized transcripts are
+captured. **These logs may contain private speech, transcript text and local
+paths. Inspect/redact before sharing; keep out of Git.** No raw audio archive is
+created; normal temporary clips still expire after replies/cancellation.
+
+Files: `$XDG_STATE_HOME/frameyap/worker-debug.log` (fallback
+`~/.local/state/frameyap/worker-debug.log`) and `worker-debug.previous.log`.
+Each debug worker start rotates the current log once; only these two files are
+retained, each bounded to 4 MiB. At the limit a marker is written and further
+output is drained/discarded for that worker session, not allowed to block it.
+The directory is owner-private 0700 and logs are 0600. Unsafe paths, symlinks,
+hardlinks or preexisting permissive files are refused with a visible error;
+there is no fallback to public temporary files. The app's single-instance lock
+is required to avoid competing rotation by multiple workers. Debug output never
+shares the framed protocol stdout. Direct worker CLI use with `--advanced-debug`
+writes to its caller's stderr; the native adapter supplies the private bounded sink.
 
 Hardware-free tests run through CTest, including fake-child cancellation, short
 injected warmup/request deadlines, duplicate/stale replies, malformed frames,

@@ -18,12 +18,16 @@ struct Config {
     std::string font; // absolute TTF/OTF path; empty uses the bundled face
     // Requests OpenVR's experimental global action priority; SteamVR must allow it too.
     bool experimental_input_priority = false;
+    bool advanced_debug = false; // opt-in full diagnostic logging; never raw audio recording
     WristPlacement wrist;
     // OpenVR action name -> physical Frame controller input path; empty disables it.
     std::map<std::string, std::string> buttons;
 };
 std::filesystem::path default_config_path();
 Config load_config(const std::filesystem::path& path);
+// Update only advanced_debug in an existing valid config; false on invalid/unwritable paths.
+// Other user customizations and formatting are retained; creates a minimal config if absent.
+bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept;
 std::string resolve_font(const std::string& assets, const std::string& requested);
 // No writes or OpenVR access when no custom button mappings are specified.
 // When customized, build a generated manifest and bindings under XDG cache.

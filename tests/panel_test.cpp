@@ -12,7 +12,8 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
     return surface.pointer_up(cursor, x, y);
 }
 void no_action(const SurfaceEvent& event) {
-    assert(!event.action && !event.mount && !event.lasers_anytime && !event.recenter && !event.open_bindings);
+    assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug &&
+           !event.recenter && !event.open_bindings);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -112,6 +113,19 @@ int main(int argc, char** argv) {
     laser = click(surface, 680, 420);
     assert(laser.lasers_anytime == false && !laser.action && !laser.mount);
     surface.set_lasers_anytime(false); assert(surface.render(p));
+    auto debug = click(surface, 680, 474);
+    assert(debug.advanced_debug == true && !debug.action && !debug.mount && !debug.lasers_anytime);
+    assert(!surface.render(p)); // an event is only a request; caller sets the accepted value
+    surface.set_advanced_debug(true); assert(surface.render(p)); assert(!surface.render(p));
+    surface.pointer_down(1, 680, 474);
+    surface.set_advanced_debug(false); assert(surface.render(p));
+    no_action(surface.pointer_up(1, 680, 474)); // stale press cannot toggle after state change
+    debug = click(surface, 680, 474);
+    assert(debug.advanced_debug == true);
+    surface.set_advanced_debug(true); assert(surface.render(p));
+    debug = click(surface, 680, 474);
+    assert(debug.advanced_debug == false);
+    surface.set_advanced_debug(false); assert(surface.render(p));
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     surface.set_placement_note("Wrist not tracked - using world space until it returns.");
     assert(surface.render(p)); assert(!surface.render(p));
@@ -123,6 +137,7 @@ int main(int argc, char** argv) {
     no_action(surface.pointer_up(1, 680, 260));
     no_action(click(surface, 680, 260)); // mount controls not active on Review
     no_action(click(surface, 680, 420)); // laser toggle only exists on Settings
+    no_action(click(surface, 680, 474)); // debug toggle only exists on Settings
 
     // Binding navigation is not a delivery action; settings and paging are hidden.
     assert(!surface.bindings_visible());
@@ -138,6 +153,7 @@ int main(int argc, char** argv) {
     no_action(click(surface, 680, 260));
     no_action(click(surface, 900, 430));
     no_action(click(surface, 680, 420));
+    no_action(click(surface, 680, 474));
     const auto editor = click(surface, 200, 434);
     assert(editor.open_bindings && !editor.action && !editor.mount && !editor.recenter && !editor.lasers_anytime);
     no_action(surface.pointer_up(0, 200, 434)); // one launch per deliberate click

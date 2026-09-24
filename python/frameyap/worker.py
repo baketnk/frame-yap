@@ -4,7 +4,7 @@ Wire protocol: unsigned LE32 payload length (max 65536), type byte, unsigned
 LE64 request id for T/R/E; Y (ready) and F (load failure) have no id. T refers
 to the fixed clip.raw in the private directory. R/E carry <=4096 UTF-8 bytes.
 Only one T may be outstanding. No stdout other than frames; stderr is suppressed
-by the native launcher. This module never captures audio or delivers input.
+by default, or captured privately with explicit --advanced-debug. This module never captures audio or delivers input.
 """
 
 import argparse
@@ -14,6 +14,7 @@ from pathlib import Path
 import stat
 import struct
 import sys
+import traceback
 
 MAX_FRAME = 65536
 MAX_TEXT = 4096
@@ -131,7 +132,19 @@ def read_clip(directory):
     return pcm
 
 
-def run(model, directory, input_fd=0, output_fd=1):
+def safe_request_error(stage, error):
+    """Only fixed labels: never stringify exceptions, paths, audio or transcripts."""
+    if stage not in ("audio", "inference", "response"):
+        stage = "unknown"
+    # Use built-in categories, not an arbitrary exception class name supplied by
+    # a model/runtime. Subclasses are reduced to their safe built-in category.
+    categories = (MemoryError, ImportError, OSError, UnicodeError, TypeError,
+                  ValueError, KeyError, IndexError, RuntimeError)
+    category = next((kind.__name__ for kind in categories if isinstance(error, kind)), "Exception")
+    return f"transcription failed [{stage}: {category}]".encode("ascii")
+
+
+def run(model, directory, input_fd=0, output_fd=1, advanced_debug=False):
     private_dir(directory)
     send_frame(output_fd, b"Y")
     while True:
@@ -141,19 +154,30 @@ def run(model, directory, input_fd=0, output_fd=1):
         if len(frame) != 9 or frame[0:1] != b"T":
             raise ValueError("invalid request")
         request_id = frame[1:9]
+        stage = "audio"
         try:
-            result = model.transcribe(audio=read_clip(directory), sample_rate=16000)
+            audio = read_clip(directory)
+            if advanced_debug:
+                print(f"request {int.from_bytes(request_id, 'little')}: audio samples={len(audio)} rate=16000", file=sys.stderr, flush=True)
+            stage = "inference"
+            result = model.transcribe(audio=audio, sample_rate=16000)
+            stage = "response"
             text = result["text"]
             if not isinstance(text, str):
-                raise ValueError("invalid model response")
+                raise TypeError("invalid model response")
             encoded = text.encode("utf-8", errors="strict")
             if len(encoded) > MAX_TEXT:
                 raise ValueError("transcript exceeds 4096 bytes")
+            if advanced_debug:
+                print(f"request {int.from_bytes(request_id, 'little')}: transcript={text!r}", file=sys.stderr, flush=True)
             send_frame(output_fd, b"R", request_id + encoded)
-        except Exception:
-            # Model exceptions may include audio or transcripts. Do not log or
-            # forward them to the overlay; request-local failure only.
-            send_frame(output_fd, b"E", request_id + b"transcription failed")
+        except Exception as error:
+            if advanced_debug:
+                print(f"request {int.from_bytes(request_id, 'little')}: failure stage={stage}", file=sys.stderr, flush=True)
+                traceback.print_exc(file=sys.stderr)
+            # Only fixed stage/category labels cross IPC. Exception messages and
+            # tracebacks may contain private audio/text and remain suppressed.
+            send_frame(output_fd, b"E", request_id + safe_request_error(stage, error))
 
 
 def main(argv=None):
@@ -161,6 +185,8 @@ def main(argv=None):
     parser.add_argument("--model", required=True)
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--clip-dir", required=True)
+    parser.add_argument("--advanced-debug", action="store_true",
+                        help="log full exceptions/runtime output and transcripts to stderr; may contain private speech")
     args = parser.parse_args(argv)
     if not 1 <= args.threads <= 64:
         parser.error("threads must be 1..64")
@@ -168,9 +194,15 @@ def main(argv=None):
     # the framed channel, not merely Python's sys.stdout wrapper.
     protocol_fd = os.dup(1)
     os.set_inheritable(protocol_fd, False)
-    with open(os.devnull, "wb") as null:
-        os.dup2(null.fileno(), 1)
-        os.dup2(null.fileno(), 2)
+    if args.advanced_debug:
+        # Native parent supplies a bounded private diagnostic sink. Model/native
+        # stdout must still never corrupt the duplicated framed protocol fd.
+        os.dup2(2, 1)
+        print("FrameYap advanced debugging ON: private speech/text/paths may be logged; no raw clip archive.", file=sys.stderr, flush=True)
+    else:
+        with open(os.devnull, "wb") as null:
+            os.dup2(null.fileno(), 1)
+            os.dup2(null.fileno(), 2)
     try:
         try:
             private_dir(args.clip_dir)
@@ -180,15 +212,20 @@ def main(argv=None):
         try:
             model = load_model(args.model, args.threads)
         except LocalModelError:
+            if args.advanced_debug: traceback.print_exc(file=sys.stderr)
             send_frame(protocol_fd, b"F", b"M")
             return 1
         except ImportError:
+            if args.advanced_debug: traceback.print_exc(file=sys.stderr)
             send_frame(protocol_fd, b"F", b"I")
             return 1
         except Exception:
+            if args.advanced_debug: traceback.print_exc(file=sys.stderr)
             send_frame(protocol_fd, b"F", b"D")
             return 1
-        run(model, args.clip_dir, output_fd=protocol_fd)
+        if args.advanced_debug:
+            print("Local model ready", file=sys.stderr, flush=True)
+        run(model, args.clip_dir, output_fd=protocol_fd, advanced_debug=args.advanced_debug)
         return 0
     finally:
         os.close(protocol_fd)

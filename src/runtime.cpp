@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fcntl.h>
+#include <iostream>
 #include <stdexcept>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -54,6 +55,7 @@ int run(const Options& options) {
     Session session;
     std::string detail = "Review mode. Other apps may also hear your mic. Enter is explicit.";
     bool quit = false;
+    bool advanced_debug = overlay.advanced_debug();
     const DeliveryFactory acquire = [&]() -> std::unique_ptr<DeliveryLease> {
         auto input = std::make_unique<NativeDeliveryLease>(options.socket);
         if (interrupted) throw std::runtime_error("Input cancelled before delivery");
@@ -77,7 +79,7 @@ int run(const Options& options) {
     };
     auto warm = [&] {
         audio.close(); worker.stop(); session = Session{};
-        worker.start(options.python, options.worker, options.model, options.threads);
+        worker.start(options.python, options.worker, options.model, options.threads, advanced_debug);
         detail = "Loading local model; microphone closed. Record again when Ready.";
     };
     auto stop_record = [&] {
@@ -108,6 +110,9 @@ int run(const Options& options) {
                         // E is a request-local error. The child still owns its
                         // loaded model and can accept the next utterance.
                         session.fail(); detail = reply->error + "; model ready. Record to retry.";
+                        // Worker::poll allows only fixed diagnostic labels here,
+                        // never exception messages, audio, paths or recognized text.
+                        std::cerr << "FrameYap worker: " << reply->error << '\n';
                     } else {
                         session.reply(reply->id, reply->text);
                         detail = session.text().empty() ? "No speech recognized; try again." : "Focus your destination, then Insert. Cancel discards.";
@@ -139,7 +144,16 @@ int run(const Options& options) {
                     session.state() != State::Warming && session.state() != State::Transcribing && session.state() != State::Review};
         if (panel.recording) panel.status += " - " + std::to_string(audio.seconds()) + " / 20s";
         overlay.draw(panel);
-        for (auto action : overlay.poll()) {
+        auto actions = overlay.poll();
+        if (advanced_debug != overlay.advanced_debug()) {
+            advanced_debug = overlay.advanced_debug();
+            // Consent changes take effect before any more work or delivery. The
+            // Settings warning makes the worker restart/cancellation explicit.
+            try { warm(); }
+            catch (const std::exception& e) { session.fail(); detail = e.what(); }
+            std::erase_if(actions, [](UiAction action) { return action != UiAction::Quit; });
+        }
+        for (auto action : actions) {
             try {
                 switch (action) {
                 case UiAction::Quit: quit = true; break;

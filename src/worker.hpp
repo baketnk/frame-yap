@@ -23,7 +23,7 @@ public:
     Worker(const Worker&) = delete;
     Worker& operator=(const Worker&) = delete;
     void start(const std::string& python, const std::string& script,
-               const std::string& model, int threads = 2);
+               const std::string& model, int threads = 2, bool advanced_debug = false);
     bool ready() const;
     void submit(uint64_t id, const std::vector<float>& pcm);
     std::optional<WorkerReply> poll();

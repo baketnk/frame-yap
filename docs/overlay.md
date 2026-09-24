@@ -98,6 +98,7 @@ installer creates one with defaults on first install. Copy the shipped
 {
   "font": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
   "input_priority": "normal",
+  "advanced_debug": false,
   "wrist": {"x": 0, "y": 0.18, "z": 0.089, "width": 0.30, "roll_degrees": 0},
   "theme": {
     "background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
@@ -117,6 +118,17 @@ installer creates one with defaults on first install. Copy the shipped
 
 Each theme color is `#RRGGBB`; omitted colors keep the default. `font` is a
 TTF/OTF file path (not a family name); a missing file uses the bundled font.
+`advanced_debug` is a boolean (default `false`, not a string): an opt-in
+request for full diagnostic logs. Full logs may contain speech/transcribed text
+and local paths; **raw audio clips are not archived**. The Settings tab shows
+an Advanced debugging ON/OFF toggle and warns that changing it restarts the
+worker and cancels current work (including pending review). Changes take effect
+immediately; failed saves show a warning and keep the selection for this session.
+Detailed logs are bounded and owner-private; see [worker diagnostics](worker.md#advanced-debugging). The native
+`save_advanced_debug(path, bool)` helper updates only this value in a valid
+config, retaining other fields and formatting; invalid/unwritable configs are
+left untouched and return failure. The installer backs up original bytes before
+repairing invalid values, while valid `true` and `false` are retained.
 `buttons` maps named OpenVR actions (`left_grip`, `right_grip`, `ptt`, `cancel`,
 `insert`, `enter`) to Frame physical `/user/hand/{left|right}/input/NAME`
 button paths. Omitted actions retain their bundled defaults; an empty string
@@ -202,7 +214,8 @@ keeps the selection for the session and displays a warning. `--mount
 world|left-wrist|right-wrist|head` overrides the saved choice for one launch without
 writing it; `--head` remains an alias for `--mount head`.
 
-Settings also has **Lasers anytime** (default off). When enabled, FrameYap sets
+Settings also has **Lasers anytime** (default off). Open the dashboard to change
+it when system-wide lasers are disabled. When enabled, FrameYap sets
 OpenVR's `VROverlayFlags_MakeOverlaysInteractiveIfVisible` on its panel. OpenVR
 requests system-wide laser mouse mode while the panel is visible, including
 with Steam's dashboard closed; it may change interaction with games. Turning

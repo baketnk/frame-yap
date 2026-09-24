@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
+#include <fstream>
+#include <sys/stat.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -143,6 +145,137 @@ int main(int argc, char** argv) {
             return failed;
         });
         assert(std::filesystem::is_empty(runtime));
+        // A separate fake worker proves stderr is not part of the framed pipe,
+        // even when diagnostics fill its pipe before the ready frame.
+        char scratch[] = "/tmp/frameyap-debug-test-XXXXXX";
+        if (!::mkdtemp(scratch)) throw std::runtime_error("debug fixture setup failed");
+        const auto root = std::filesystem::path(scratch);
+        try {
+            const auto script = root / "fake.py";
+            {
+                std::ofstream out(script);
+                out << R"PY(import argparse, os, struct, sys
+p = argparse.ArgumentParser()
+p.add_argument('--model')
+p.add_argument('--threads')
+p.add_argument('--clip-dir')
+p.add_argument('--advanced-debug', action='store_true')
+a = p.parse_args()
+protocol = os.dup(1)
+if a.advanced_debug:
+    os.dup2(2, 1)  # Match the production Python protocol/stdout split.
+    os.write(2, b'PRIVATE TRANSCRIPT /private/model/path\n')
+    os.write(1, b'PRIVATE STDOUT from model\n')
+    if a.model == 'spam':
+        for _ in range(1300): os.write(2, b'x' * 4096)
+else:
+    null = os.open(os.devnull, os.O_WRONLY)
+    os.dup2(null, 1)
+    os.close(null)
+os.write(protocol, struct.pack('<I', 1) + b'Y')
+while True:
+    request = os.read(0, 13)
+    if not request: break
+    assert len(request) == 13 and request[4:5] == b'T'
+    if a.model == 'unsafe':
+        value = b'E' + request[5:] + b'transcription failed [inference: RuntimeError] PRIVATE SPEECH'
+    elif a.model == 'safe':
+        value = b'E' + request[5:] + b'transcription failed [inference: RuntimeError]'
+    else:
+        value = b'R' + request[5:] + b'ok'
+    os.write(protocol, struct.pack('<I', len(value)) + value)
+)PY";
+            }
+            const auto state = root / "state";
+            ::setenv("XDG_STATE_HOME", state.c_str(), 1);
+            const auto logs = state / "frameyap";
+            const auto current = logs / "worker-debug.log";
+            const auto previous = logs / "worker-debug.previous.log";
+            worker.start(argv[1], script, "safe", 2); // OFF must not create files.
+            until([&] { worker.poll(); return worker.ready(); });
+            worker.submit(300, clip);
+            until([&] { reply = worker.poll(); return reply.has_value(); });
+            assert(reply->error == "transcription failed [inference: RuntimeError]");
+            worker.stop();
+            assert(!std::filesystem::exists(logs));
+
+            worker.start(argv[1], script, "spam", 2, true);
+            until([&] { worker.poll(); return worker.ready(); });
+            worker.submit(301, clip);
+            until([&] { reply = worker.poll(); return reply.has_value(); });
+            assert(reply->text == "ok");
+            worker.stop();
+            assert(std::filesystem::status(logs).permissions() == std::filesystem::perms::owner_all);
+            assert(std::filesystem::status(current).permissions() ==
+                   (std::filesystem::perms::owner_read | std::filesystem::perms::owner_write));
+            assert(std::filesystem::file_size(current) <= 4 * 1024 * 1024);
+            std::ifstream input(current, std::ios::binary);
+            std::string body((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+            assert(body.find("PRIVATE TRANSCRIPT /private/model/path") != std::string::npos);
+            assert(body.find("PRIVATE STDOUT from model") != std::string::npos);
+            assert(body.find("[worker diagnostics truncated; further output discarded]") != std::string::npos);
+            worker.start(argv[1], script, "unsafe", 2, true);
+            until([&] { worker.poll(); return worker.ready(); });
+            worker.submit(302, clip);
+            until([&] { reply = worker.poll(); return reply.has_value(); });
+            assert(reply->error == "transcription failed" && worker.ready());
+            worker.stop();
+            assert(std::filesystem::file_size(previous) <= 4 * 1024 * 1024);
+            assert(std::filesystem::file_size(current) < 4096);
+            auto size = std::filesystem::file_size(current);
+            worker.start(argv[1], script, "ok", 2); // OFF retains earlier logs.
+            until([&] { worker.poll(); return worker.ready(); });
+            worker.stop();
+            assert(std::filesystem::file_size(current) == size && std::filesystem::exists(previous));
+            std::filesystem::remove(current);
+            std::filesystem::create_symlink(script, current);
+            bool refused = false;
+            try { worker.start(argv[1], script, "ok", 2, true); }
+            catch (const std::runtime_error&) { refused = true; }
+            assert(refused && !worker.ready());
+            std::filesystem::remove(current);
+            { std::ofstream out(current); out << "existing"; }
+            ::chmod(current.c_str(), 0644);
+            refused = false;
+            try { worker.start(argv[1], script, "ok", 2, true); }
+            catch (const std::runtime_error&) { refused = true; }
+            assert(refused);
+            std::filesystem::remove(current);
+            { std::ofstream out(current); out << "linked"; }
+            ::chmod(current.c_str(), 0600);
+            std::filesystem::create_hard_link(current, root / "outside-link");
+            refused = false;
+            try { worker.start(argv[1], script, "ok", 2, true); }
+            catch (const std::runtime_error&) { refused = true; }
+            assert(refused);
+            std::filesystem::remove(root / "outside-link");
+            std::filesystem::remove(current);
+            std::filesystem::remove_all(logs);
+            std::filesystem::create_directory_symlink(root, logs);
+            refused = false;
+            try { worker.start(argv[1], script, "ok", 2, true); }
+            catch (const std::runtime_error&) { refused = true; }
+            assert(refused);
+            std::filesystem::remove(logs);
+            std::filesystem::create_directory(logs);
+            ::chmod(logs.c_str(), 0755);
+            refused = false;
+            try { worker.start(argv[1], script, "ok", 2, true); }
+            catch (const std::runtime_error&) { refused = true; }
+            assert(refused);
+            ::unsetenv("XDG_STATE_HOME");
+            ::setenv("HOME", root.c_str(), 1);
+            worker.start(argv[1], script, "ok", 2, true);
+            until([&] { worker.poll(); return worker.ready(); });
+            worker.stop();
+            assert(std::filesystem::exists(root / ".local/state/frameyap/worker-debug.log"));
+            ::setenv("XDG_STATE_HOME", "relative/state", 1);
+            refused = false;
+            try { worker.start(argv[1], script, "ok", 2, true); }
+            catch (const std::runtime_error&) { refused = true; }
+            assert(refused);
+            std::filesystem::remove_all(root);
+        } catch (...) { std::filesystem::remove_all(root); throw; }
         std::filesystem::remove(runtime);
     } catch (...) {
         std::filesystem::remove(runtime);

@@ -74,7 +74,7 @@ struct Overlay::Impl {
     Config config;
     PanelSurface surface;
     Panel panel;
-    bool save_failed = false;
+    bool save_failed = false, debug_save_failed = false;
     bool world_ready = false, placed = false, has_texture = false, shown = false;
     vr::HmdMatrix34_t world_transform{};
     std::optional<Mount> applied_mount;
@@ -151,6 +151,7 @@ struct Overlay::Impl {
                 laser_change_failed = true;
             }
             surface.set_lasers_anytime(lasers_anytime);
+            surface.set_advanced_debug(config.advanced_debug);
             overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_VisibleInDashboard, true), overlay, "VisibleInDashboard");
             vr::HmdVector2_t mouse_scale{{float(W), float(H)}};
             overlay_check(overlay->SetOverlayMouseScale(handle, &mouse_scale), overlay, "SetOverlayMouseScale");
@@ -190,7 +191,8 @@ struct Overlay::Impl {
         }
         if (effective == Mount::World && applied_mount && *applied_mount != Mount::World)
             world_ready = false; // a fresh world fallback near the wearer, not an old room location
-        std::string note = laser_change_failed ? "SteamVR declined the laser mode change." :
+        std::string note = debug_save_failed ? "Debug preference not saved; using it only for this session." :
+                           laser_change_failed ? "SteamVR declined the laser mode change." :
                            save_failed ? "Preference could not be saved; using it for this session." : "";
         if (effective != mount) note = save_failed ? "Wrist untracked; world fallback. Preference not saved." :
                                                      "Wrist not tracked - using world space until it returns.";
@@ -371,8 +373,17 @@ struct Overlay::Impl {
                 last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings) ++pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.advanced_debug) ++pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
+                    if (event_result.advanced_debug) {
+                        config.advanced_debug = *event_result.advanced_debug;
+                        debug_save_failed = persist_mount && !save_advanced_debug(default_config_path(), config.advanced_debug);
+                        surface.set_advanced_debug(config.advanced_debug);
+                        reset_input(result);
+                        // Runtime observes the change before handling this batch,
+                        // restarts its worker and invalidates pending work/actions.
+                        return result;
+                    }
                     if (event_result.open_bindings) {
                         // The editor changes input ownership. Invalidate held gestures
                         // and pointer presses; never turn the returning release into input.
@@ -456,6 +467,7 @@ Overlay::Overlay(const std::string& assets, const std::string& font, std::option
 Overlay::~Overlay() = default;
 std::vector<UiAction> Overlay::poll() { return impl_->poll(); }
 void Overlay::draw(const Panel& panel) { impl_->draw(panel); }
+bool Overlay::advanced_debug() const { return impl_->config.advanced_debug; }
 std::string Overlay::controls_status() {
     // Compare the same actions across modes, before and after our pose/role gate.
     // IsInputAvailable and a successful UpdateActionState are not delivery proof.

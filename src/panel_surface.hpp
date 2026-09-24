@@ -12,6 +12,7 @@ struct SurfaceEvent {
     std::optional<UiAction> action;
     std::optional<Mount> mount;
     std::optional<bool> lasers_anytime;
+    std::optional<bool> advanced_debug;
     bool recenter = false;
     bool open_bindings = false;
 };
@@ -32,6 +33,7 @@ public:
     void reset_pointers();
     void set_placement_note(std::string note);
     void set_lasers_anytime(bool enabled);
+    void set_advanced_debug(bool enabled);
     // PTT, Cancel, Insert, Enter, left-grip gesture, right-grip gesture.
     void set_bindings(std::array<std::string, 6> labels);
     void set_binding_note(std::string note);

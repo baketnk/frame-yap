@@ -73,6 +73,7 @@ class InstallTests(unittest.TestCase):
         self.assertNotIn("--font", launcher.read_text())  # run/check modes honor config font
         config = self.home / ".config/frameyap/config.json"
         self.assertEqual(json.loads(config.read_text()), installer.CONFIG_DEFAULTS)
+        self.assertIs(json.loads(config.read_text())["advanced_debug"], False)
         self.assertEqual(list(config.parent.glob("config.json.backup-*")), [])
         self.assertIn("PYTHONDONTWRITEBYTECODE=1", launcher.read_text())
         self.assertTrue(os.access(root / "versions/v1/runtime/bin/helper", os.X_OK))
@@ -125,17 +126,26 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["theme"]["card"], installer.CONFIG_DEFAULTS["theme"]["card"])
         self.assertEqual(fixed["buttons"]["cancel"], "/user/hand/right/input/b")
         self.assertEqual(fixed["input_priority"], "normal")
+        self.assertIs(fixed["advanced_debug"], False)
         self.assertEqual(fixed["wrist"], installer.CONFIG_DEFAULTS["wrist"])
         backups = list(config.parent.glob("config.json.backup-*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), original)
         fixed["input_priority"] = "experimental"
+        fixed["advanced_debug"] = True
         fixed["buttons"]["enter"] = ""  # intentional disabling survives upgrades
         fixed["wrist"]["y"] = 0.2
         compact = json.dumps(fixed, separators=(",", ":")).encode()
         config.write_bytes(compact)
         self.install("v1", archive, digest)
         self.assertEqual(config.read_bytes(), compact)
+        self.assertIs(json.loads(config.read_text())["advanced_debug"], True)
+        self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), 1)
+        fixed["advanced_debug"] = False
+        compact_off = json.dumps(fixed, separators=(",", ":")).encode()
+        config.write_bytes(compact_off)
+        self.install("v1", archive, digest)
+        self.assertEqual(config.read_bytes(), compact_off)
         self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), 1)
         original = b'{"font":"/system/face.ttf","input_priority":"highest","wrist":{"x":0.04,"y":true,"width":100,"obsolete":4},"theme":{"ink":"bad","retired":"#123456"},"buttons":{"ptt":"/user/hand/left/input/grip"},"old_option":4}'
         config.write_bytes(original)
@@ -145,6 +155,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(fixed["theme"]["ink"], installer.CONFIG_DEFAULTS["theme"]["ink"])
         self.assertEqual(fixed["buttons"], installer.CONFIG_DEFAULTS["buttons"])  # colliding paths reset
         self.assertEqual(fixed["input_priority"], "normal")
+        self.assertIs(fixed["advanced_debug"], False)
         self.assertEqual(fixed["wrist"]["x"], 0.04)
         self.assertEqual(fixed["wrist"]["y"], 0.18)
         self.assertEqual(fixed["wrist"]["width"], 0.30)
@@ -169,6 +180,18 @@ class InstallTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "foreign config path"):
             self.install("v1", archive, digest)
         self.assertTrue(config.is_symlink())
+
+    def test_debug_boolean_repair_backs_up_invalid_values(self):
+        archive, digest = self.package("v1")
+        config = self.home / ".config/frameyap/config.json"
+        config.parent.mkdir(parents=True)
+        for invalid in ("true", 1, None, [], {}):
+            original = json.dumps({"advanced_debug": invalid, "font": "/custom/font.ttf"}).encode()
+            config.write_bytes(original)
+            self.install("v1", archive, digest)
+            self.assertIs(json.loads(config.read_text())["advanced_debug"], False)
+            self.assertEqual(json.loads(config.read_text())["font"], "/custom/font.ttf")
+            self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
 
     def test_digest_and_same_version_mismatch_leave_previous(self):
         a, h = self.package("v1")
