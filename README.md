@@ -115,6 +115,9 @@ end-user compiler; full bundled-ASR distribution awaits runtime permission.
 - [Installer design](docs/install-design.md) and [packaging](docs/packaging.md).
 - [Current POC observations](docs/evidence/poc-cpu-overlay-2026-09-24.md): measured
   CPU behavior and native installation checks, with acceptance limits.
+- [Resize / Auto Insert deployment](docs/evidence/auto-insert-deployment-2026-09-24.md):
+  installed ARM64 version and narrow owned-target fixture; live speech-driven
+  Auto Insert and physical resize acceptance remain open.
 - [Earlier API evidence](docs/evidence/frameyap-apis-2026-09-24.md) and
   [provenance](docs/provenance.md): historical investigation, not live authority.
 - [Overlay](docs/overlay.md), [worker protocol](docs/worker.md),

@@ -141,8 +141,9 @@ Native Wayland focus and child text-field focus cannot be safely inferred here;
 those cases fall back to review. No automatic Enter, speech commands or retry.
 The compositor can still change focus in the gap between the final check and
 global delivery, and IME commit is not an application receipt. This path has
-offline synthetic focus tests; live automatic typing, target coverage and
-headset acceptance are still unverified. The setting is preserved on upgrade
+offline synthetic focus tests and a separate owned-target IME fixture; live
+speech-driven Auto Insert, target coverage and headset acceptance remain
+unverified. The setting is preserved on upgrade
 and a failed preference write applies only to the current session.
 
 `buttons` maps named OpenVR actions (`left_grip`, `right_grip`, `ptt`, `cancel`,
