@@ -28,7 +28,8 @@ public:
     const std::vector<unsigned char>& pixels() const;
     void pointer_down(unsigned cursor, float x, float y);
     SurfaceEvent pointer_up(unsigned cursor, float x, float y);
-    void pointer_move(unsigned cursor, float x, float y);
+    // Returns a relative physical-width change while dragging the resize grip.
+    std::optional<float> pointer_move(unsigned cursor, float x, float y);
     void reset_pointers();
     void set_placement_note(std::string note);
     void set_lasers_anytime(bool enabled);

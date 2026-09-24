@@ -13,6 +13,7 @@ namespace frameyap {
 namespace {
 constexpr int W = PanelSurface::width, H = PanelSurface::height;
 using Color = Rgba;
+constexpr int grip_x = 927, grip_y = 646, grip_w = 51, grip_h = 29;
 float rounded_distance(float px, float py, int x, int y, int w, int h, float radius) {
     const float dx = std::abs(px - (x + w / 2.f)) - (w / 2.f - radius);
     const float dy = std::abs(py - (y + h / 2.f)) - (h / 2.f - radius);
@@ -109,6 +110,8 @@ struct PanelSurface::Impl {
     bool dirty = true, lasers_anytime = false, advanced_debug = false;
     std::string placement_note, binding_note;
     std::array<int, 2> pressed{{-1, -1}};
+    int resize_cursor = -1;
+    float resize_x = 0.f, resize_y = 0.f;
     std::vector<std::string> lines;
     size_t page = 0;
     static constexpr size_t lines_per_page = 4;
@@ -262,6 +265,7 @@ struct PanelSurface::Impl {
     }
     void reset() {
         pressed.fill(-1);
+        resize_cursor = -1;
     }
     bool render(const Panel& p) {
         if (p.recording != panel.recording || p.enabled != panel.enabled ||
@@ -334,6 +338,11 @@ struct PanelSurface::Impl {
                      active ? cyan : muted, b.r.x + b.r.w - 12);
             }
         }
+        // Separate from the Quit hitbox. The three diagonal marks remain
+        // visible on both tabs, slightly inset from the lower-right corner.
+        for (int n = 0; n < 3; ++n)
+            for (int i = 0; i < 13 + 5 * n; ++i)
+                rect({956 - i, 657 + 5 * n + i / 3, 2, 2}, cyan);
         dirty = false;
         return true;
     }
@@ -344,17 +353,30 @@ PanelSurface::~PanelSurface() = default;
 bool PanelSurface::render(const Panel& p) { return impl_->render(p); }
 const std::vector<unsigned char>& PanelSurface::pixels() const { return impl_->pixels; }
 bool PanelSurface::available(UiAction a) const { return impl_->available(a); }
-void PanelSurface::pointer_move(unsigned, float, float) {
-    // Hit-test on down/up only; laser movement does not change panel content
-    // and does not require a GPU texture upload.
+std::optional<float> PanelSurface::pointer_move(unsigned cursor, float x, float y) {
+    if (cursor >= impl_->pressed.size() || int(cursor) != impl_->resize_cursor ||
+        !std::isfinite(x) || !std::isfinite(y)) return {};
+    // OpenVR supplies coordinates on the *current* panel. Work incrementally
+    // so resizing never depends on a stale down-position after a width change.
+    const float delta = (x - impl_->resize_x) / W - (y - impl_->resize_y) / H;
+    impl_->resize_x = x; impl_->resize_y = y;
+    return std::clamp(1.f + delta, .9f, 1.1f);
 }
 void PanelSurface::pointer_down(unsigned cursor, float x, float y) {
     if (cursor >= impl_->pressed.size()) return;
+    if (impl_->resize_cursor < 0 && std::isfinite(x) && std::isfinite(y) &&
+        x >= grip_x && x < grip_x + grip_w && y >= grip_y && y < grip_y + grip_h) {
+        impl_->resize_cursor = int(cursor);
+        impl_->resize_x = x; impl_->resize_y = y;
+        impl_->pressed[cursor] = -1;
+        return;
+    }
     impl_->pressed[cursor] = impl_->hit(x, y);
 }
 SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
     SurfaceEvent result;
     if (cursor >= impl_->pressed.size()) return result;
+    if (impl_->resize_cursor == int(cursor)) { impl_->resize_cursor = -1; return result; }
     int index = std::exchange(impl_->pressed[cursor], -1);
     if (index < 0 || impl_->hit(x, y) != index) return result;
     auto c = buttons[index].id;

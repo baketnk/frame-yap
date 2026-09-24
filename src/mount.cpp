@@ -95,6 +95,14 @@ float mount_width(Mount mount, const WristPlacement& wrist) {
     return mount == Mount::LeftWrist || mount == Mount::RightWrist ? wrist.width : 0.85f;
 }
 
+Matrix34 resized_mount_pose(Matrix34 pose, float original_width, float scale, float aspect) {
+    const float dx = original_width * (scale - 1.f) * .5f;
+    const float dy = -dx * aspect;
+    for (int row = 0; row < 3; ++row)
+        pose[row][3] += pose[row][0] * dx + pose[row][1] * dy;
+    return pose;
+}
+
 std::filesystem::path default_mount_settings_path() {
     try {
         const char* xdg = std::getenv("XDG_CONFIG_HOME");

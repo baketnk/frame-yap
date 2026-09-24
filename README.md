@@ -29,6 +29,8 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
   Nothing inserts or submits automatically after transcription.
 - **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
   Review and settings share one Inconsolata/neon-framed surface.
+  Drag the inset lower-right grip to resize the panel (world, head or wrist);
+  the upper-left corner stays anchored. Size changes last for this run only.
   **Bindings** requests SteamVR's binding editor directly. Existing SteamVR overrides may supersede defaults. World-space by
   default; settings offer left wrist, right wrist and head mounting, plus recenter.
   Dashboard lasers provide clickable controls. Settings → Lasers anytime is an

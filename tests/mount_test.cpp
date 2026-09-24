@@ -65,6 +65,19 @@ int main() {
     const auto head = relative_mount_pose(Mount::Head);
     check_basis(head, 1, 0, 0, 1);
     CHECK(near(head[0][3], 0)); CHECK(near(head[1][3], -.16f)); CHECK(near(head[2][3], -1.05f));
+    for (auto mount : mounts) {
+        const float width = mount_width(mount);
+        const auto original = mount == Mount::World ? identity : relative_mount_pose(mount);
+        const auto grown = resized_mount_pose(original, width, 1.5f, .68f);
+        const auto shrunk = resized_mount_pose(original, width, .5f, .68f);
+        CHECK(resized_mount_pose(original, width, 1.f, .68f) == original);
+        for (int row = 0; row < 3; ++row) {
+            // Upper-left = center - width/2 * right + height/2 * up.
+            const float old_corner = original[row][3] - width * .5f * original[row][0] + width * .34f * original[row][1];
+            CHECK(near(grown[row][3] - width * .75f * grown[row][0] + width * .51f * grown[row][1], old_corner));
+            CHECK(near(shrunk[row][3] - width * .25f * shrunk[row][0] + width * .17f * shrunk[row][1], old_corner));
+        }
+    }
     const auto left = relative_mount_pose(Mount::LeftWrist), right = relative_mount_pose(Mount::RightWrist);
     check_basis(right, 0, 1, -1, 0); // right wrist faces inward, not away from wearer
     for (int r = 0; r < 3; ++r) {

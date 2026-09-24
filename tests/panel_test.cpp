@@ -61,6 +61,19 @@ int main(int argc, char** argv) {
     no_action(click(surface, std::numeric_limits<float>::quiet_NaN(), 610));
     no_action(click(surface, -1, 610));
     no_action(click(surface, 1000, 680));
+    // Lower-right grip scales without activating the nearby Quit button or
+    // uploading new pixels. Other cursors cannot hijack an active drag.
+    surface.pointer_down(0, 951, 656);
+    assert(!surface.pointer_move(1, 970, 650));
+    auto factor = surface.pointer_move(0, 971, 641);
+    assert(factor && *factor > 1.f);
+    no_action(surface.pointer_up(0, 900, 610));
+    assert(!surface.pointer_move(0, 975, 640));
+    assert(!surface.render(p));
+    surface.pointer_down(0, 951, 656);
+    surface.reset_pointers();
+    assert(!surface.pointer_move(0, 971, 641));
+    no_action(surface.pointer_up(0, 951, 656));
 
     p.enabled = true;
     p.record_available = false;

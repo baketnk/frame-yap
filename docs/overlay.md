@@ -181,7 +181,13 @@ rather than placing a menu at the world origin. A tracking-origin reset requests
 a fresh placement. Settings → Recenter in front deliberately resamples the pose.
 
 Settings offers World space, Left wrist, Right wrist and Head on that same canvas.
-World/head width is 0.85 m; wrist width defaults to 0.30 m. The left wrist uses
+World/head width is 0.85 m; wrist width defaults to 0.30 m. All mounts have
+the same lower-right resize grip: drag it to scale the panel
+between half and twice its configured width. The original upper-left corner
+remains fixed relative to the chosen mount, rather than scaling about the
+center. The physical resize is session-only; switching mounts retains the
+scale factor, while restart restores configured defaults. Grip behavior and
+comfort still need an opt-in on-headset check. The left wrist uses
 VR Workspace's fallback watch-face axes: panel-right points toward the fingers
 (controller -Z), panel-up points out of the back of the hand (controller +Y),
 and panel-front points toward controller +X. The right wrist reverses panel-right

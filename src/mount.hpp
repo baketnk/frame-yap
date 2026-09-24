@@ -29,6 +29,9 @@ std::optional<Matrix34> world_mount_pose(const Matrix34& hmd);
 // Device-relative transform; World has no relative anchor and returns identity.
 Matrix34 relative_mount_pose(Mount mount, const WristPlacement& wrist = {});
 float mount_width(Mount mount, const WristPlacement& wrist = {});
+// Move the center so the upper-left corner of the original panel remains
+// anchored when the same-aspect-ratio canvas changes physical width.
+Matrix34 resized_mount_pose(Matrix34 pose, float original_width, float scale, float aspect);
 
 // Empty when neither XDG_CONFIG_HOME nor HOME specifies an absolute base.
 std::filesystem::path default_mount_settings_path();

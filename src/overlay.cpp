@@ -76,6 +76,8 @@ struct Overlay::Impl {
     Panel panel;
     bool save_failed = false, debug_save_failed = false;
     bool world_ready = false, placed = false, has_texture = false, shown = false;
+    float size_scale = 1.f;
+    bool size_changed = false;
     vr::HmdMatrix34_t world_transform{};
     std::optional<Mount> applied_mount;
     vr::TrackedDeviceIndex_t anchor = vr::k_unTrackedDeviceIndexInvalid;
@@ -211,21 +213,30 @@ struct Overlay::Impl {
             applied_mount.reset();
         }
         surface.set_placement_note(note);
-        if (applied_mount != effective || (effective != Mount::World && anchor != target)) {
-            surface.reset_pointers(); // a release on a relocated surface cannot activate an old press
+        if (applied_mount != effective || (effective != Mount::World && anchor != target) || size_changed) {
+            if (!size_changed || applied_mount != effective || anchor != target)
+                surface.reset_pointers(); // a release on a relocated surface cannot activate an old press
+            const float base_width = mount_width(effective, config.wrist);
             if (effective == Mount::World) {
-                overlay_check(overlay->SetOverlayTransformAbsolute(handle, vr::TrackingUniverseStanding, &world_transform), overlay,
+                Matrix34 pose{};
+                for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) pose[r][c] = world_transform.m[r][c];
+                pose = resized_mount_pose(pose, base_width, size_scale, float(H) / W);
+                vr::HmdMatrix34_t transform{};
+                for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = pose[r][c];
+                overlay_check(overlay->SetOverlayTransformAbsolute(handle, vr::TrackingUniverseStanding, &transform), overlay,
                               "SetOverlayTransformAbsolute");
             } else {
-                const auto pose = relative_mount_pose(effective, config.wrist);
+                const auto pose = resized_mount_pose(relative_mount_pose(effective, config.wrist),
+                                                     base_width, size_scale, float(H) / W);
                 vr::HmdMatrix34_t transform{};
                 for (int r = 0; r < 3; ++r) for (int c = 0; c < 4; ++c) transform.m[r][c] = pose[r][c];
                 overlay_check(overlay->SetOverlayTransformTrackedDeviceRelative(handle, target, &transform), overlay,
                               "SetOverlayTransformTrackedDeviceRelative");
             }
-            overlay_check(overlay->SetOverlayWidthInMeters(handle, mount_width(effective, config.wrist)), overlay, "SetOverlayWidthInMeters");
+            overlay_check(overlay->SetOverlayWidthInMeters(handle, base_width * size_scale), overlay, "SetOverlayWidthInMeters");
             applied_mount = effective;
             anchor = target;
+            size_changed = false;
         }
         placed = true;
         visibility();
@@ -331,7 +342,11 @@ struct Overlay::Impl {
                 // a release must still hit the same enabled control.
                 last_pointer_event = "overlay focus changed"; break;
             case vr::VREvent_MouseMove:
-                surface.pointer_move(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
+                if (auto factor = surface.pointer_move(event.data.mouse.cursorIndex, event.data.mouse.x,
+                                                       H - event.data.mouse.y)) {
+                    const float next = std::clamp(size_scale * *factor, .5f, 2.f);
+                    if (next != size_scale) { size_scale = next; size_changed = true; }
+                }
                 break;
             case vr::VREvent_MouseButtonDown:
                 ++pointer_downs;
