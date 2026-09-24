@@ -25,6 +25,7 @@ public:
     std::vector<UiAction> poll();
     void draw(const Panel& panel);
     std::string controls_status(); // diagnostic only, no input delivery
+    std::string pointer_status() const; // diagnostic counters, no input delivery
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

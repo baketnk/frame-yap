@@ -131,8 +131,12 @@ int main(int argc, char** argv) {
     assert(surface.pixels() == replaced);
     p.status = std::string(4096, 's'); p.detail = std::string(4096, 'd');
     assert(surface.render(p)); assert(!surface.render(p));
-    surface.pointer_move(0, 900, 610); assert(surface.render(p));
+    // Laser motion and a press do not re-upload raw pixels. A completed
+    // action still reaches the caller; meaningful panel changes redraw.
     surface.pointer_move(0, 900, 610); assert(!surface.render(p));
-    assert(click(surface, 900, 610).action == UiAction::Quit);
+    surface.pointer_move(0, 900, 610); assert(!surface.render(p));
+    surface.pointer_down(0, 900, 610); assert(!surface.render(p));
+    assert(surface.pointer_up(0, 900, 610).action == UiAction::Quit);
+    assert(!surface.render(p));
     std::cout << "panel checks passed (no OpenVR, microphone or input injection)\n";
 }

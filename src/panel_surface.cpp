@@ -103,7 +103,7 @@ struct PanelSurface::Impl {
     Mount mount;
     bool settings = false, dirty = true;
     std::string placement_note;
-    std::array<int, 2> pressed{{-1, -1}}, hovered{{-1, -1}};
+    std::array<int, 2> pressed{{-1, -1}};
     std::vector<std::string> lines;
     size_t page = 0;
     static constexpr size_t lines_per_page = 4;
@@ -241,9 +241,7 @@ struct PanelSurface::Impl {
         return -1;
     }
     void reset() {
-        if (std::any_of(pressed.begin(), pressed.end(), [](int i) { return i >= 0; }) ||
-            std::any_of(hovered.begin(), hovered.end(), [](int i) { return i >= 0; })) dirty = true;
-        pressed.fill(-1); hovered.fill(-1);
+        pressed.fill(-1);
     }
     bool render(const Panel& p) {
         if (p.recording != panel.recording || p.enabled != panel.enabled ||
@@ -296,16 +294,14 @@ struct PanelSurface::Impl {
             bool on = enabled(b.id);
             bool selected = (b.id == Control::Review && !settings) || (b.id == Control::Settings && settings) ||
                             (mounting(b.id) && *mounting(b.id) == mount);
-            bool hover = std::find(hovered.begin(), hovered.end(), int(i)) != hovered.end();
-            bool down = std::find(pressed.begin(), pressed.end(), int(i)) != pressed.end();
-            const Color fill = !on ? Color{17, 23, 33, 255} : down ? Color{35, 77, 88, 255} :
-                               hover || selected ? Color{26, 55, 68, 255} : card;
+            const Color fill = !on ? Color{17, 23, 33, 255} :
+                               selected ? Color{26, 55, 68, 255} : card;
             const Color accent = b.id == Control::Record && panel.recording ? pink : cyan;
-            const bool highlighted = on && (hover || selected || b.id == Control::Record ||
+            const bool highlighted = on && (selected || b.id == Control::Record ||
                                              (b.id == Control::Insert && panel.transcript.size()));
             rounded(b.r, std::min(16, b.r.h / 3), fill,
                     !on ? Color{35, 46, 59, 255} : highlighted ? accent : Color{67, 93, 112, 255},
-                    highlighted ? (hover || down ? .40f : .23f) : 0.f, highlighted ? 2 : 1);
+                    highlighted ? .23f : 0.f, highlighted ? 2 : 1);
             const auto label = b.id == Control::Record && panel.recording ? "Stop" : b.label;
             text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, 27, on ? ink : Color{81, 96, 113, 255}, b.r.x + b.r.w - 8);
             if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
@@ -319,32 +315,27 @@ PanelSurface::~PanelSurface() = default;
 bool PanelSurface::render(const Panel& p) { return impl_->render(p); }
 const std::vector<unsigned char>& PanelSurface::pixels() const { return impl_->pixels; }
 bool PanelSurface::available(UiAction a) const { return impl_->available(a); }
-void PanelSurface::pointer_move(unsigned cursor, float x, float y) {
-    if (cursor >= impl_->hovered.size()) return;
-    const int next = impl_->hit(x, y);
-    if (next != impl_->hovered[cursor]) { impl_->hovered[cursor] = next; impl_->dirty = true; }
+void PanelSurface::pointer_move(unsigned, float, float) {
+    // Hit-test on down/up only. SetOverlayRaw can flicker in SteamVR when each
+    // laser hover frame causes another full RGBA upload.
 }
 void PanelSurface::pointer_down(unsigned cursor, float x, float y) {
     if (cursor >= impl_->pressed.size()) return;
     impl_->pressed[cursor] = impl_->hit(x, y);
-    pointer_move(cursor, x, y);
-    impl_->dirty = true;
 }
 SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y) {
     SurfaceEvent result;
     if (cursor >= impl_->pressed.size()) return result;
     int index = std::exchange(impl_->pressed[cursor], -1);
-    pointer_move(cursor, x, y);
-    impl_->dirty = true;
     if (index < 0 || impl_->hit(x, y) != index) return result;
     auto c = buttons[index].id;
     if (c == Control::Record) result.action = impl_->panel.recording ? UiAction::EndRecord : UiAction::BeginRecord;
     else if (auto a = action(c)) result.action = a;
-    else if (auto m = mounting(c)) { impl_->mount = *m; result.mount = *m; impl_->reset(); }
+    else if (auto m = mounting(c)) { impl_->mount = *m; result.mount = *m; impl_->reset(); impl_->dirty = true; }
     else if (c == Control::Recenter) { result.recenter = true; impl_->reset(); }
-    else if (c == Control::Review || c == Control::Settings) { impl_->settings = c == Control::Settings; impl_->reset(); }
-    else if (c == Control::Prev) --impl_->page;
-    else if (c == Control::Next) ++impl_->page;
+    else if (c == Control::Review || c == Control::Settings) { impl_->settings = c == Control::Settings; impl_->reset(); impl_->dirty = true; }
+    else if (c == Control::Prev) { --impl_->page; impl_->dirty = true; }
+    else if (c == Control::Next) { ++impl_->page; impl_->dirty = true; }
     return result;
 }
 void PanelSurface::reset_pointers() { impl_->reset(); }

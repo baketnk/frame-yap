@@ -66,6 +66,8 @@ struct Overlay::Impl {
     bool focus = true;
     bool persist_mount = true;
     vr::EVRInputError action_update_error = vr::VRInputError_None;
+    unsigned pointer_downs = 0, pointer_ups = 0, pointer_actions = 0, pointer_resets = 0;
+    std::string last_pointer_event = "none";
 
     Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested, bool persist)
         : settings_path(default_mount_settings_path()),
@@ -236,22 +238,28 @@ struct Overlay::Impl {
             case vr::VREvent_OverlayShown:
                 focus = true; reset_input(result); break;
             case vr::VREvent_OverlayGamepadFocusLost:
+                surface.reset_pointers(); ++pointer_resets;
+                last_pointer_event = "gamepad focus lost"; break;
             case vr::VREvent_OverlayFocusChanged:
-                // Dashboard laser/gamepad focus can change between the two grip
-                // squeezes. It is not action activity or controller tracking loss:
-                // invalidate pointer presses, but leave a physical grip gesture
-                // armed. Hidden overlays and true OpenVR input capture still reset.
-                surface.reset_pointers(); break;
+                // This global focus notification also fires when the dashboard
+                // laser enters our overlay. Do not erase a press between down/up;
+                // a release must still hit the same enabled control.
+                last_pointer_event = "overlay focus changed"; break;
             case vr::VREvent_MouseMove:
                 surface.pointer_move(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
                 break;
             case vr::VREvent_MouseButtonDown:
+                ++pointer_downs;
+                last_pointer_event = "down button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left)
                     surface.pointer_down(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
                 break;
             case vr::VREvent_MouseButtonUp:
+                ++pointer_ups;
+                last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
+                    if (event_result.action || event_result.mount || event_result.recenter) ++pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
                     if (event_result.mount) {
                         mount = *event_result.mount;
@@ -328,12 +336,17 @@ std::string Overlay::controls_status() {
         vr::VRControllerState_t raw{};
         const bool raw_ok = device < impl_->poses.size() && impl_->system->GetControllerState(device, &raw, sizeof(raw));
         result += std::string(i == 0 ? "\nLeft:" : "\nRight:") +
-            " err=" + std::to_string(int(error)) + " bound=" + (data.bActive ? "Y" : "N") +
+            " err=" + std::to_string(int(error)) + " active=" + (data.bActive ? "Y" : "N") +
             " down=" + (data.bState ? "Y" : "N") + " pose=" + (tracked ? "Y" : "N") +
             " origin=" + (origin_ok ? "Y" : "N") +
             " raw=" + (raw_ok ? ((raw.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_Grip)) ? "down" : "up") : "n/a");
     }
     return result;
+}
+std::string Overlay::pointer_status() const {
+    return "Pointer down=" + std::to_string(impl_->pointer_downs) + " up=" + std::to_string(impl_->pointer_ups) +
+           " hits=" + std::to_string(impl_->pointer_actions) + " resets=" + std::to_string(impl_->pointer_resets) +
+           " last=" + impl_->last_pointer_event;
 }
 
 int registration(const std::string& manifest, bool remove, bool autostart) {

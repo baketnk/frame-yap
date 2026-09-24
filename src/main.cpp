@@ -89,6 +89,7 @@ int main(int argc, char** argv) {
                     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(30);
                     std::string status;
                     bool held = false;
+                    bool quit_check = false;
                     std::string last_action = "Press panel controls or tap then hold right grip. No mic or typing.";
                     auto action_name = [](frameyap::UiAction action) {
                         switch (action) {
@@ -103,9 +104,9 @@ int main(int argc, char** argv) {
                         }
                         return "Unknown";
                     };
-                    while (std::chrono::steady_clock::now() < end) {
+                    while (!quit_check && std::chrono::steady_clock::now() < end) {
                         for (auto action : overlay.poll()) {
-                            if (action == frameyap::UiAction::Quit) return 0;
+                            if (action == frameyap::UiAction::Quit) { quit_check = true; break; }
                             if (action == frameyap::UiAction::BeginRecord) held = true;
                             if (action == frameyap::UiAction::EndRecord || action == frameyap::UiAction::Cancel) held = false;
                             last_action = std::string(action_name(action)) + " received; diagnostic only.";
@@ -113,10 +114,11 @@ int main(int argc, char** argv) {
                         }
                         auto next = overlay.controls_status();
                         if (next != status) { status = next; std::cout << status << std::endl; }
-                        overlay.draw({"Controls ONLY - " + std::string(held ? "HOLD recognized" : "no microphone or typing"),
+                        overlay.draw({overlay.pointer_status(),
                                       status, last_action, true, held});
                         std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     }
+                    std::cout << "Final " << overlay.pointer_status() << std::endl;
                 } else {
                     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
                     while (std::chrono::steady_clock::now() < end) {

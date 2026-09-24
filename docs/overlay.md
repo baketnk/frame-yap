@@ -24,9 +24,11 @@ preview, status and control surfaces use independently rasterized antialiased ed
 and restrained baked neon halos rather than GPU bloom. The recording indicator and
 selected controls remain distinguishable by their labels, not color alone. Rounded
 control hit areas exclude their clipped corners.
-Rendering/uploads occur only for changed content, page, settings, or pointer
-feedback; static frames are reused. The caller may call `draw(Panel)` at 10 ms
-intervals. Tracking transforms do not require repainting the canvas.
+Rendering/uploads occur only for changed content, page or settings; laser hover
+and button down/up are hit-tested without a raw-texture upload, to reduce
+compositor flicker reported during hover. Static frames are reused.
+The caller may call `draw(Panel)` at 10 ms intervals. Tracking transforms do
+not require repainting the canvas.
 
 The complete transcript preview is paginated by glyph width and four-line
 height; Previous and Next navigate it without changing the source transcript.
