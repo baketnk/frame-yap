@@ -2,7 +2,7 @@
 
 Standalone, on-device voice typing POC for Steam Frame. **MIT licensed.**
 
-Implemented: native OpenVR overlay, remappable grip controls, bounded SDL3 capture,
+Implemented: native OpenVR overlay, remappable controller actions, bounded SDL3 capture,
 persistent local Parakeet Redux worker, preview/explicit insertion through Gamescope,
 and an idempotent user-local installer. No Steam store AppID, sudo, desktop ASR
 server, cloud fallback or unrelated application dependency.
@@ -19,9 +19,10 @@ See [third-party notes](docs/third-party.md). No GitHub release is published yet
 
 ## Controls
 
-- **Right grip:** short tap, then hold the second squeeze to record; release to
-  transcribe. Remappable through SteamVR bindings; separate hold-to-talk action too.
-- **Left grip:** double-tap to explicitly send Enter. Never inferred from speech.
+- **Right X (default Frame binding):** hold to record; release to
+  transcribe. This PTT action is remappable through SteamVR bindings; delivery
+  in the dashboard still requires an on-device test.
+- **Left grip (when active):** double-tap to explicitly send Enter. Never inferred from speech.
 - **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Enter and Quit.
   Review and settings share one Inconsolata/neon-framed surface. World-space by
   default; settings offer left wrist, right wrist and head mounting, plus recenter.

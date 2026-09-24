@@ -24,8 +24,9 @@ void help() {
                  "Mount: world (first-launch default), left-wrist, right-wrist, head.\n"
                  "Settings save the mount; --mount overrides it for this launch. --head is an alias.\n"
                  "Font defaults to bundled Inconsolata in the assets directory.\n"
-                 "Right grip: double-tap, hold second squeeze to speak, release to review.\n"
-                 "Left grip: double-tap for explicit Enter. Bindings are remappable.\n"
+                 "Right X: hold to speak, release to review (default Frame binding).\n"
+                 "Grip gestures are remappable but may be unavailable in the dashboard.\n"
+                 "Left grip: double-tap for explicit Enter when active.\n"
                  "Review first: Insert approves current focus; never automatic Enter.\n"
                  "No device access unless an explicit runtime/check/registration mode is used.\n";
 #ifndef FRAMEYAP_NATIVE

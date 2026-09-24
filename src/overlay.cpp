@@ -341,6 +341,15 @@ std::string Overlay::controls_status() {
             " origin=" + (origin_ok ? "Y" : "N") +
             " raw=" + (raw_ok ? ((raw.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_Grip)) ? "down" : "up") : "n/a");
     }
+    // The default Frame binding maps right X to the named hold-to-talk action.
+    // Report the action's own activity separately from the stricter pose gate;
+    // remapped bindings may intentionally have a different origin.
+    vr::InputDigitalActionData_t ptt{};
+    const auto ptt_error = impl_->input->GetDigitalActionData(impl_->actions[2], &ptt, sizeof(ptt), vr::k_ulInvalidInputValueHandle);
+    const auto [accepted, down] = impl_->digital(2);
+    result += "\nPTT (default right X): err=" + std::to_string(int(ptt_error)) +
+              " active=" + (ptt.bActive ? "Y" : "N") + " down=" + (ptt.bState ? "Y" : "N") +
+              " accepted=" + (accepted ? "Y" : "N") + " gated-down=" + (down ? "Y" : "N");
     return result;
 }
 std::string Overlay::pointer_status() const {

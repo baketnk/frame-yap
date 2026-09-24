@@ -24,7 +24,7 @@ void signal_stop(int) { interrupted = 1; }
 std::string state_label(State state) {
     switch (state) {
     case State::Warming: return "Warming - on-device Redux CPU";
-    case State::Ready: return "Ready - double-tap + hold right grip";
+    case State::Ready: return "Ready - hold X or click Record";
     case State::Recording: return "RECORDING";
     case State::Transcribing: return "Transcribing - on device";
     case State::Review: return "Review - Insert approves CURRENT focus";
@@ -66,7 +66,7 @@ int run(const Options& options) {
         if (session.state() == State::Error) session.cancel();
         if (!session.record()) return;
         audio.start();
-        detail = "Release grip to finish. Cancel discards. Maximum 20 seconds.";
+        detail = "Release to finish. Cancel discards. Maximum 20 seconds.";
     };
     try { warm(); }
     catch (const std::exception& e) { session.fail(); detail = e.what(); }

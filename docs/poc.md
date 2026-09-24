@@ -7,10 +7,13 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
 
 - Opt-in OpenVR RGBA overlay with world-space default and selectable wrist/head
   mounts, status, recording timer, paginated UTF-8 preview and explicit controls.
-- Remappable SteamVR actions. Default Steam Frame grip bindings use the observed
-  `frame_controller` profile. Right: short tap, then hold the second squeeze to
-  record; release to transcribe. Left: two short taps request explicit Enter.
-  First squeeze <=250 ms; second squeeze begins <=350 ms after first release.
+- Remappable SteamVR actions. The default Steam Frame binding maps right X
+  (hold to record, release to transcribe) to the existing PTT action using the
+  observed `frame_controller` profile. Grip bindings remain, but both grip
+  actions were inactive in the observed dashboard check; do not rely on them.
+  If left grip becomes active, two short taps request explicit Enter.
+  For grip gestures, first squeeze <=250 ms; second squeeze begins <=350 ms
+  after first release.
   Activity/tracking loss cancels a held recording and requires neutral rearm.
 - SDL3 default recording device, mono float32 conversion at 16 kHz, 200 ms minimum,
   20 second maximum. Microphone is closed outside actual capture. Other apps may
@@ -90,10 +93,11 @@ That is a producer workflow, not an end-user compiler requirement.
 
 The first acquires/releases an IME without text/actions. The second displays a
 five-second inert panel. The third displays a 30-second diagnostic panel and
-reports pointer actions, SteamVR action activity, tracking and read-only legacy
-grip state, **without microphone or input injection**. Mount clicks in check
-modes do not save a preference. A SteamVR error code or inactive grip means the
-gesture cannot be accepted; raw grip reads do not authorize a fallback binding.
+reports pointer actions, SteamVR grip and PTT action activity, tracking and
+read-only legacy grip state, **without microphone or input injection**. Mount
+clicks in check modes do not save a preference. A SteamVR error code or inactive
+action means the gesture cannot be accepted; raw grip reads do not authorize a
+fallback binding.
 Action handles alone are not proof that gestures were delivered. Checks must be explicitly launched
 while the user expects the panel. Normal CLI/help/version remain inert.
 

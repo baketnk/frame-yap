@@ -92,9 +92,11 @@ texture replacements; it does not establish that ordinary state-changing UI
 updates are flicker-free.
 
 `assets/actions.json` names six actions: left/right grip, PTT, cancel, insert,
-Enter. `bindings_frame_controller.json` uses the observed Frame profile's grip
-click paths; both bound actions were reported tracked/active in the device check.
-This does not prove physical gesture delivery. `bindings_knuckles.json` is an
+Enter. `bindings_frame_controller.json` maps right X click to hold-to-talk PTT;
+the grip bindings remain for optional remapping/diagnosis. Both grip actions
+were **inactive** during the dashboard controls check despite a loaded binding
+file; this does not prove whether right X will deliver until an on-device test.
+`bindings_knuckles.json` is an
 additional **Index/knuckles example only**. Collisions with scene actions require
 separate on-device validation. Left grip double tap
 (releases <=250 ms, second press within 350 ms) requests explicit Enter only
