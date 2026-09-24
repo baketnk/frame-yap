@@ -1,0 +1,13 @@
+/build*/
+/.venv/
+/.cache/
+/models/
+/recordings/
+/transcripts/
+/logs/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.DS_Store
