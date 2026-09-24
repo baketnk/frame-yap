@@ -83,6 +83,14 @@ supplied prefix. The native build includes these tests too; tests never initiali
 OpenVR or touch the real mounting preference. Physical pointing, tracking loss,
 recentring and readability still require a separately authorized headset check.
 
+The opt-in native `--check-controls` probe logs pointer counters and action
+callbacks to the terminal rather than repainting them on the panel. Its canvas
+stays static for Record/Cancel/Insert/Enter clicks so those clicks can be checked
+without diagnostic `SetOverlayRaw` traffic. Switching tabs or mount still updates
+the visible panel. This isolates click-induced compositor flicker from full raw
+texture replacements; it does not establish that ordinary state-changing UI
+updates are flicker-free.
+
 `assets/actions.json` names six actions: left/right grip, PTT, cancel, insert,
 Enter. `bindings_frame_controller.json` uses the observed Frame profile's grip
 click paths; both bound actions were reported tracked/active in the device check.

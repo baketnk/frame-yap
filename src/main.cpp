@@ -77,7 +77,12 @@ int main(int argc, char** argv) {
             if (mode == "--check-overlay" || mode == "--check-controls") {
                 frameyap::InstanceLock lock;
                 frameyap::Overlay overlay(options.assets, options.font, options.mount, false);
-                overlay.draw({"FrameYap five-second visual check", "No audio captured. No text or Enter delivered.", "Controls inactive during this check.", false, false});
+                const frameyap::Panel check_panel = mode == "--check-controls"
+                    ? frameyap::Panel{"Controls check - watch terminal for events", "No audio captured. No text or Enter delivered.",
+                                      "Click Record, Cancel or tabs. Actions are diagnostic only.", true, false}
+                    : frameyap::Panel{"FrameYap five-second visual check", "No audio captured. No text or Enter delivered.",
+                                      "Controls inactive during this check.", false, false};
+                overlay.draw(check_panel);
                 for (vr::TrackedDeviceIndex_t i = 0; i < vr::k_unMaxTrackedDeviceCount; ++i) {
                     if (vr::VRSystem()->GetTrackedDeviceClass(i) != vr::TrackedDeviceClass_Controller) continue;
                     char type[256]{}, profile[512]{};
@@ -88,9 +93,8 @@ int main(int argc, char** argv) {
                 if (mode == "--check-controls") {
                     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(30);
                     std::string status;
-                    bool held = false;
+                    std::string pointer_status;
                     bool quit_check = false;
-                    std::string last_action = "Press panel controls or tap then hold right grip. No mic or typing.";
                     auto action_name = [](frameyap::UiAction action) {
                         switch (action) {
                         case frameyap::UiAction::BeginRecord: return "BeginRecord";
@@ -107,15 +111,16 @@ int main(int argc, char** argv) {
                     while (!quit_check && std::chrono::steady_clock::now() < end) {
                         for (auto action : overlay.poll()) {
                             if (action == frameyap::UiAction::Quit) { quit_check = true; break; }
-                            if (action == frameyap::UiAction::BeginRecord) held = true;
-                            if (action == frameyap::UiAction::EndRecord || action == frameyap::UiAction::Cancel) held = false;
-                            last_action = std::string(action_name(action)) + " received; diagnostic only.";
-                            std::cout << last_action << std::endl;
+                            std::cout << action_name(action) << " received; diagnostic only." << std::endl;
                         }
                         auto next = overlay.controls_status();
                         if (next != status) { status = next; std::cout << status << std::endl; }
-                        overlay.draw({overlay.pointer_status(),
-                                      status, last_action, true, held});
+                        auto pointer = overlay.pointer_status();
+                        if (pointer != pointer_status) { pointer_status = pointer; std::cout << pointer_status << std::endl; }
+                        // Keep the canvas fixed for action clicks: otherwise the
+                        // changing counters cause SetOverlayRaw on every down/up.
+                        // Tab/placement changes still redraw the correct controls.
+                        overlay.draw(check_panel);
                         std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     }
                     std::cout << "Final " << overlay.pointer_status() << std::endl;
@@ -123,8 +128,7 @@ int main(int argc, char** argv) {
                     const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
                     while (std::chrono::steady_clock::now() < end) {
                         for (auto action : overlay.poll()) if (action == frameyap::UiAction::Quit) return 0;
-                        overlay.draw({"FrameYap five-second visual check", "No audio captured. No text or Enter delivered.",
-                                      "Actions are diagnostic only during this check.", false, false});
+                        overlay.draw(check_panel);
                         std::this_thread::sleep_for(std::chrono::milliseconds(10));
                     }
                 }

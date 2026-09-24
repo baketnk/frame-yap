@@ -37,7 +37,9 @@ int main(int argc, char** argv) {
     no_action(click(surface, 32, 574)); // clipped visual corners are not invisible hit targets
     no_action(click(surface, 207, 575));
     assert(click(surface, 100, 610).action == UiAction::BeginRecord);
+    assert(!surface.render(p)); // a diagnostic click does not change the canvas
     assert(click(surface, 280, 610).action == UiAction::Cancel);
+    assert(!surface.render(p));
     no_action(surface.pointer_up(0, 100, 610));
     surface.pointer_down(0, 100, 610);
     no_action(surface.pointer_up(0, 280, 610));
