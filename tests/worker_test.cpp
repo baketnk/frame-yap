@@ -189,6 +189,10 @@ while True:
     assert len(request) == 13 and request[4:5] == b'T'
     if a.model == 'unsafe':
         value = b'E' + request[5:] + b'transcription failed [inference: RuntimeError] PRIVATE SPEECH'
+    elif a.model == 'bad-utf8' and request[5] == 47:
+        value = b'R' + request[5:] + b'bad\xff'
+    elif a.model == 'control' and request[5] == 47:
+        value = b'R' + request[5:] + b'bad\x1b[31m'
     elif a.model == 'safe':
         value = b'E' + request[5:] + b'transcription failed [inference: RuntimeError]'
     else:
@@ -201,6 +205,24 @@ while True:
             const auto logs = state / "frameyap";
             const auto current = logs / "worker-debug.log";
             const auto previous = logs / "worker-debug.previous.log";
+            for (const char* mode : {"bad-utf8", "control"}) {
+                worker.start(argv[1], script, mode, 2);
+                until([&] { worker.poll(); return worker.ready(); });
+                worker.submit(47, clip);
+                until([&] { reply = worker.poll(); return reply.has_value(); });
+                assert(reply->id == 47 && worker.ready());
+                if (std::string(mode) == "bad-utf8") {
+                    assert(reply->error == "transcription failed" && reply->text.empty());
+                } else {
+                    // Framing permits controls; Controller rejects the transcript
+                    // as a request-local failure without stopping this worker.
+                    assert(reply->text == "bad\x1b[31m");
+                }
+                worker.submit(48, clip);
+                until([&] { reply = worker.poll(); return reply.has_value(); });
+                assert(reply->text == "ok" && worker.ready());
+                worker.stop();
+            }
             worker.start(argv[1], script, "safe", 2); // OFF must not create files.
             until([&] { worker.poll(); return worker.ready(); });
             worker.submit(300, clip);

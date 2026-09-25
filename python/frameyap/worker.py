@@ -182,6 +182,9 @@ def main(argv=None):
     parser.add_argument("--advanced-debug", action="store_true",
                         help="log full exceptions/runtime output and transcripts to stderr; may contain private speech")
     args = parser.parse_args(argv)
+    # Dispatcher uses this explicit protocol preference for the pinned Redux
+    # launcher, rather than adding flags to arbitrary backend commands.
+    args.advanced_debug = args.advanced_debug or os.environ.get("FRAMEYAP_ADVANCED_DEBUG") == "1"
     if not 1 <= args.threads <= 64:
         parser.error("threads must be 1..64")
     # Native libraries sometimes print directly to fd 1. Keep those bytes out of

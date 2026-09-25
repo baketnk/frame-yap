@@ -84,6 +84,20 @@ def fake_child():
 
 
 class WorkerTests(unittest.TestCase):
+    def test_explicit_dispatcher_debug_environment_reaches_redux(self):
+        # No model imports: the missing model exits after emitting F/M. This
+        # verifies stderr consent while stdout remains an exact protocol frame.
+        with tempfile.TemporaryDirectory() as temp:
+            os.chmod(temp, 0o700)
+            args = [sys.executable, str(Path(worker.__file__)), '--model', str(Path(temp) / 'missing'),
+                    '--clip-dir', temp, '--threads', '2']
+            for enabled in ('0', '1'):
+                result = subprocess.run(args, capture_output=True,
+                                        env={**os.environ, 'FRAMEYAP_ADVANCED_DEBUG': enabled}, timeout=5)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, struct.pack('<I', 2) + b'FM')
+                self.assertEqual(b'advanced debugging ON' in result.stderr, enabled == '1')
+
     def test_framing_and_bounds(self):
         r, w = os.pipe()
         try:

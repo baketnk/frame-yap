@@ -250,17 +250,18 @@ void Worker::stop() {
     close_fd(s.to_child);
     close_fd(s.from_child);
     if (s.pid > 0) {
-        ::kill(s.pid, SIGTERM); // Only our direct child, never a process group.
+        ::kill(s.pid, SIGTERM); // Dispatcher handles and reaps its owned child.
         auto until = Clock::now() + std::chrono::milliseconds(500);
         int status = 0;
         while (::waitpid(s.pid, &status, WNOHANG) == 0 && Clock::now() < until) {
             try { s.drain_debug(); } catch (...) {} // stop/destructor are best effort
             ::usleep(10000);
         }
-        if (::waitpid(s.pid, &status, WNOHANG) == 0) {
-            ::kill(s.pid, SIGKILL);
+        // Spawned in a dedicated group: if dispatcher was stuck or died before
+        // reaping, stop its remaining model process too. Never signal a session.
+        ::kill(-s.pid, SIGKILL);
+        if (::waitpid(s.pid, &status, WNOHANG) == 0)
             while (::waitpid(s.pid, &status, 0) < 0 && errno == EINTR) {}
-        }
         s.pid = -1;
     }
     try { s.drain_debug(); } catch (...) {}
@@ -276,10 +277,14 @@ void Worker::stop() {
 }
 
 void Worker::start(const std::string& python, const std::string& script,
-                   const std::string& model, int threads, bool advanced_debug) {
+                   const std::string& model, int threads, bool advanced_debug,
+                   const std::string& backend, const std::string& manifest_dir,
+                   const std::string& root) {
     if (state_->pid > 0) throw std::logic_error("worker already started");
     if (python.empty() || script.empty() || model.empty() || threads < 1 || threads > 64)
         throw std::invalid_argument("python, script, local model and 1..64 threads required");
+    if (!backend.empty() && (manifest_dir.empty() || root.empty()))
+        throw std::invalid_argument("backend needs manifest directory and release root");
     check_runtime(::getenv("XDG_RUNTIME_DIR"));
     try {
         // The model's internal files are checked by the child before loading, never fetched.
@@ -302,16 +307,27 @@ void Worker::start(const std::string& python, const std::string& script,
         std::vector<std::string> environment;
         for (char** e = environ; *e; ++e) {
             std::string_view entry(*e);
-            if (entry.starts_with("PYTHONDONTWRITEBYTECODE=")) continue;
+            if (entry.starts_with("PYTHONDONTWRITEBYTECODE=") ||
+                entry.starts_with("FRAMEYAP_ADVANCED_DEBUG=")) continue;
             environment.emplace_back(*e);
         }
         environment.emplace_back("PYTHONDONTWRITEBYTECODE=1");
+        // Explicit protocol opt-in; dispatcher forwards it to known Redux without
+        // appending unsupported flags to third-party backend launchers.
+        environment.emplace_back(std::string("FRAMEYAP_ADVANCED_DEBUG=") + (advanced_debug ? "1" : "0"));
         std::vector<char*> envp;
         for (auto& value : environment) envp.push_back(value.data());
         envp.push_back(nullptr);
-        const char* args[] = {python.c_str(), script.c_str(), "--model", model.c_str(),
-            "--threads", thread_arg.c_str(), "--clip-dir", state_->dir.c_str(),
-            advanced_debug ? "--advanced-debug" : nullptr, nullptr};
+        std::vector<std::string> arguments{python, script, "--model", model, "--threads", thread_arg,
+                                           "--clip-dir", state_->dir};
+        if (!backend.empty()) {
+            arguments.insert(arguments.end(), {"--backend", backend, "--manifest-dir", manifest_dir,
+                                                "--root", root, "--python", python});
+        }
+        if (advanced_debug) arguments.emplace_back("--advanced-debug");
+        std::vector<char*> args;
+        for (auto& argument : arguments) args.push_back(argument.data());
+        args.push_back(nullptr);
         posix_spawn_file_actions_t actions;
         int error = posix_spawn_file_actions_init(&actions);
         if (error) {
@@ -325,14 +341,23 @@ void Worker::start(const std::string& python, const std::string& script,
         if (!error && !advanced_debug) error = posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
         for (int fd : std::array<int, 6>{in[0], in[1], out[0], out[1], debug[0], debug[1]})
             if (!error && fd > STDERR_FILENO) error = posix_spawn_file_actions_addclose(&actions, fd);
+        posix_spawnattr_t attr;
+        bool attr_ready = false;
+        if (!error) {
+            error = posix_spawnattr_init(&attr);
+            attr_ready = !error;
+        }
+        if (!error) error = posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+        if (!error) error = posix_spawnattr_setpgroup(&attr, 0);
         pid_t pid = -1;
-        if (!error) error = posix_spawnp(&pid, python.c_str(), &actions, nullptr,
-                                        const_cast<char* const*>(args), envp.data());
+        if (!error) error = posix_spawnp(&pid, python.c_str(), &actions, &attr,
+                                        args.data(), envp.data());
+        if (attr_ready) posix_spawnattr_destroy(&attr);
         posix_spawn_file_actions_destroy(&actions);
         if (error) {
             close_fd(in[0]); close_fd(in[1]); close_fd(out[0]); close_fd(out[1]);
             close_fd(debug[0]); close_fd(debug[1]);
-            throw std::runtime_error("cannot launch configured Python worker");
+            throw std::runtime_error("cannot launch configured local worker");
         }
         close_fd(in[0]); close_fd(out[1]); close_fd(debug[1]);
         state_->pid = pid; state_->to_child = in[1]; state_->from_child = out[0];
@@ -419,18 +444,21 @@ std::optional<WorkerReply> Worker::poll() {
                 }
                 if (type == 'F' && !s.loaded) {
                     if (size == 2 && s.input[5] == 'M')
-                        throw std::runtime_error("Missing/mismatched pinned local model weights or private clip directory; check --model");
+                        throw std::runtime_error("Missing/mismatched local model files or private clip directory; check --model");
                     if (size == 2 && s.input[5] == 'I')
-                        throw std::runtime_error("Authorized Python lacks compatible CPU moondream/torch dependencies; check --python");
-                    throw std::runtime_error("Local Redux model failed to load; check authorized CPU runtime and weights");
+                        throw std::runtime_error("Configured local worker runtime unavailable; check --python and backend launcher");
+                    throw std::runtime_error("Local backend failed to load; check runtime and verified model files");
                 }
                 if ((type != 'R' && type != 'E') || size < 9 || !s.loaded || !s.pending ||
                     get64(s.input.data() + 5) != *s.pending || size - 9 > max_text)
                     throw std::runtime_error("invalid or stale worker reply");
                 WorkerReply reply{*s.pending, {}, {}};
                 std::string text(reinterpret_cast<const char*>(s.input.data() + 13), size - 9);
-                if (!valid_utf8(text)) throw std::runtime_error("invalid worker UTF-8 reply");
-                if (type == 'R') reply.text = std::move(text);
+                // A malformed but correctly framed, correlated transcript is a
+                // request failure, not a broken worker stream. Preserve the loaded
+                // model and allow a fresh recording. Never expose the bad bytes.
+                if (!valid_utf8(text)) reply.error = "transcription failed";
+                else if (type == 'R') reply.text = std::move(text);
                 else reply.error = safe_request_error(text);
                 s.pending.reset(); s.input.clear();
                 ::unlink((s.dir + "/clip.raw").c_str());
