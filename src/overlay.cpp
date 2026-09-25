@@ -126,7 +126,7 @@ struct Overlay::Impl {
           mount(requested ? *requested : load_mount(persistence.settings_path)),
           lasers_anytime(load_lasers_anytime(persistence.laser_settings_path)),
           config(load_config(default_config_path())),
-          surface(resolve_font(assets, font.empty() ? config.font : font), mount, config.theme) {
+          surface(resolve_font(assets, font.empty() ? config.font : font), mount, config.theme, config.gradient) {
         persistence.persist_mount = persist;
         const auto action_path = absolute_file(action_manifest(assets, config));
         absolute_file(std::filesystem::path(assets) / "bindings_knuckles.json");
@@ -374,7 +374,7 @@ struct Overlay::Impl {
     void draw(const Panel& p) {
         panel = p;
         surface.set_clock_time(std::time(nullptr));
-        if (surface.render(p)) {
+        if (surface.render(p, PanelSurface::Clock::now(), shown)) {
             gpu_texture->upload(surface.pixels());
             auto texture = gpu_texture->texture();
             overlay_check(overlay->SetOverlayTexture(handle, &texture), overlay, "SetOverlayTexture (Vulkan)");

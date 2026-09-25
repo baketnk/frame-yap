@@ -7,6 +7,7 @@ import importlib.util
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -42,6 +43,7 @@ CONFIG_DEFAULTS = {
     "theme": {"background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
               "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
               "frame_start": "#1fff91", "frame_end": "#1f70ff"},
+    "gradient": {"enabled": True, "period_seconds": 30, "strength": 0.12},
     "buttons": {"left_grip": "/user/hand/left/input/grip",
                 "right_grip": "/user/hand/right/input/grip",
                 "ptt": "/user/hand/right/input/x", "cancel": "/user/hand/right/input/b",
@@ -123,6 +125,17 @@ def normalized_config(data):
         value = source.get(name, default)
         limit = (.15, .6) if name == "width" else (-180, 180) if name == "roll_degrees" else (-.3, .3)
         fixed["wrist"][name] = value if type(value) in (int, float) and limit[0] <= value <= limit[1] else default
+    gradient = data.get("gradient")
+    gradient = gradient if isinstance(gradient, dict) else {}
+    fixed["gradient"] = {}
+    for name, default in CONFIG_DEFAULTS["gradient"].items():
+        value = gradient.get(name, default)
+        if name == "enabled":
+            valid = type(value) is bool
+        else:
+            low, high = (5, 300) if name == "period_seconds" else (0, 0.3)
+            valid = type(value) in (int, float) and low <= value <= high and math.isfinite(value)
+        fixed["gradient"][name] = value if valid else default
     for section in ("theme", "buttons"):
         source = data.get(section)
         source = source if isinstance(source, dict) else {}

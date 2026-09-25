@@ -114,6 +114,10 @@ struct PanelSurface::Impl {
     Panel panel;
     Mount mount;
     Theme theme;
+    GradientConfig gradient;
+    std::optional<Clock::time_point> animation_start;
+    Clock::time_point last_animation_frame{};
+    std::array<Color, W> gradient_columns{};
     Color background, card, ink, muted, cyan, pink;
     Tab tab = Tab::Review;
     bool dirty = true, lasers_anytime = false, advanced_debug = false, auto_insert = false;
@@ -165,8 +169,8 @@ struct PanelSurface::Impl {
         install_confirm = true;
     }
 
-    Impl(const std::string& font, Mount m, Theme t)
-        : mount(m), theme(t), background(t.background), card(t.card), ink(t.ink), muted(t.muted),
+    Impl(const std::string& font, Mount m, Theme t, GradientConfig g)
+        : mount(m), theme(t), gradient(g), background(t.background), card(t.card), ink(t.ink), muted(t.muted),
           cyan(t.accent), pink(t.warning) {
         if (FT_Init_FreeType(&library)) throw std::runtime_error("FreeType initialization failed");
         if (FT_New_Face(library, font.c_str(), 0, &face)) {
@@ -217,6 +221,26 @@ struct PanelSurface::Impl {
                                        std::clamp(.5f - d, 0.f, 1.f));
             }
     }
+    void prepare_gradient(Clock::time_point now) {
+        // A periodic cosine field has matching values AND velocity at both
+        // spatial and temporal seams. One phase drives the body and handles.
+        const double elapsed = std::chrono::duration<double>(now - *animation_start).count();
+        const double phase = std::fmod(elapsed, gradient.period_seconds) / gradient.period_seconds;
+        for (int x = 0; x < W; ++x) {
+            const float t = float(.5 - .5 * std::cos(2. * 3.141592653589793 * (double(x) / W - phase)));
+            gradient_columns[x] = mix(theme.frame_start, theme.frame_end, t);
+        }
+    }
+    void paint_background() {
+        if (!gradient.enabled) { rect({0, 0, CW, CH}, background); return; }
+        // Compute colors once per column, then copy contiguous rows.
+        for (int x = 0; x < CW; ++x) {
+            const auto color = mix(background, gradient_columns[x], gradient.strength);
+            std::copy(color.begin(), color.end(), pixels.begin() + x * 4);
+        }
+        for (int y = 1; y < CH; ++y)
+            std::copy_n(pixels.begin(), CW * 4, pixels.begin() + size_t(y) * W * 4);
+    }
     void frame() {
         // Independently rasterized neon-frame HUD style:
         // rounded mint-to-blue perimeter and a second shallow curved accent.
@@ -225,23 +249,18 @@ struct PanelSurface::Impl {
             const float distance = rounded_distance(x, y, 10, 10, CW - 20, CH - 20, 18.f);
             const float edge = std::abs(distance);
             const float strength = edge <= 1.f ? 1.f : .30f * std::max(0.f, 1.f - (edge - 1.f) / 6.f);
-            const float t = float(x) / CW;
-            Color gradient{};
-            for (int k = 0; k < 3; ++k)
-                gradient[k] = static_cast<unsigned char>(theme.frame_start[k] * (1.f - t) + theme.frame_end[k] * t);
-            gradient[3] = 255;
+            const auto color = gradient.enabled ? gradient_columns[x] :
+                mix(theme.frame_start, theme.frame_end, float(x) / CW);
             auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
-            for (int k = 0; k < 3; ++k) dst[k] = static_cast<unsigned char>(background[k] + (gradient[k] - background[k]) * strength);
+            for (int k = 0; k < 3; ++k)
+                dst[k] = static_cast<unsigned char>(dst[k] + (color[k] - dst[k]) * strength);
             dst[3] = distance <= 1.f ? 255 : static_cast<unsigned char>(255 * std::max(0.f, 1.f - (distance - 1.f) / 6.f));
         }
         for (int x = 32; x < CW - 32; ++x) {
             const float t = float(x - 32) / (CW - 64);
             const int y = CH - 21 - int(5 * std::sin(t * 3.14159265f));
-            Color gradient{};
-            for (int k = 0; k < 3; ++k)
-                gradient[k] = static_cast<unsigned char>(theme.frame_start[k] * (1.f - t) + theme.frame_end[k] * t);
-            gradient[3] = 255;
-            rect({x, y, 1, 1}, gradient);
+            const auto color = gradient.enabled ? gradient_columns[x] : mix(theme.frame_start, theme.frame_end, t);
+            rect({x, y, 1, 1}, color);
         }
     }
     int advance(uint32_t cp) {
@@ -344,7 +363,10 @@ struct PanelSurface::Impl {
         pressed.fill(-1);
         drag_cursor = -1;
     }
-    bool render(const Panel& p) {
+    bool render(const Panel& p, Clock::time_point now, bool animate) {
+        if (!animation_start) animation_start = now;
+        if (gradient.enabled && animate && now - last_animation_frame >= std::chrono::milliseconds(100))
+            dirty = true;
         if (p.recording != panel.recording || p.enabled != panel.enabled ||
             p.record_available != panel.record_available || p.transcript != panel.transcript) {
             reset(); // an old press cannot authorize a changed action or replacement transcript
@@ -375,8 +397,10 @@ struct PanelSurface::Impl {
         if (label.time != displayed_clock.time || label.date != displayed_clock.date) dirty = true;
         if (!dirty) return false;
         displayed_clock = std::move(label);
+        if (gradient.enabled) prepare_gradient(now);
+        last_animation_frame = now;
         std::fill(pixels.begin(), pixels.end(), 0);
-        rect({0, 0, CW, CH}, background);
+        paint_background();
         frame();
         text("FrameYap", 32, 61, 40, ink, 300);
         text(displayed_clock.time, 475, 58, 28, ink, 735);
@@ -507,8 +531,8 @@ struct PanelSurface::Impl {
                     for (int x = bounds.x; x < bounds.x + bounds.w; ++x) {
                         auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
                         if (!dst[3]) continue;
-                        const auto color = mix(theme.frame_start, theme.frame_end,
-                                               float(x - bounds.x) / (bounds.w - 1));
+                        const auto color = gradient.enabled ? gradient_columns[x] :
+                            mix(theme.frame_start, theme.frame_end, float(x - bounds.x) / (bounds.w - 1));
                         std::copy_n(color.begin(), 3, dst);
                     }
         }
@@ -516,10 +540,10 @@ struct PanelSurface::Impl {
         return true;
     }
 };
-PanelSurface::PanelSurface(const std::string& font, Mount mount, Theme theme)
-    : impl_(std::make_unique<Impl>(font, mount, theme)) {}
+PanelSurface::PanelSurface(const std::string& font, Mount mount, Theme theme, GradientConfig gradient)
+    : impl_(std::make_unique<Impl>(font, mount, theme, gradient)) {}
 PanelSurface::~PanelSurface() = default;
-bool PanelSurface::render(const Panel& p) { return impl_->render(p); }
+bool PanelSurface::render(const Panel& p, Clock::time_point now, bool animate) { return impl_->render(p, now, animate); }
 const std::vector<unsigned char>& PanelSurface::pixels() const { return impl_->pixels; }
 bool PanelSurface::available(UiAction a) const { return impl_->available(a); }
 std::vector<std::string> PanelSurface::visible_model_review_lines() const {

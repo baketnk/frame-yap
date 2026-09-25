@@ -103,8 +103,21 @@ panel. A small overlay-specific RAII owner in this repository should manage Open
 handles, input manifest and shutdown. No dependency on external application
 libraries, assets, build trees or Python environments.
 
-Use one small RGBA panel updated only on UI changes and a bounded recording
-indicator cadence. The native implementation uploads the CPU-rasterized panel to
+Use one small RGBA panel updated on UI changes, a bounded recording
+indicator cadence and, when visible with the optional gradient enabled, at most
+one animation redraw per 100 ms on a monotonic clock. Hidden panels do not
+repaint for animation. The locally implemented gradient uses a smooth periodic
+cosine field: one start/end/start cycle across the canvas width, with a shared
+time phase and global canvas coordinates on the perimeter and grab/scale handles.
+`gradient.enabled` defaults to true; `period_seconds` defaults to 30 (finite
+number 5–300), and `strength` to 0.12 (finite number 0–0.3). Its colors derive
+only from `theme.frame_start` and `theme.frame_end`; strength blends those colors
+into `theme.background`. Disabled mode restores the static solid background
+and existing linear edge/handle gradients. Config is read on restart, with no
+in-panel gradient switch. This is local implementation, **not** device-validated
+appearance, frame pacing, performance or headset acceptance. See
+[config and rendering](overlay.md).
+The native implementation uploads the CPU-rasterized panel to
 a persistent Vulkan image and uses `SetOverlayTexture`; the initial
 `SetOverlayRaw` proof path has been replaced. No stereo
 eye targets or per-eye scene rendering. Keep tracking in compositor transforms,

@@ -139,10 +139,10 @@ Rgba color(const Json& json) {
     return c;
 }
 float bounded_number(const Json& json, std::string_view name, float lower, float upper) {
-    if (!json.is_number) throw std::runtime_error("Config wrist " + std::string(name) + " must be a number");
+    if (!json.is_number) throw std::runtime_error("Config " + std::string(name) + " must be a number");
     const float value = std::strtof(json.value.c_str(), nullptr);
     if (!std::isfinite(value) || value < lower || value > upper)
-        throw std::runtime_error("Config wrist " + std::string(name) + " out of range");
+        throw std::runtime_error("Config " + std::string(name) + " out of range");
     return value;
 }
 std::filesystem::path xdg_root(const char* variable, const char* fallback) {
@@ -250,6 +250,18 @@ Config load_config(const std::filesystem::path& path) {
                 else if (name == "width") config.wrist.width = bounded_number(v, name, .15f, .6f);
                 else if (name == "roll_degrees") config.wrist.roll_degrees = bounded_number(v, name, -180.f, 180.f);
                 else throw std::runtime_error("Unknown wrist placement key: " + name);
+            }
+        } else if (key == "gradient") {
+            if (!value.is_object) throw std::runtime_error("Config gradient must be an object");
+            for (const auto& [name, v] : value.object) {
+                if (name == "enabled") {
+                    if (!v.is_bool) throw std::runtime_error("Config gradient enabled must be a boolean");
+                    config.gradient.enabled = v.value == "true";
+                } else if (name == "period_seconds")
+                    config.gradient.period_seconds = bounded_number(v, "gradient period_seconds", 5.f, 300.f);
+                else if (name == "strength")
+                    config.gradient.strength = bounded_number(v, "gradient strength", 0.f, .3f);
+                else throw std::runtime_error("Unknown gradient key: " + name);
             }
         } else if (key == "theme") {
             if (!value.is_object) throw std::runtime_error("Config theme must be an object");

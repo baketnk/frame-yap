@@ -27,7 +27,9 @@ void snapshot(PanelSurface& surface, const std::string& path) {
 }
 int main(int argc, char** argv) {
     assert(argc >= 2);
-    PanelSurface surface(argv[1], Mount::World);
+    // Interaction tests use the opt-out path; animation has a deterministic
+    // injected-clock suite below rather than wall-time-sensitive assertions.
+    PanelSurface surface(argv[1], Mount::World, {}, {.enabled = false});
     Panel p{"Ready to record", "", "Focus your destination before Type. Enter is always separate.", false, false};
     assert(surface.render(p));
     assert(surface.pixels().size() == size_t(PanelSurface::width * PanelSurface::height * 4));
@@ -44,7 +46,7 @@ int main(int argc, char** argv) {
     Theme custom;
     custom.background = {75, 30, 100, 255};
     custom.accent = {245, 110, 15, 255};
-    PanelSurface themed(argv[1], Mount::World, custom);
+    PanelSurface themed(argv[1], Mount::World, custom, {.enabled = false});
     assert(themed.render(p));
     const auto pixel = size_t((190 * PanelSurface::width + 500) * 4);
     assert(themed.pixels()[pixel] == 75 && themed.pixels()[pixel + 1] == 30 && themed.pixels()[pixel + 2] == 100);
@@ -100,7 +102,7 @@ int main(int argc, char** argv) {
     Theme gradient_theme;
     gradient_theme.frame_start = {255, 0, 0, 255};
     gradient_theme.frame_end = {0, 0, 255, 255};
-    PanelSurface gradient_surface(argv[1], Mount::World, gradient_theme);
+    PanelSurface gradient_surface(argv[1], Mount::World, gradient_theme, {.enabled = false});
     gradient_surface.render(p);
     const auto channel = [&](int x, int y, int c) {
         return gradient_surface.pixels()[(y * PanelSurface::width + x) * 4 + c];
@@ -109,6 +111,70 @@ int main(int argc, char** argv) {
     assert(channel(1012, 723, 0) > 220 && channel(1040, 705, 2) > 220);
     assert(channel(1030, 704, 3) == 0 && channel(800, 724, 3) == 0);
     assert(channel(401, 721, 3) == alpha(401, 721));
+    {
+        // Animated colors share one global field; timestamps never depend on the
+        // civil clock, and full cycles return byte-identical pixels (including alpha).
+        using namespace std::chrono_literals;
+        const auto epoch = PanelSurface::Clock::time_point{};
+        PanelSurface animated(argv[1], Mount::World, gradient_theme);
+        animated.set_clock_time(std::time_t{1704211440});
+        assert(animated.render(p, epoch));
+        const auto first = animated.pixels();
+        const auto rgb = [](const auto& pixels, int x, int y) {
+            const auto i = (y * PanelSurface::width + x) * 4;
+            return Rgba{pixels[i], pixels[i + 1], pixels[i + 2], 255};
+        };
+        assert(rgb(first, 100, 190) != rgb(first, 500, 190)); // spatial, not a flat color fade
+        for (int x : {410, 500, 590})
+            assert(rgb(first, x, 723) == rgb(first, x, 10)); // handle and perimeter same phase
+        const auto bg = rgb(first, 500, 190), edge = rgb(first, 500, 10);
+        for (int k = 0; k < 3; ++k)
+            assert(bg[k] == static_cast<unsigned char>(gradient_theme.background[k] * .88f + edge[k] * .12f));
+        assert(!animated.render(p, epoch + 99ms));
+        assert(animated.render(p, epoch + 100ms));
+        assert(!animated.render(p, epoch + 150ms));
+        assert(animated.render(p, epoch + 7500ms));
+        const auto quarter = animated.pixels();
+        assert(rgb(quarter, 500, 190) != bg);
+        assert(rgb(quarter, 500, 10) != edge);
+        assert(rgb(quarter, 500, 723) != rgb(first, 500, 723));
+        assert(rgb(quarter, 1040, 705) != rgb(first, 1040, 705));
+        for (size_t i = 3; i < first.size(); i += 4) assert(first[i] == quarter[i]);
+        assert(animated.render(p, epoch + 29900ms));
+        const auto before_loop = animated.pixels();
+        assert(animated.render(p, epoch + 30s));
+        assert(animated.pixels() == first);
+        assert(animated.render(p, epoch + 30100ms));
+        for (auto point : {std::pair{500, 190}, std::pair{500, 10}, std::pair{500, 723}, std::pair{1040, 705}}) {
+            const auto a = rgb(before_loop, point.first, point.second);
+            const auto b = rgb(first, point.first, point.second);
+            const auto c = rgb(animated.pixels(), point.first, point.second);
+            for (int k = 0; k < 3; ++k) {
+                assert(std::abs(int(a[k]) - b[k]) <= 3);
+                assert(std::abs(int(c[k]) - b[k]) <= 3);
+                assert(std::abs((int(b[k]) - a[k]) - (int(c[k]) - b[k])) <= 2);
+            }
+        }
+        // Hidden panels skip animation; showing again catches up without replaying
+        // missed frames. A frame never cancels an already approved pointer press.
+        assert(!animated.render(p, epoch + 40s, false));
+        assert(animated.render(p, epoch + 40s));
+        animated.pointer_down(0, 100, 610, epoch + 40s);
+        assert(animated.render(p, epoch + 41s));
+        assert(animated.pointer_up(0, 100, 610, epoch + 41s).action == UiAction::BeginRecord);
+        assert(!gradient_surface.render(p, epoch + 300s)); // disabled has no timed redraws
+        PanelSurface faster(argv[1], Mount::World, gradient_theme, {.period_seconds = 10.f, .strength = 0.f});
+        assert(faster.render(p, epoch));
+        const auto fast_first = faster.pixels();
+        assert(rgb(fast_first, 500, 190) == gradient_theme.background);
+        assert(faster.render(p, epoch + 2500ms) && faster.pixels() != fast_first);
+        assert(faster.render(p, epoch + 10s) && faster.pixels() == fast_first);
+        if (argc >= 3) {
+            PanelSurface preview(argv[1], Mount::World);
+            preview.render(p, epoch);
+            snapshot(preview, std::string(argv[2]) + "-gradient.ppm");
+        }
+    }
     auto regions = surface.input_regions();
     assert(regions.size() == 3);
     assert(regions[2].x == 996 && regions[2].y == 680); // masks use TOP-left, not GL mouse Y
@@ -321,7 +387,7 @@ int main(int argc, char** argv) {
     assert(!surface.render(p));
     // Model page: selection is separate from installation; the first Install
     // click reveals the source/size/license and cannot launch a child.
-    PanelSurface chooser(argv[1], Mount::World);
+    PanelSurface chooser(argv[1], Mount::World, {}, {.enabled = false});
     Panel model_panel{"Ready", "", "", true, false};
     model_panel.selected_backend = "redux";
     model_panel.models = {{"redux", "Parakeet Redux", "not_installed", "https://example.org/model",
@@ -374,7 +440,7 @@ int main(int argc, char** argv) {
     assert(install.model_action && install.model_action->manifest_sha256 == std::string(64, 'c'));
     // Max-length metadata must have every byte represented on navigable pages,
     // including the source tail, long license text, attribution and exact hash.
-    PanelSurface long_review(argv[1], Mount::World);
+    PanelSurface long_review(argv[1], Mount::World, {}, {.enabled = false});
     Panel long_panel{"Ready", "", "", true, false};
     long_panel.selected_backend = "redux";
     auto long_model = model_panel.models[0];

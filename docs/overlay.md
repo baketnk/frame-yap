@@ -25,15 +25,20 @@ margins for a thin grab underline and an external L-shaped scale handle. `src/ov
 persistent Vulkan RGBA8 image and submits it with `SetOverlayTexture`. The image,
 staging allocation and command buffer are reused; tabs do not create extra
 overlays or render targets. The rounded mint-to-blue perimeter,
-shallow curved accent, and dark cards form the panel's visual language. Rounded
+shallow curved accent, and dark cards form the panel's visual language.
+With `gradient.enabled` (the default), a low-strength animated field blends
+`theme.frame_start` and `theme.frame_end` into `theme.background`; the perimeter
+and grab/scale handles share its phase and canvas coordinates. Rounded
 preview, status and control surfaces use independently rasterized antialiased edges
 and restrained baked neon halos rather than GPU bloom. The recording indicator and
 selected controls remain distinguishable by their labels, not color alone. Rounded
 control hit areas exclude their clipped corners.
-Rendering/uploads occur only for changed content, page or settings; laser hover
-and button down/up are hit-tested without an upload. Static frames are reused.
-The caller may call `draw(Panel)` at 10 ms intervals. Tracking transforms do
-not require repainting the canvas.
+Rendering/uploads occur for changed content, page or settings, and, when the
+animated gradient is enabled and visible, at most every 100 ms (10 fps) on a
+monotonic clock. There is no animation redraw while hidden. Laser hover and
+button down/up are hit-tested without an upload; static frames are reused when
+animation is disabled. The caller may call `draw(Panel)` at 10 ms intervals.
+Tracking transforms do not require repainting the canvas.
 
 The Vulkan instance/device enable the extensions requested by the running
 SteamVR runtime and use its selected physical device and a graphics queue.
@@ -124,6 +129,7 @@ installer creates one with defaults on first install. Copy the shipped
     "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
     "frame_start": "#1fff91", "frame_end": "#1f70ff"
   },
+  "gradient": {"enabled": true, "period_seconds": 30, "strength": 0.12},
   "buttons": {
     "ptt": "/user/hand/right/input/x",
     "cancel": "/user/hand/right/input/b",
@@ -142,8 +148,21 @@ immediately and save them to the user config when persistence is enabled.
 A failed save warns and leaves the selection active for this run. Time uses
 the device's local timezone; these controls do not change system time.
 
-Each theme color is `#RRGGBB`; omitted colors keep the default. `font` is a
-TTF/OTF file path (not a family name); a missing file uses the bundled font.
+Each theme color is `#RRGGBB`; omitted colors keep the default. The optional
+`gradient` object defaults to `{"enabled": true, "period_seconds": 30, "strength": 0.12}`.
+`enabled` must be a boolean; `period_seconds` must be a
+finite number from 5 to 300 (seconds per full cycle), and `strength` a finite
+number from 0 to 0.3. The animation uses a smooth periodic cosine field with
+one start/end/start cycle across the canvas width. Its edge and handle colors
+use the same global canvas coordinates and time phase; it does not add a
+separate handle animation. Colors always come from `theme.frame_start` and
+`theme.frame_end`, while `strength` controls how much of those colors blends
+into `theme.background`. Set `enabled` to `false` for a static solid background
+and the existing linear perimeter/handle gradients. Edit the JSON and restart;
+there is no in-panel gradient switch or hot reload. This is locally implemented,
+not device validated; headset appearance and rendering cost remain unverified.
+`font` is a TTF/OTF file path (not a family name); a missing file uses the
+bundled font.
 `advanced_debug` is a boolean (default `false`, not a string): an opt-in
 request for full diagnostic logs. Full logs may contain speech/transcribed text
 and local paths; **raw audio clips are not archived**. The Settings tab shows
@@ -215,12 +234,12 @@ action manifest and adjacent bindings are placed in `$XDG_CACHE_HOME/frameyap/bi
 (or `~/.cache/frameyap/bindings`); the bundled manifest remains unchanged. The
 config is read once at launch, not hot-reloaded (the in-panel backend selection
 is saved separately). On install/upgrade the installer fills known missing fields,
-including `close_mic_when_idle` and `backend`, removes retired keys and resets
-invalid entries. It saves the exact prior bytes under `config.json.backup-*`
-before a repair and refuses symlink/oversized config paths; valid customizations
+including `close_mic_when_idle`, `backend` and `gradient`, removes retired keys
+and unknown `gradient` subkeys, and resets invalid entries. It saves the exact
+prior bytes under `config.json.backup-*` before a repair and refuses symlink/oversized config paths; valid customizations
 remain intact. The installed launcher no longer pins `--font`, so this selection takes effect. Direct native
-launches with bad JSON, colors or button mappings fail startup rather than
-silently changing input behavior.
+launches with bad JSON, gradient fields, colors or button mappings fail startup
+rather than silently changing input behavior.
 
 ### Models / backends (local implementation)
 

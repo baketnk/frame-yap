@@ -86,6 +86,8 @@ class InstallTests(unittest.TestCase):
         self.assertIs(json.loads(config.read_text())["auto_insert"], False)
         self.assertIs(json.loads(config.read_text())["close_mic_when_idle"], False)
         self.assertEqual(json.loads(config.read_text())["backend"], "redux")
+        self.assertEqual(json.loads(config.read_text())["gradient"],
+                         {"enabled": True, "period_seconds": 30, "strength": 0.12})
         self.assertIs(json.loads(config.read_text())["lock_layout"], False)
         self.assertEqual(list(config.parent.glob("config.json.backup-*")), [])
         self.assertIn("PYTHONDONTWRITEBYTECODE=1", launcher.read_text())
@@ -243,6 +245,74 @@ class InstallTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "foreign config path"):
             self.install("0.1.202609241530", archive, digest)
         self.assertTrue(config.is_symlink())
+
+    def test_gradient_config_defaults_preservation_and_repair(self):
+        archive, digest = self.package("0.1.202609241530")
+        config = self.home / ".config/frameyap/config.json"
+        config.parent.mkdir(parents=True)
+        defaults = installer.CONFIG_DEFAULTS["gradient"]
+
+        # Older configs receive defaults; a non-object section is replaced.
+        for value in (None, [], "animated", 1):
+            with self.subTest(section=value):
+                original = json.dumps({"font": "/custom.ttf", "gradient": value}).encode()
+                config.write_bytes(original)
+                self.install("0.1.202609241530", archive, digest)
+                fixed = json.loads(config.read_text())
+                self.assertEqual(fixed["gradient"], defaults)
+                self.assertEqual(fixed["font"], "/custom.ttf")
+                self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+        original = b'{"font":"/custom.ttf"}'
+        config.write_bytes(original)
+        self.install("0.1.202609241530", archive, digest)
+        self.assertEqual(json.loads(config.read_text())["gradient"], defaults)
+        self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+        original = b'{"gradient":{"enabled":false},"font":"/custom.ttf"}'
+        config.write_bytes(original)
+        self.install("0.1.202609241530", archive, digest)
+        self.assertEqual(json.loads(config.read_text())["gradient"],
+                         {"enabled": False, "period_seconds": 30, "strength": 0.12})
+        self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+
+        # A complete valid section, including numeric boundaries and explicit
+        # disabled state, retains exact user bytes and gets no new backup.
+        for gradient in ({"enabled": False, "period_seconds": 5, "strength": 0},
+                         {"enabled": True, "period_seconds": 300.0, "strength": 0.3},
+                         {"enabled": True, "period_seconds": 17.5, "strength": 0.125}):
+            with self.subTest(valid=gradient):
+                full = installer.normalized_config({"gradient": gradient})
+                compact = json.dumps(full, separators=(",", ":")).encode()
+                config.write_bytes(compact)
+                backups = len(list(config.parent.glob("config.json.backup-*")))
+                self.install("0.1.202609241530", archive, digest)
+                self.assertEqual(config.read_bytes(), compact)
+                self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), backups)
+
+        for name, invalids in (
+            ("enabled", ("true", 1, 0, None, [], {})),
+            ("period_seconds", (True, False, 4.99, 301, 10**400, "30", None, float("nan"), float("inf"), -float("inf"))),
+            ("strength", (True, False, -0.001, 0.301, 10**400, "0.12", None, float("nan"), float("inf"), -float("inf"))),
+        ):
+            for invalid in invalids:
+                with self.subTest(field=name, invalid=invalid):
+                    gradient = {"enabled": False, "period_seconds": 19.5, "strength": 0.21}
+                    gradient[name] = invalid
+                    original = json.dumps({"gradient": gradient, "theme": {"card": "#AbCdEf"}}).encode()
+                    config.write_bytes(original)
+                    self.install("0.1.202609241530", archive, digest)
+                    fixed = json.loads(config.read_text())
+                    self.assertEqual(fixed["gradient"][name], defaults[name])
+                    for valid_name in set(gradient) - {name}:
+                        self.assertEqual(fixed["gradient"][valid_name], gradient[valid_name])
+                    self.assertEqual(fixed["theme"]["card"], "#AbCdEf")
+                    self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+
+        original = b'{"gradient":{"enabled":false,"period_seconds":7,"strength":0.2,"retired":1}}'
+        config.write_bytes(original)
+        self.install("0.1.202609241530", archive, digest)
+        self.assertEqual(json.loads(config.read_text())["gradient"],
+                         {"enabled": False, "period_seconds": 7, "strength": 0.2})
+        self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
 
     def test_debug_boolean_repair_backs_up_invalid_values(self):
         archive, digest = self.package("0.1.202609241530")

@@ -14,9 +14,15 @@ struct Theme {
     Rgba accent{31, 240, 164, 255}, warning{255, 110, 135, 255};
     Rgba frame_start{31, 255, 145, 255}, frame_end{31, 112, 255, 255};
 };
+struct GradientConfig {
+    bool enabled = true;
+    float period_seconds = 30.f;
+    float strength = .12f; // muted edge colors blended into theme.background
+};
 enum class DateFormat { Off, MonthDayYear, DayMonthYear, Iso };
 struct Config {
     Theme theme;
+    GradientConfig gradient;
     std::string font; // absolute TTF/OTF path; empty uses the bundled face
     std::string backend = "redux"; // selected manifest ID; never triggers a download
     // Requests OpenVR's experimental global action priority; SteamVR must allow it too.

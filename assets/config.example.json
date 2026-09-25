@@ -20,6 +20,7 @@
     "frame_start": "#1fff91",
     "frame_end": "#1f70ff"
   },
+  "gradient": {"enabled": true, "period_seconds": 30, "strength": 0.12},
   "buttons": {
     "left_grip": "/user/hand/left/input/grip",
     "right_grip": "/user/hand/right/input/grip",

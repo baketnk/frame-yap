@@ -33,14 +33,16 @@ public:
     static constexpr Bounds body{0, 0, 1000, 680};
     static constexpr Bounds grab{370, 698, 260, 52};
     static constexpr Bounds scale{996, 680, 68, 68};
-    PanelSurface(const std::string& font, Mount mount, Theme theme = {});
+    using Clock = std::chrono::steady_clock;
+    PanelSurface(const std::string& font, Mount mount, Theme theme = {}, GradientConfig gradient = {});
     ~PanelSurface();
     PanelSurface(const PanelSurface&) = delete;
     PanelSurface& operator=(const PanelSurface&) = delete;
-    bool render(const Panel& panel);
+    // Monotonic time is injectable for offline loop/cadence checks. Hidden
+    // overlays still process UI changes, but do not schedule animation repaints.
+    bool render(const Panel& panel, Clock::time_point now = Clock::now(), bool animate = true);
     const std::vector<unsigned char>& pixels() const;
     // Handles capture one cursor and never authorize a UI action on release.
-    using Clock = std::chrono::steady_clock;
     static constexpr auto quit_hold = std::chrono::milliseconds(900);
     std::optional<PanelDragKind> pointer_down(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
     SurfaceEvent pointer_up(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
