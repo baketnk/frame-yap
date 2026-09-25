@@ -37,7 +37,7 @@ void help() {
                  "SteamVR Developer setting Enable global input from overlays.\n"
                  "Right X: hold to speak, release to review (default Frame binding).\n"
                  "Grip gestures are remappable but may be unavailable in the dashboard.\n"
-                 "Right B: cancel; A: Type (text + space); Y: Quick phrases picker.\n"
+                 "Right B: cancel; A: Type (text + space, or Enter alone when no review); Y: Quick phrases.\n"
                  "Left grip: double-tap to Type + Enter (Enter alone when no review).\n"
                  "Review by default. Auto insert requires uninterrupted verified Xwayland focus.\n"
                  "Type approves current focus; Enter is never automatic.\n"

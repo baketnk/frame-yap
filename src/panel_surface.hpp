@@ -1,5 +1,6 @@
 #pragma once
 #include "overlay.hpp"
+#include "battery.hpp"
 #include "config.hpp"
 #include "panel_drag.hpp"
 #include <ctime>
@@ -23,6 +24,12 @@ struct SurfaceEvent {
     bool recenter = false;
     bool open_bindings = false;
     std::optional<ModelAction> model_action;
+};
+// Header indicators. Absent values are hidden, never shown as zero or as a guess.
+struct StatusIndicators {
+    std::optional<bool> dashboard_open; // SteamVR dashboard: controller bindings paused
+    std::optional<BatteryLevel> left, head, right;
+    bool operator==(const StatusIndicators&) const = default;
 };
 // One CPU RGBA canvas, independent of OpenVR. Settings replace the review area;
 // status and safety controls remain on the same surface.
@@ -60,6 +67,7 @@ public:
     void set_date_format(DateFormat format);
     void set_clock_time(std::time_t now);
     void set_binding_note(std::string note);
+    void set_indicators(const StatusIndicators& indicators);
     bool available(UiAction action) const;
     // Exact text rows currently shown in the consent viewport (empty outside it).
     // OpenVR has no screen-reader accessibility channel for this canvas.

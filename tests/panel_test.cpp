@@ -57,6 +57,28 @@ int main(int argc, char** argv) {
     no_action(click(surface, 207, 575));
     assert(click(surface, 100, 610).action == UiAction::BeginRecord);
     assert(!surface.render(p)); // a diagnostic click does not change the canvas
+    {
+        // With nothing to review, the enabled Type button is an explicit Enter.
+        PanelSurface idle(argv[1], Mount::World, {}, {.enabled = false});
+        Panel ready{"Ready", "", "", true, false};
+        idle.render(ready);
+        assert(idle.available(UiAction::Insert));
+        assert(click(idle, 480, 610).action == UiAction::Insert);
+        ready.recording = true; idle.render(ready);
+        assert(!idle.available(UiAction::Insert));
+        // Indicators repaint only on change; absent values stay hidden.
+        ready.recording = false; idle.render(ready);
+        const auto plain = idle.pixels();
+        StatusIndicators shown{true, BatteryLevel{82, false}, BatteryLevel{15, false}, BatteryLevel{100, true}};
+        idle.set_indicators(shown);
+        assert(idle.render(ready) && idle.pixels() != plain);
+        idle.set_indicators(shown); assert(!idle.render(ready));
+        if (argc >= 3) snapshot(idle, std::string(argv[2]) + "-indicators.ppm");
+        shown.dashboard_open = false; idle.set_indicators(shown);
+        assert(idle.render(ready));
+        if (argc >= 3) snapshot(idle, std::string(argv[2]) + "-indicators-closed.ppm");
+        idle.set_indicators({}); assert(idle.render(ready) && idle.pixels() == plain);
+    }
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     assert(!surface.render(p));
     no_action(surface.pointer_up(0, 100, 610));
@@ -204,7 +226,7 @@ int main(int argc, char** argv) {
     p.quick_open = true;
     assert(surface.render(p));
     const auto first_quick = surface.pixels();
-    no_action(click(surface, 900, 430)); // review pagination hidden behind picker
+    no_action(click(surface, 900, 518)); // review pagination hidden behind picker
     p.quick_selected = 1;
     assert(surface.render(p) && surface.pixels() != first_quick);
     assert(click(surface, 680, 610).action == UiAction::Enter);
@@ -351,21 +373,21 @@ int main(int argc, char** argv) {
     surface.render(p);
     surface.reset_pointers(); surface.render(p);
     const auto first = surface.pixels();
-    no_action(click(surface, 900, 430));
+    no_action(click(surface, 900, 518));
     surface.reset_pointers(); assert(surface.render(p));
     assert(surface.pixels() != first);
-    no_action(click(surface, 90, 430));
+    no_action(click(surface, 90, 518));
     surface.reset_pointers(); surface.render(p);
     assert(surface.pixels() == first);
-    for (int i = 0; i < 200; ++i) { no_action(click(surface, 900, 430)); surface.render(p); }
-    for (int i = 0; i < 200; ++i) { no_action(click(surface, 90, 430)); surface.render(p); }
+    for (int i = 0; i < 200; ++i) { no_action(click(surface, 900, 518)); surface.render(p); }
+    for (int i = 0; i < 200; ++i) { no_action(click(surface, 90, 518)); surface.render(p); }
     surface.reset_pointers(); surface.render(p);
     assert(surface.pixels() == first);
     p.transcript = "New result";
     assert(surface.render(p));
     surface.reset_pointers(); surface.render(p);
     auto replaced = surface.pixels();
-    no_action(click(surface, 900, 430));
+    no_action(click(surface, 900, 518));
     surface.reset_pointers(); surface.render(p);
     assert(surface.pixels() == replaced);
     p.status = std::string(4096, 's'); p.detail = std::string(4096, 'd');

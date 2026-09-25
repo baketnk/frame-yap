@@ -66,6 +66,10 @@ template<class Query> std::vector<std::string> vulkan_extensions(Query query) {
     for (std::string name; words >> name;) result.push_back(std::move(name));
     return result;
 }
+std::string battery_text(const std::optional<BatteryLevel>& level) {
+    if (!level) return "n/a";
+    return std::to_string(level->percent) + "%" + (level->charging ? " charging" : "");
+}
 } // namespace
 
 struct Overlay::Impl {
@@ -88,6 +92,8 @@ struct Overlay::Impl {
     PanelSurface surface;
     Panel panel;
     std::vector<ModelAction> model_actions;
+    StatusIndicators indicators;
+    std::chrono::steady_clock::time_point batteries_read{};
     bool world_ready = false, placed = false, has_texture = false, shown = false;
     float published_alpha = -1.f;
     float size_scale = 1.f;
@@ -371,9 +377,33 @@ struct Overlay::Impl {
         }
     }
     bool available(UiAction action) const { return surface.available(action); }
+    std::optional<BatteryLevel> device_battery(vr::TrackedDeviceIndex_t index) const {
+        if (index == vr::k_unTrackedDeviceIndexInvalid || !system->IsTrackedDeviceConnected(index)) return {};
+        vr::ETrackedPropertyError error = vr::TrackedProp_Success;
+        if (!system->GetBoolTrackedDeviceProperty(index, vr::Prop_DeviceProvidesBatteryStatus_Bool, &error) ||
+            error != vr::TrackedProp_Success) return {};
+        const float level = system->GetFloatTrackedDeviceProperty(index, vr::Prop_DeviceBatteryPercentage_Float, &error);
+        if (error != vr::TrackedProp_Success || !std::isfinite(level) || level < 0.f || level > 1.f) return {};
+        const bool charging = system->GetBoolTrackedDeviceProperty(index, vr::Prop_DeviceIsCharging_Bool, &error);
+        return BatteryLevel{int(std::lround(level * 100.f)), error == vr::TrackedProp_Success && charging};
+    }
+    void update_indicators() {
+        indicators.dashboard_open = overlay->IsDashboardVisible();
+        const auto now = std::chrono::steady_clock::now();
+        if (now - batteries_read >= std::chrono::seconds(5) || batteries_read == decltype(now){}) {
+            batteries_read = now;
+            indicators.left = device_battery(system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand));
+            indicators.right = device_battery(system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand));
+            // A standalone headset may report its battery only through Linux.
+            indicators.head = device_battery(vr::k_unTrackedDeviceIndex_Hmd);
+            if (!indicators.head) indicators.head = system_battery();
+        }
+        surface.set_indicators(indicators);
+    }
     void draw(const Panel& p) {
         panel = p;
         surface.set_clock_time(std::time(nullptr));
+        update_indicators();
         if (surface.render(p, PanelSurface::Clock::now(), shown)) {
             gpu_texture->upload(surface.pixels());
             auto texture = gpu_texture->texture();
@@ -413,7 +443,9 @@ struct Overlay::Impl {
             "\nMode dashboard=" + (overlay->IsDashboardVisible() ? "Y" : "N") +
             " lasers-anytime=" + (laser_error == vr::VROverlayError_None ? (laser_flag ? "Y" : "N") : "n/a") +
             " system-input-available=" + (system->IsInputAvailable() ? "Y" : "N") +
-            " panel-shown=" + (shown ? "Y" : "N") + " focus-gate=" + (focus ? "Y" : "N");
+            " panel-shown=" + (shown ? "Y" : "N") + " focus-gate=" + (focus ? "Y" : "N") +
+            "\nBattery L=" + battery_text(indicators.left) + " HMD=" + battery_text(indicators.head) +
+            " R=" + battery_text(indicators.right);
     }
     // Bound actions are accepted only with a connected tracked source. A held input
     // following loss of activity must return to neutral before generating an edge.

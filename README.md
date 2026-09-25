@@ -27,7 +27,7 @@ sh install.sh --mode binary --archive /path/to/frameyap-VERSION-linux-aarch64.ta
 | --- | --- |
 | Right X, hold / release | Record while held; release to transcribe. |
 | Right B | Cancel/discard, or close the Quick phrases picker. |
-| Right A | **Type:** queue reviewed text, normally with a trailing space. |
+| Right A | **Type:** queue reviewed text, normally with a trailing space. With nothing to review, a press queues Enter alone (so a quick double press types then submits). |
 | Right Y | Open **Quick phrases**; press again to cycle the selection. |
 | Left grip, double-tap | **Type + Enter:** queue the selected phrase verbatim + Enter, pending review (normally + space) then Enter, or Enter alone if neither exists. |
 | Overlay Record / Stop | Click-to-start/stop alternative to the PTT binding. |

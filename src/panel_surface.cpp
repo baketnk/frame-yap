@@ -39,8 +39,8 @@ constexpr std::array<Button, 32> buttons{{
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
     {{620, 138, 348, 46}, Control::LockLayout, "Lock grab/scale"},
-    {{32, 406, 154, 44}, Control::Prev, "Previous"},
-    {{838, 406, 130, 44}, Control::Next, "Next"},
+    {{32, 496, 154, 44}, Control::Prev, "Previous"},
+    {{838, 496, 130, 44}, Control::Next, "Next"},
     {{32, 574, 176, 68}, Control::Record, "Record"},
     {{222, 574, 176, 68}, Control::Cancel, "Cancel"},
     {{412, 574, 176, 68}, Control::Insert, "Type"},
@@ -127,6 +127,7 @@ struct PanelSurface::Impl {
     std::time_t clock_time = std::time(nullptr);
     ClockLabel displayed_clock;
     std::string placement_note, binding_note;
+    StatusIndicators indicators;
     std::array<int, 2> pressed{{-1, -1}};
     std::array<PanelSurface::Clock::time_point, 2> press_time{};
     int hold_progress = 0;
@@ -139,7 +140,7 @@ struct PanelSurface::Impl {
     bool install_confirm = false;
     std::optional<ModelOption> consent_snapshot;
     std::vector<std::string> consent_lines;
-    static constexpr size_t lines_per_page = 4;
+    static constexpr size_t lines_per_page = 6;
     static constexpr size_t consent_lines_per_page = 6;
     size_t consent_pages() const {
         return std::max(size_t(1), (consent_lines.size() + consent_lines_per_page - 1) / consent_lines_per_page);
@@ -221,6 +222,30 @@ struct PanelSurface::Impl {
                                        std::clamp(.5f - d, 0.f, 1.f));
             }
     }
+    // Compact "L [###] 82%" groups; missing devices are omitted, not zeroed.
+    void batteries(int x, int right) {
+        const std::array<std::pair<const char*, const std::optional<BatteryLevel>*>, 3> groups{{
+            {"L", &indicators.left}, {"HMD", &indicators.head}, {"R", &indicators.right}}};
+        for (const auto& [name, level] : groups) {
+            if (!*level) continue;
+            const auto& b = **level;
+            const std::string percent = std::to_string(b.percent) + "%";
+            const int width = measure(name, 18) + 6 + 30 + 6 + measure(percent, 20) + (b.charging ? 12 : 0);
+            if (x + width > right) return;
+            text(name, x, 56, 18, muted, right);
+            x += measure(name, 18) + 6;
+            const Color tone = b.charging ? cyan : b.percent <= 20 ? pink : ink;
+            rounded({x, 42, 26, 16}, 4, background, mix(background, tone, .8f));
+            rect({x + 26, 47, 3, 6}, mix(background, tone, .8f));
+            const int fill = std::max(b.percent > 0 ? 1 : 0, 20 * std::clamp(b.percent, 0, 100) / 100);
+            if (fill) rect({x + 3, 45, fill, 10}, tone);
+            x += 36;
+            text(percent, x, 57, 20, tone, right);
+            x += measure(percent, 20);
+            if (b.charging) { text("+", x + 1, 55, 18, cyan, right); x += 12; }
+            x += 18;
+        }
+    }
     void prepare_gradient(Clock::time_point now) {
         // A periodic cosine field has matching values AND velocity at both
         // spatial and temporal seams. One phase drives the body and handles.
@@ -268,6 +293,12 @@ struct PanelSurface::Impl {
         if (FT_Load_Char(face, cp, FT_LOAD_DEFAULT)) return 0;
         return int(face->glyph->advance.x >> 6);
     }
+    int measure(std::string_view s, unsigned px) {
+        size(px);
+        int width = 0;
+        for (size_t i = 0; i < s.size();) width += advance(next_codepoint(s, i));
+        return width;
+    }
     std::vector<std::string> wrap(std::string_view s, unsigned px, int width) {
         size(px);
         std::vector<std::string> result;
@@ -314,7 +345,8 @@ struct PanelSurface::Impl {
     size_t page_count() const { return std::max(size_t(1), (lines.size() + lines_per_page - 1) / lines_per_page); }
     bool available(UiAction a) const {
         if (a == UiAction::Record) return tab != Tab::Models && !panel.quick_open && (panel.recording || panel.record_available);
-        if (a == UiAction::Insert) return tab != Tab::Models && !panel.quick_open && panel.enabled && !panel.recording && !panel.transcript.empty();
+        // With nothing to review, Type is an explicit Enter.
+        if (a == UiAction::Insert) return tab != Tab::Models && !panel.quick_open && panel.enabled && !panel.recording;
         if (a == UiAction::Enter) return tab != Tab::Models && panel.enabled && !panel.recording;
         if (a == UiAction::QuickChat) return tab != Tab::Models && panel.enabled && !panel.recording && !panel.quick_inputs.empty();
         if (a == UiAction::Toggle) return false;
@@ -403,16 +435,37 @@ struct PanelSurface::Impl {
         paint_background();
         frame();
         text("FrameYap", 32, 61, 40, ink, 300);
-        text(displayed_clock.time, 475, 58, 28, ink, 735);
-        if (!displayed_clock.date.empty()) text(displayed_clock.date, 756, 58, 24, cyan, 968);
+        // Clock and date are right-aligned; batteries fill the space after the title.
+        int clock_right = 968;
+        if (!displayed_clock.date.empty()) {
+            clock_right -= measure(displayed_clock.date, 24);
+            text(displayed_clock.date, clock_right, 58, 24, cyan, 968);
+            clock_right -= 22;
+        }
+        const int clock_left = clock_right - measure(displayed_clock.time, 28);
+        text(displayed_clock.time, clock_left, 58, 28, ink, clock_right);
+        batteries(222, clock_left - 20);
         rounded({32, 78, 936, 48}, 13, mix(background, card, .7f),
                 panel.recording ? mix(card, pink, .36f) : mix(card, cyan, .22f),
                 panel.recording ? .16f : 0.f);
         rounded({46, 95, 13, 13}, 6, panel.recording ? pink : cyan,
                 panel.recording ? pink : cyan, panel.recording ? .40f : .20f);
-        auto status = wrap(panel.status, 27, 790);
-        text(status.front(), 70, 109, 27, ink, 844);
-        if (status.size() > 1) text("[...]", 864, 109, 23, muted, 968);
+        int status_right = 968;
+        if (indicators.dashboard_open) {
+            // The SteamVR dashboard owns controller buttons while it is open;
+            // the pointer still works. Mirrors what the wearer can use right now.
+            const bool paused = *indicators.dashboard_open;
+            const char* label = paused ? "Buttons paused" : "Buttons ready";
+            const Rect chip{958 - measure(label, 19) - 38, 87, measure(label, 19) + 38, 30};
+            rounded(chip, 12, mix(card, paused ? pink : cyan, .12f), paused ? pink : mix(card, cyan, .5f),
+                    0.f, 1);
+            rounded({chip.x + 11, 97, 10, 10}, 5, paused ? pink : cyan, paused ? pink : cyan);
+            text(label, chip.x + 28, 108, 19, paused ? pink : ink, chip.x + chip.w - 4);
+            status_right = chip.x - 12;
+        }
+        auto status = wrap(panel.status, 27, status_right - 70 - 74);
+        text(status.front(), 70, 109, 27, ink, status_right - 70);
+        if (status.size() > 1) text("[...]", status_right - 66, 109, 23, muted, status_right);
         if (tab == Tab::Review && panel.quick_open) {
             rounded({32, 212, 936, 324}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
             text("QUICK PHRASES    Y: NEXT   TYPE + ENTER: CHOICE + ENTER   CANCEL: CLOSE", 48, 243, 21, cyan, 952);
@@ -424,13 +477,13 @@ struct PanelSurface::Impl {
                 text(panel.quick_inputs[i], 66, row.y + 28, 26, selected ? ink : muted, 930);
             }
         } else if (tab == Tab::Review) {
-            rounded({32, 212, 936, 178}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
+            rounded({32, 204, 936, 278}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
             for (size_t i = 0; i < lines_per_page && page * lines_per_page + i < lines.size(); ++i)
-                text(lines[page * lines_per_page + i], 48, 246 + int(i) * 40, 32,
+                text(lines[page * lines_per_page + i], 48, 240 + int(i) * 42, 32,
                      panel.transcript.empty() ? muted : ink, 952);
-            text("PAGE " + std::to_string(page + 1) + " / " + std::to_string(page_count()), 416, 436, 23, muted, 790);
-            text(binding_note.empty() ? "Type adds a space; Type + Enter explicitly submits." : binding_note,
-                 32, 203, 20, muted, 968);
+            // A Bindings failure is the only note here; it replaces the page count.
+            if (!binding_note.empty()) text(binding_note, 200, 526, 18, pink, 824);
+            else text("PAGE " + std::to_string(page + 1) + " / " + std::to_string(page_count()), 416, 526, 23, muted, 790);
         } else if (tab == Tab::Models) {
             text("Models: select to restart. Install always needs explicit confirmation.", 32, 202, 19, muted, 968);
             const auto it = std::find_if(panel.models.begin(), panel.models.end(), [&](const auto& m) { return m.id == panel.selected_backend; });
@@ -489,6 +542,7 @@ struct PanelSurface::Impl {
                            (m.id == panel.selected_backend && panel.model_busy ? "checking" : m.state);
                 }() : b.id == Control::ModelInstall && install_confirm ? "Confirm Install" :
                 b.id == Control::Record && panel.recording ? "Stop" :
+                b.id == Control::Insert && panel.transcript.empty() ? "Enter" :
                 b.id == Control::Clock24h ? (clock_24h ? "Clock: 24 hour" : "Clock: 12 hour") :
                 b.id == Control::Date ? (date_format == DateFormat::Off ? "Date: Off" :
                     date_format == DateFormat::MonthDayYear ? "Date: MM/DD/YYYY" :
@@ -628,6 +682,9 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
     else if (c == Control::Prev) { --impl_->page; impl_->dirty = true; }
     else if (c == Control::Next) { ++impl_->page; impl_->dirty = true; }
     return result;
+}
+void PanelSurface::set_indicators(const StatusIndicators& indicators) {
+    if (impl_->indicators != indicators) { impl_->indicators = indicators; impl_->dirty = true; }
 }
 void PanelSurface::set_binding_note(std::string note) {
     if (impl_->binding_note != note) { impl_->binding_note = std::move(note); impl_->dirty = true; }

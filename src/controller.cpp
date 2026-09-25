@@ -335,6 +335,10 @@ void Controller::action(UiAction action) {
                     if (text.back() != ' ' && text.size() < 4096) text += ' ';
                     queue_paced(std::move(text), false, true, manual_focus());
                 } else delivery_detail(deliver_insert(session_, delivery_), false);
+            } else if (!quick_open_ && (session_.state() == State::Ready || session_.state() == State::Queued)) {
+                // A deliberate Type press with nothing to review is an explicit Enter.
+                if (paced_) queue_paced({}, true, false, manual_focus());
+                else delivery_detail(deliver_enter(session_, delivery_), true);
             }
             break;
         case UiAction::Enter:

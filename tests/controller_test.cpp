@@ -120,7 +120,8 @@ int main() {
         int submitted = f.worker.submissions;
         c.action(UiAction::EndRecord); // old PTT release cannot submit after restart
         c.tick(); assert(c.state() == State::Ready && f.worker.submissions == submitted);
-        c.action(UiAction::Insert); assert(f.input.text == 0);
+        c.action(UiAction::Insert); // nothing to review: Type is an explicit Enter
+        assert(f.input.text == 0 && f.input.enter == 1);
         release(c, f);
         f.focus.valid = false; result(c, f, "review to discard");
         assert(c.state() == State::Review && f.input.text == 0);
@@ -130,7 +131,7 @@ int main() {
         c.action(UiAction::Cancel); // a stale Cancel cannot re-enable an unavailable model
         c.tick(); c.action(UiAction::BeginRecord); c.action(UiAction::Enter);
         assert(c.state() == State::Error && f.worker.starts == starts &&
-               f.input.enter == 0 && f.input.text == 0);
+               f.input.enter == 1 && f.input.text == 0);
         c.shutdown();
     }
     {
@@ -167,7 +168,8 @@ int main() {
         assert(f.input.text == 0 && f.input.enter == 0);
         c.action(UiAction::Insert);
         assert(f.input.text == 1 && f.input.sent == "hello " && f.input.enter == 0);
-        c.action(UiAction::Insert); assert(f.input.text == 1); // at most once
+        c.action(UiAction::Insert); // at most once; a second press is only an Enter
+        assert(f.input.text == 1 && f.input.enter == 1);
         release(c, f); result(c, f, std::string(4096, 'x'));
         c.action(UiAction::Insert);
         assert(f.input.sent.size() == 4096 && f.input.sent.back() == 'x');
@@ -301,10 +303,13 @@ int main() {
         std::string joined;
         for (int i = 0; i < 4; ++i) joined += f.input.events[i];
         assert(joined == std::string(81, 'x') + " " && f.input.events.back() == "<Enter>");
+        // With nothing left to review, Type is an explicit Enter; it still obeys the gap.
         c.action(UiAction::Insert); assert(f.input.events.size() == 5);
-        // A separate Enter press is a new action but still obeys the gap.
-        c.action(UiAction::Enter); c.tick(); assert(f.input.enter == 1);
+        c.action(UiAction::Enter); // ignored while the Type-Enter is pending
+        c.tick(); assert(f.input.enter == 1);
         now += std::chrono::milliseconds(150); c.tick(); assert(f.input.enter == 2);
+        c.action(UiAction::Enter); now += std::chrono::milliseconds(150); c.tick();
+        assert(f.input.enter == 3 && f.input.text == 4);
         c.shutdown();
     }
     {

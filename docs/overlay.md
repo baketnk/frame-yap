@@ -54,19 +54,33 @@ GPU setup/submission errors stop startup or the run with an explicit error.
 This replaces the raw-upload rendering path; headset flicker acceptance still
 requires an on-device comparison. Native installation and offscreen GPU checks are separate from headset acceptance.
 
-The header shows local time and date instead of the former on-device/review
-and current-mount labels. Settings explains Hold Quit (hold 0.9 seconds then
-release) and Lasers anytime (system-wide lasers may affect games). The review
-tab describes Type and Type + Enter. It updates when the displayed minute or date changes,
+The header shows local time and date (right-aligned) instead of the former
+on-device/review and current-mount labels. Between the title and the clock it
+shows battery levels for the left controller, headset (HMD) and right controller.
+Controllers and the headset use OpenVR's `Prop_DeviceBatteryPercentage_Float`
+(with `Prop_DeviceIsCharging_Bool`) when the device reports
+`Prop_DeviceProvidesBatteryStatus_Bool`; if the headset reports none, the local
+Linux `/sys/class/power_supply` system battery is read instead (peripheral
+`scope=Device` supplies are skipped). Levels refresh every five seconds; a device
+without a reading is hidden, never shown as zero. 20% or less is drawn in the
+warning color, charging in the accent color with `+`. The status line carries a
+**Buttons ready / Buttons paused** chip from `IVROverlay::IsDashboardVisible()`:
+while the SteamVR dashboard is open, controller bindings do not reach FrameYap,
+though pointer clicks still work. The chip reflects dashboard visibility only,
+not every system or game input override. `--check-controls` prints the same
+battery readings. Which devices Frame actually reports still needs a headset check.
+Settings explains Hold Quit (hold 0.9 seconds then
+release) and Lasers anytime (system-wide lasers may affect games). The header
+updates when the displayed minute, date, battery or dashboard state changes,
 not every frame. Settings toggles 12/24-hour time and cycles date Off →
 MM/DD/YYYY → DD/MM/YYYY → YYYY-MM-DD → Off. These only affect display;
 mount choices remain in Settings.
 
-The complete transcript preview is paginated by glyph width and four-line
+The complete transcript preview is paginated by glyph width and six-line
 height; Previous and Next navigate it without changing the source transcript.
 Status fits on the single status line; the old bottom detail label is gone.
 The footer remains available on all tabs: Record (labelled Stop while recording),
-Cancel, Type, Type + Enter, Hold Quit. Hold Quit needs a 900 ms press and release on
+Cancel, Type (labelled Enter when nothing is pending review), Type + Enter, Hold Quit. Hold Quit needs a 900 ms press and release on
 that same button; its thin progress bar shows the hold. Record can retry after an
 error; it is disabled while warming/transcribing and until an existing review is
 typed or discarded. Cancel can stop worker startup. Type and Type + Enter are
@@ -76,7 +90,9 @@ tab changes, action-state changes and relocation clear pending presses. Type + E
 is *always* a separate deliberate action, not inferred from text. Type normally
 appends a trailing space (without doubling an existing one); a full 4096-byte
 transcript without room for that suffix is queued unchanged, with no extra error
-for the missing space. Type + Enter types any pending review and then queues
+for the missing space. With no pending review, Type (button or A) queues Enter
+alone, the same as Type + Enter; a quick second A after Type therefore submits.
+Type + Enter types any pending review and then queues
 Enter; with no pending text it queues Enter only. Y opens the Quick phrases
 list over the review area; each further Y press cycles its highlighted choice. Cancel closes the picker without discarding an
 existing review. Type + Enter sends the selected phrase *without* a trailing
