@@ -745,8 +745,9 @@ class InstallTests(unittest.TestCase):
     def test_piped_input_with_tty_output_does_not_prompt(self):
         master, slave = pty.openpty()
         try:
+            # A new session has no controlling terminal: nothing to prompt on.
             child = subprocess.Popen(["sh", str(REPO / "install.sh")], stdin=subprocess.PIPE,
-                                     stdout=slave, stderr=slave,
+                                     stdout=slave, stderr=slave, start_new_session=True,
                                      env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
             os.close(slave)
             slave = -1
@@ -772,6 +773,76 @@ class InstallTests(unittest.TestCase):
             os.close(master)
             if slave >= 0:
                 os.close(slave)
+
+    def test_curl_pipe_prompts_on_controlling_terminal_not_the_pipe(self):
+        import fcntl as fcntl_module
+        import termios
+        master, slave = pty.openpty()
+        try:
+            def controlling_terminal():
+                fcntl_module.ioctl(1, termios.TIOCSCTTY, 0)
+            # `curl | sh`: stdin is a pipe; the pty is stdout and the session's terminal.
+            child = subprocess.Popen(["sh", str(REPO / "install.sh")], stdin=subprocess.PIPE,
+                                     stdout=slave, stderr=slave, start_new_session=True,
+                                     preexec_fn=controlling_terminal,
+                                     env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            os.close(slave)
+            slave = -1
+            output = bytearray()
+            try:
+                child.stdin.write(b"source\n")  # piped data must never answer a prompt
+                child.stdin.close()
+                wrote = False
+                while child.poll() is None:
+                    ready, _, _ = select.select([master], [], [], 8)
+                    self.assertTrue(ready, "installer did not prompt on the terminal")
+                    try:
+                        output.extend(os.read(master, 8192))
+                    except OSError:
+                        break
+                    if not wrote and b"Mode [binary/source]:" in output:
+                        os.write(master, b"not-a-mode\n")
+                        wrote = True
+                self.assertEqual(child.wait(timeout=8), 2)
+                self.assertIn(b"read it first", output)
+                self.assertIn(b"choose binary or source", output)
+                self.assertFalse((self.data / "frameyap").exists())
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait(timeout=8)
+        finally:
+            os.close(master)
+            if slave >= 0:
+                os.close(slave)
+
+    def test_attended_steps_ask_for_model_and_runtime_separately(self):
+        answers = iter(["binary", "0.1.202609241530", "/tmp/a.tar.gz", "a" * 64, "maybe", "y", "n"])
+        with patch("builtins.input", lambda prompt="": next(answers)), \
+             contextlib.redirect_stdout(io.StringIO()) as shown:
+            steps = installer.interactive_options()
+        self.assertEqual(steps, [["--mode", "binary", "--version", "0.1.202609241530",
+                                  "--archive", "/tmp/a.tar.gz", "--sha256", "a" * 64],
+                                 ["--install-model", "--backend", "redux", "--yes"]])
+        self.assertIn("Please answer y or n.", shown.getvalue())
+        self.assertIn("sh install.sh --install-model --backend redux --yes", shown.getvalue())
+        answers = iter(["binary", "0.1.202609241530", "", "n"])
+        with patch("builtins.input", lambda prompt="": next(answers)), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, "download not approved"):
+                installer.interactive_options()
+        answers = iter(["binary", "0.1.202609241530", "", "yes", "n", "y"])
+        with patch("builtins.input", lambda prompt="": next(answers)), contextlib.redirect_stdout(io.StringIO()):
+            steps = installer.interactive_options()
+        self.assertEqual(steps[0][-1], "--yes")
+        self.assertEqual(steps[1:], [["--install-runtime", "--yes"]])
+        # Steps run in order and stop at the first failure.
+        calls = []
+        with patch.object(installer, "attended_input", return_value=sys.stdin), \
+             patch.object(installer, "interactive_options", return_value=[["a"], ["b"], ["c"]]), \
+             patch.object(installer, "run_step", side_effect=lambda argv: calls.append(argv) or (1 if argv == ["b"] else 0)), \
+             patch.object(installer.sys.stdout, "isatty", return_value=True):
+            self.assertEqual(installer.cli([]), 1)
+        self.assertEqual(calls, [["a"], ["b"]])
 
     def test_attended_shell_wrapper_reads_the_actual_tty(self):
         master, slave = pty.openpty()

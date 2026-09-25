@@ -20,8 +20,9 @@ a separately provisioned compatible CPU Python environment and pinned weights.
 ## OpenVR identity
 
 `local.frameyap.overlay` is a string OpenVR application key, **not** a Steam
-store AppID. The installer creates a manifest/desktop launcher user-locally but
-does not register/launch the app by default. Explicit `frameyap --register
+store AppID. The installer creates a manifest and a desktop entry user-locally; the
+desktop entry (read by KDE's menu) is the intended launch path, and the app
+is not registered with SteamVR or launched by default. Explicit `frameyap --register
 /absolute/manifest/path` uses the OpenVR registration API; registration alone
 did not reveal a launcher in the first checked dashboard menu. On one Frame the
 user opened the panel from the **Non-Steam** section and quit; shortcut discovery
@@ -57,8 +58,10 @@ already be available for registration; never start/restart it for installation.
   authorized runtime/model can be set in `paths.conf`.
 - **Noninteractive**: supply flags and `--yes` for network/model consent.
   `--print-plan` is read-only; `--json` provides structured results/errors and
-  progress events for a model download. No prompt reads stdin in a pipe. An
-  empty TTY invocation offers a local menu and prints equivalent flags.
+  progress events for a model download. No prompt reads answers from a pipe.
+  A bare terminal invocation, including `curl … | sh`, prompts on the real
+  terminal (`/dev/tty`), asks y/n separately for the model and runtime
+  downloads, and prints the equivalent flag commands.
 
 Installation is user-local under XDG data/config paths with a managed launcher,
 retained rollback, SHA-256/path validation, foreign-file refusal and a lock

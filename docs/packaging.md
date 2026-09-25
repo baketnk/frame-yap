@@ -86,7 +86,7 @@ sh install.sh --archive /path/to/frameyap-VERSION-linux-aarch64.tar.gz \
 After an actual vetted release exists, use a real numeric version (for example,
 `sh install.sh --mode binary --version 0.1.202609241627 --yes`); the installer
 will retrieve tag `v0.1.202609241627` and its versioned checksum; no `latest` or moving-branch
-lookup. A pipe invocation is supported, never prompts on stdin, and must also
+lookup. A pipe invocation is supported, never reads answers from the pipe, and must also
 pin a real published tag. **There is no functional public download command yet.**
 
 `--without-model` omits any model files in the selected archive, never deletes
@@ -139,9 +139,17 @@ compiler, CMake, SDK, SDL3, Wayland/scanner, libxcb, FreeType, Vulkan developmen
 files and producer-supplied
 licenses; it still does not install Python ASR packages. `--print-plan` performs
 a read-only plan, `--json` gives machine-readable results/errors (model installs
-also stream file events), and `--yes` authorizes network downloads. Bare TTY
-invocation can guide choices and prints equivalent flags; non-TTY runs require
-explicit arguments and never prompt. `--autolaunch`/`--no-autolaunch` are explicit
+also stream file events), and `--yes` authorizes network downloads.
+A bare invocation with a terminal on stdout (including `curl … | sh`) runs
+the attended flow: it first notes that the user can press Ctrl+C and read the
+script, asks for the install choices, then separately asks y/n before the
+speech-model download (about 180 MB) and the pip runtime install, and runs the
+chosen steps in order, stopping at the first failure. Answers come from the real
+terminal (stdin if it is one, else `/dev/tty`); piped data is never read as an
+answer, and with no controlling terminal nothing prompts. It prints the
+equivalent flag commands for automation. Attended mode does not offer OpenVR
+registration: the desktop entry is the launch path.
+Runs with flags, or without a terminal, never prompt. `--autolaunch`/`--no-autolaunch` are explicit
 OpenVR registration choices, off by default; do not pass either during an inert
 install if a running SteamVR session must remain untouched.
 
@@ -188,7 +196,7 @@ Install root: `$XDG_DATA_HOME/frameyap` (default `~/.local/share/frameyap`);
 launcher: `~/.local/bin/frameyap`; desktop entry:
 `$XDG_DATA_HOME/applications/frameyap.desktop` (default
 `~/.local/share/applications/frameyap.desktop`). The desktop entry points to the
-user-local launcher; the installer never edits Steam's library or registers a
+user-local launcher and is the intended launch path (KDE's menu reads it); the installer never edits Steam's library or registers a
 Steam shortcut. Install/upgrade creates or checks `$XDG_CONFIG_HOME/frameyap/config.json`
 (default `~/.config/frameyap/config.json`), filling missing properties or repairing
 invalid JSON/values while preserving valid customization. Before each repair it

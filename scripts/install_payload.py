@@ -1085,8 +1085,21 @@ def main(argv=None):
         print("OpenVR autolaunch " + ("enabled" if args.autolaunch else "disabled") + " by explicit request")
 
 
+def ask_yes_no(question):
+    while True:
+        answer = input(question + " [y/n]: ").strip().lower()
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        print("Please answer y or n.")
+
+
 def interactive_options():
-    """Only an empty, actual terminal invocation offers a guided local choice."""
+    """Only an empty, actual terminal invocation offers a guided local choice.
+
+    Returns one argv per step; each step is an ordinary flag-driven operation."""
+    print("If you piped this script without reading it, you can press Ctrl+C now and read it first.")
     print("FrameYap installer: choose binary (verified archive) or source (local build).")
     mode = input("Mode [binary/source]: ").strip().lower()
     if mode not in ("binary", "source"):
@@ -1099,44 +1112,68 @@ def interactive_options():
         if archive:
             chosen += ["--archive", archive, "--sha256", input("SHA-256 (64 hex digits): ").strip()]
         else:
-            if input("Download verified release v" + version + "? [yes/no]: ").strip().lower() != "yes":
+            if not ask_yes_no("Download verified release v" + version + "?"):
                 raise UsageError("download not approved; no installation started")
             chosen.append("--yes")
     else:
         for flag in ("source", "openvr-root", "openvr-library", "openvr-license", "sdl-library", "sdl-license"):
             chosen += ["--" + flag, input(flag + " local path: ").strip()]
-    if input("Omit archive model files? [yes/no]: ").strip().lower() == "yes":
-        chosen.append("--without-model")
-    if input("Enable OpenVR autolaunch? [yes/no]: ").strip().lower() == "yes":
-        chosen.append("--autolaunch")
-    print("Equivalent flags: " + " ".join(shlex.quote(item) for item in chosen))
-    return chosen
+    steps = [chosen]
+    # Each download is described and separately approved; nothing is fetched on a default.
+    if ask_yes_no("Download the Parakeet Redux speech model (about 180 MB, CC-BY-4.0) from Hugging Face?"):
+        steps.append(["--install-model", "--backend", "redux", "--yes"])
+    if ask_yes_no("Install the CPU Python runtime with pip (" + RUNTIME_DOWNLOAD + ")?"):
+        steps.append(["--install-runtime", "--yes"])
+    print("Equivalent commands:")
+    for step in steps:
+        print("  sh install.sh " + " ".join(shlex.quote(item) for item in step))
+    return steps
+
+
+def attended_input():
+    """The real terminal for prompts, or None. Under `curl | sh` stdin (and the
+    saved fd 3) is the pipe, so the controlling terminal is opened directly;
+    piped data is never read as answers."""
+    if sys.stdin.isatty():
+        return sys.stdin
+    try:
+        if os.isatty(3):
+            return os.fdopen(3, "r", closefd=False)
+    except OSError:
+        pass  # Direct Python entry point, no saved shell descriptor.
+    try:
+        return open("/dev/tty", "r")
+    except OSError:
+        return None  # no controlling terminal: never prompt
 
 
 def cli(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    structured = "--json" in argv
+    steps = [argv]
     if not argv and sys.stdout.isatty():
         # With `sh install.sh`, fd 0 is the embedded Python code, not the
         # invoking terminal. fd 3 retains original stdin (including a pipe).
-        attended = sys.stdin
-        if not attended.isatty():
-            try:
-                if os.isatty(3):
-                    attended = os.fdopen(3, "r", closefd=False)
-            except OSError:
-                pass  # Direct Python entry point, no saved shell descriptor.
-        if attended.isatty():
+        attended = attended_input()
+        if attended is not None:
             try:
                 original_stdin = sys.stdin
                 try:
                     sys.stdin = attended
-                    argv = interactive_options()
+                    steps = interactive_options()
                 finally:
                     sys.stdin = original_stdin
-            except (ValueError, EOFError) as exc:
-                print(f"frameyap installer: {exc}", file=sys.stderr)
+            except (ValueError, EOFError, KeyboardInterrupt) as exc:
+                print(f"frameyap installer: {exc or 'cancelled'}", file=sys.stderr)
                 return 2
+    for step in steps:
+        code = run_step(step)
+        if code:
+            return code
+    return 0
+
+
+def run_step(argv):
+    structured = "--json" in argv
     try:
         if structured and "--print-plan" in argv:
             main(argv)  # already emits one JSON plan
