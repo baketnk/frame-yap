@@ -438,6 +438,84 @@ class InstallTests(unittest.TestCase):
             self.install("0.1.202609241530", a, h, "--without-model")
         self.assertTrue((self.data / "frameyap/versions/0.1.202609241530/model/weights.bin").exists())
 
+    def test_launcher_run_defaults_and_explicit_overrides_preserve_argv(self):
+        native = self.stage / "bin/frameyap"
+        native.write_text('#!/usr/bin/env python3\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n')
+        native.chmod(0o755)
+        a, h = self.package("0.1.202609241530")
+        self.install("0.1.202609241530", a, h)
+        root = self.data / "frameyap/current"
+        launcher = self.home / ".local/bin/frameyap"
+        base_env = {**os.environ, "GAMESCOPE_SOCKET": "", "FRAMEYAP_PYTHON": "", "FRAMEYAP_MODEL": ""}
+
+        def run(*args, env=base_env):
+            result = subprocess.run([str(launcher), *args], env=env, capture_output=True, text=True, check=True)
+            return json.loads(result.stdout)
+
+        defaults = ["--assets", str(root / "assets"), "--worker", str(root / "python/frameyap/worker.py"),
+                    "--python", str(root / "runtime/bin/python3"), "--model", str(root / "model")]
+        self.assertEqual(run(), ["--run", *defaults])
+        marker = self.base / "not-executed"
+        literal = f"$(touch {marker})"
+        config = self.home / ".config/frameyap/paths.conf"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(f"python=/opt/approved python/{literal}\n"
+                          "model=/opt/local model; touch not-executed\n")
+        config_defaults = [*defaults[:4], "--python", f"/opt/approved python/{literal}",
+                           "--model", "/opt/local model; touch not-executed"]
+        self.assertEqual(run("--run"), ["--run", *config_defaults])
+        self.assertFalse(marker.exists())
+        env_defaults = [*defaults[:4], "--python", f"/env/python $HOME; {literal}",
+                        "--model", "/env/model * 'quoted'"]
+        env = {**base_env, "FRAMEYAP_PYTHON": env_defaults[5], "FRAMEYAP_MODEL": env_defaults[7],
+               "GAMESCOPE_SOCKET": "env-socket $HOME"}
+        self.assertEqual(run(env=env), ["--run", *env_defaults, "--socket", "env-socket $HOME"])
+        self.assertFalse(marker.exists())
+
+        # Each explicit flag wins independently, even when environment/config supplies defaults.
+        for flag, value in (("--assets", f"/other assets/{literal}"),
+                            ("--worker", "/other worker; touch not-executed"),
+                            ("--python", "/other python $HOME"),
+                            ("--model", "/other model *"),
+                            ("--socket", f"explicit socket; {literal}")):
+            with self.subTest(flag=flag):
+                argv = run("--run", flag, value, env=env)
+                self.assertEqual(argv.count(flag), 1)
+                self.assertEqual(argv[argv.index(flag) + 1], value)
+                if flag == "--socket":
+                    self.assertNotIn("env-socket $HOME", argv)
+                else:
+                    self.assertIn("env-socket $HOME", argv)
+        explicit = ["--model", "/my model", "--worker", "/my worker", "--assets", "/my assets",
+                    "--python", "/my python", "--socket", "my socket", "--head"]
+        self.assertEqual(run("--run", *explicit, env=env), ["--run", *explicit])
+        self.assertEqual(run("--run", "--python", "/one", "--python", "/two"),
+                         ["--run", *defaults[:4], "--model", "/opt/local model; touch not-executed",
+                          "--python", "/one", "--python", "/two"])
+        self.assertFalse(marker.exists())
+
+    def test_prior_managed_launcher_migration_and_modified_refusal(self):
+        a, h = self.package("0.1.202609241530")
+        self.install("0.1.202609241530", a, h)
+        root = self.data / "frameyap"
+        launcher = self.home / ".local/bin/frameyap"
+        old = installer.desired_launcher(root, prior_launcher=True)
+        self.assertIn(b'shift; exec ', old)
+        self.assertIn(b'--python "$PYTHON" --model "$MODEL" "$@"', old)
+        launcher.write_bytes(old)
+        self.install("0.1.202609241530", a, h)
+        self.assertEqual(launcher.read_bytes(), installer.desired_launcher(root))
+        launcher.write_bytes(old + b'# user change\n')
+        with self.assertRaisesRegex(ValueError, "foreign file"):
+            self.install("0.1.202609241530", a, h)
+        with self.assertRaisesRegex(ValueError, "foreign file"):
+            installer.main(["--uninstall", "--unregistered"])
+        self.assertEqual(launcher.read_bytes(), old + b'# user change\n')
+        launcher.write_bytes(old)
+        with contextlib.redirect_stdout(io.StringIO()):
+            installer.main(["--uninstall", "--unregistered"])
+        self.assertFalse(launcher.exists())
+
     def test_no_model_reinstall_preserves_provisioned_model_and_uninstall(self):
         a, h = self.package("0.1.202609241530")
         self.install("0.1.202609241530", a, h, "--without-model")

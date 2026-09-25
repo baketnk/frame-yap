@@ -348,7 +348,7 @@ def select(root, link, target):
         temp.unlink(missing_ok=True)
 
 
-def desired_launcher(root, legacy=False, pinned_font=False):
+def desired_launcher(root, legacy=False, pinned_font=False, prior_launcher=False):
     import shlex
     q = lambda path: shlex.quote(str(path))
     base = root / "current"
@@ -374,18 +374,48 @@ def desired_launcher(root, legacy=False, pinned_font=False):
     model_default = (q(base / "model") if legacy else
                      '${CONFIG_MODEL:-' + q(base / "model") + '}')
     check_font = ' --font ' + q(base / "fonts/font.ttf") if legacy or pinned_font else ''
-    return ("#!/bin/sh\n" + MARKER + 'export PYTHONDONTWRITEBYTECODE=1\n'
-            + f'export FRAMEYAP_INSTALL_ROOT={q(root)}\n'
-            + f'export LD_LIBRARY_PATH={q(base / "lib")}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\n'
-            + config
-            + f'PYTHON=${{FRAMEYAP_PYTHON:-{python_default}}}\n'
-            + f'MODEL=${{FRAMEYAP_MODEL:-{model_default}}}\n'
-            + 'if [ "$#" -eq 0 ]; then set -- --run; fi\n'
-            + 'case "$1" in\n'
+    preamble = ("#!/bin/sh\n" + MARKER + 'export PYTHONDONTWRITEBYTECODE=1\n'
+                + f'export FRAMEYAP_INSTALL_ROOT={q(root)}\n'
+                + f'export LD_LIBRARY_PATH={q(base / "lib")}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\n'
+                + config
+                + f'PYTHON=${{FRAMEYAP_PYTHON:-{python_default}}}\n'
+                + f'MODEL=${{FRAMEYAP_MODEL:-{model_default}}}\n'
+                + 'if [ "$#" -eq 0 ]; then set -- --run; fi\n'
+                + 'case "$1" in\n')
+    # These are only for byte-for-byte migration of earlier managed wrappers.
+    if legacy or pinned_font or prior_launcher:
+        return (preamble
+                + '  --run)\n'
+                + '    if [ -n "${GAMESCOPE_SOCKET:-}" ]; then set -- "$@" --socket "$GAMESCOPE_SOCKET"; fi\n'
+                + f"    shift; exec {q(base / 'bin/frameyap')} --run {args} --python \"$PYTHON\" --model \"$MODEL\" \"$@\";;\n"
+                + f"  --check-overlay|--check-controls) mode=$1; shift; exec {q(base / 'bin/frameyap')} \"$mode\" --assets {q(base / 'assets')}{check_font} \"$@\";;\n"
+                + f"  *) exec {q(base / 'bin/frameyap')} \"$@\";;\n"
+                + 'esac\n').encode()
+    # Scan the original argv without shifting or evaluating it. Prepend each
+    # absent default in reverse order, preserving explicit options (including
+    # duplicates) for the binary's strict parser to handle.
+    return (preamble
             + '  --run)\n'
-            + '    if [ -n "${GAMESCOPE_SOCKET:-}" ]; then set -- "$@" --socket "$GAMESCOPE_SOCKET"; fi\n'
-            + f"    shift; exec {q(base / 'bin/frameyap')} --run {args} --python \"$PYTHON\" --model \"$MODEL\" \"$@\";;\n"
-            + f"  --check-overlay|--check-controls) mode=$1; shift; exec {q(base / 'bin/frameyap')} \"$mode\" --assets {q(base / 'assets')}{check_font} \"$@\";;\n"
+            + '    shift\n'
+            + '    has_assets= has_worker= has_python= has_model= has_socket=\n'
+            + '    for arg in "$@"; do\n'
+            + '      case "$arg" in\n'
+            + '        --assets) has_assets=1;;\n'
+            + '        --worker) has_worker=1;;\n'
+            + '        --python) has_python=1;;\n'
+            + '        --model) has_model=1;;\n'
+            + '        --socket) has_socket=1;;\n'
+            + '      esac\n'
+            + '    done\n'
+            + '    if [ -z "$has_socket" ] && [ -n "${GAMESCOPE_SOCKET:-}" ]; then\n'
+            + '      set -- --socket "$GAMESCOPE_SOCKET" "$@"\n'
+            + '    fi\n'
+            + '    if [ -z "$has_model" ]; then set -- --model "$MODEL" "$@"; fi\n'
+            + '    if [ -z "$has_python" ]; then set -- --python "$PYTHON" "$@"; fi\n'
+            + f'    if [ -z "$has_worker" ]; then set -- --worker {q(base / "python/frameyap/worker.py")} "$@"; fi\n'
+            + f'    if [ -z "$has_assets" ]; then set -- --assets {q(base / "assets")} "$@"; fi\n'
+            + f"    exec {q(base / 'bin/frameyap')} --run \"$@\";;\n"
+            + f"  --check-overlay|--check-controls) mode=$1; shift; exec {q(base / 'bin/frameyap')} \"$mode\" --assets {q(base / 'assets')} \"$@\";;\n"
             + f"  *) exec {q(base / 'bin/frameyap')} \"$@\";;\n"
             + 'esac\n').encode()
 
@@ -425,7 +455,8 @@ def check_wrappers(root, launcher):
     desired = (json.dumps(desired_manifest(launcher), sort_keys=True, indent=2) + "\n").encode()
     # Accept only exact earlier managed scripts for migration.
     check_owned_file(launcher, desired_launcher(root),
-                     (desired_launcher(root, pinned_font=True), desired_launcher(root, legacy=True)))
+                     (desired_launcher(root, prior_launcher=True), desired_launcher(root, pinned_font=True),
+                      desired_launcher(root, legacy=True)))
     check_owned_file(manifest, desired)
     check_owned_file(desktop_path(root), desired_desktop(launcher))
     return manifest, desired
@@ -764,7 +795,8 @@ def uninstall(root, launcher):
     desired = (json.dumps(desired_manifest(launcher), sort_keys=True, indent=2) + "\n").encode()
     check_owned_file(manifest, desired)
     check_owned_file(launcher, desired_launcher(root),
-                     (desired_launcher(root, pinned_font=True), desired_launcher(root, legacy=True)))
+                     (desired_launcher(root, prior_launcher=True), desired_launcher(root, pinned_font=True),
+                      desired_launcher(root, legacy=True)))
     desktop = desktop_path(root)
     check_owned_file(desktop, desired_desktop(launcher))
     versions = root / "versions"
