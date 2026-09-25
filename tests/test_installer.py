@@ -16,6 +16,7 @@ from unittest.mock import patch
 import shutil
 import pty
 import select
+import signal
 from types import SimpleNamespace
 
 REPO = Path(__file__).resolve().parents[1]
@@ -849,6 +850,61 @@ class InstallTests(unittest.TestCase):
                 self.assertEqual(json.loads(output.getvalue())["code"], "manifest_mismatch")
             fetch.assert_not_called()
         self.assertFalse((root / "models/other").exists())
+
+    def test_model_sigterm_removes_owned_partial_download(self):
+        # The child uses a mocked blocking response. No network/download occurs.
+        shutil.copyfile(REPO / "python/frameyap/model_files.py",
+                        self.stage / "python/frameyap/model_files.py")
+        manifest = json.loads((REPO / "assets/backends/redux.json").read_text())
+        manifest["model"]["files"] = [{"path": "weights.bin", "size": 9,
+                                     "sha256": hashlib.sha256(b"ninebytes").hexdigest()}]
+        manifests = self.stage / "assets/backends"
+        manifests.mkdir()
+        (manifests / "redux.json").write_text(json.dumps(manifest))
+        archive, digest = self.package("0.1.202609241530")
+        self.install("0.1.202609241530", archive, digest, "--without-model")
+        dest = self.base / "cancelled-model"
+        script = '''import importlib.util, signal, sys
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location("installer", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class Response:
+    def __enter__(self): return self
+    def __exit__(self, *args): pass
+    def geturl(self): return "https://example.org/model"
+    def read(self, size):
+        print("fixture-read-started", flush=True)
+        signal.pause()  # parent delivers SIGTERM during the owned download
+with patch.object(module, "check_host"), patch.object(module.urllib.request, "urlopen", return_value=Response()):
+    sys.exit(module.cli(["--install-model", "--backend", "redux", "--model-dir", sys.argv[2], "--yes", "--json"]))
+'''
+        child = subprocess.Popen([sys.executable, "-c", script,
+                                  str(REPO / "scripts/install_payload.py"), str(dest)],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        try:
+            output = b""
+            for _ in range(8):
+                readable, _, _ = select.select([child.stdout], [], [], 8)
+                self.assertTrue(readable, "mocked download did not reach response.read")
+                output += os.read(child.stdout.fileno(), 4096)
+                if b"fixture-read-started\n" in output:
+                    break
+            self.assertIn(b"fixture-read-started\n", output)
+            self.assertEqual(len(list(dest.glob(".download-*"))), 1)
+            os.kill(child.pid, signal.SIGTERM)  # only our fixture process
+            rest, error = child.communicate(timeout=5)
+            self.assertEqual(child.returncode, 1, error)
+            event = json.loads(rest.strip())
+            self.assertFalse(event["ok"])
+            self.assertIn("cancelled", event["message"])
+            self.assertEqual(list(dest.glob(".download-*")), [])
+            self.assertFalse((dest / "weights.bin").exists())
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
 
     def test_model_install_manifest_verification_and_explicit_consent(self):
         # Tiny pinned files via the shared verifier; urllib is mocked, no network.

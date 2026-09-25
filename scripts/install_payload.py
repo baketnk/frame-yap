@@ -12,6 +12,7 @@ from pathlib import Path
 import platform
 import re
 import shlex
+import signal
 import shutil
 import subprocess
 import sys
@@ -515,6 +516,20 @@ def model_target(args, root):
     return root / "models" / args.backend
 
 
+@contextlib.contextmanager
+def model_download_cancellation():
+    # Install-model runs on the main thread. Raising unwinds the owned temp's
+    # finally block; unlike SIGKILL this does not leave a partial download.
+    def terminate(_signal, _frame):
+        raise ValueError("model installation cancelled")
+
+    previous = signal.signal(signal.SIGTERM, terminate)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def install_model(args, root):
     module, backend, manifest_sha = installed_backend(root, args.backend)
     check_expected_manifest(args, manifest_sha)  # under .model.lock, before model mkdir/network
@@ -539,32 +554,33 @@ def install_model(args, root):
         url = f"{backend.source}/resolve/{quote(backend.revision, safe='')}/{quote(item.path, safe='/')}"
         if args.json:
             print(json.dumps({"ok": True, "event": "model_file", "file": item.path, "state": "downloading", "bytes": item.size}), flush=True)
-        fd, temp = tempfile.mkstemp(prefix=".download-", dir=target.parent)
-        try:
-            with os.fdopen(fd, "wb") as output:
-                # The shared verifier is used for both pre-existing and downloaded files.
-                request = urllib.request.Request(url, headers={"User-Agent": "frameyap-installer"})
-                with urllib.request.urlopen(request, timeout=60) as response:
-                    if response.geturl().split(":", 1)[0] != "https":
-                        fail("model URL redirected away from HTTPS")
-                    total = 0
-                    while chunk := response.read(1024 * 1024):
-                        total += len(chunk)
-                        if total > item.size:
-                            fail(f"model download exceeded pinned size: {item.path}")
-                        output.write(chunk)
-                output.flush()
-                os.fsync(output.fileno())
-            temporary = type(item)(Path(temp).name, item.size, item.sha256)
-            if module.check_file(target.parent, temporary)[0] is not None:
-                fail(f"pinned SHA-256/size mismatch: {item.path}")
-            if target.exists() or target.is_symlink():
-                fail(f"model destination changed during download: {target}")
-            os.replace(temp, target)
-            if args.json:
-                print(json.dumps({"ok": True, "event": "model_file", "file": item.path, "state": "verified"}), flush=True)
-        finally:
-            Path(temp).unlink(missing_ok=True)
+        with model_download_cancellation():
+            fd, temp = tempfile.mkstemp(prefix=".download-", dir=target.parent)
+            try:
+                with os.fdopen(fd, "wb") as output:
+                    # The shared verifier is used for both pre-existing and downloaded files.
+                    request = urllib.request.Request(url, headers={"User-Agent": "frameyap-installer"})
+                    with urllib.request.urlopen(request, timeout=60) as response:
+                        if response.geturl().split(":", 1)[0] != "https":
+                            fail("model URL redirected away from HTTPS")
+                        total = 0
+                        while chunk := response.read(1024 * 1024):
+                            total += len(chunk)
+                            if total > item.size:
+                                fail(f"model download exceeded pinned size: {item.path}")
+                            output.write(chunk)
+                    output.flush()
+                    os.fsync(output.fileno())
+                temporary = type(item)(Path(temp).name, item.size, item.sha256)
+                if module.check_file(target.parent, temporary)[0] is not None:
+                    fail(f"pinned SHA-256/size mismatch: {item.path}")
+                if target.exists() or target.is_symlink():
+                    fail(f"model destination changed during download: {target}")
+                os.replace(temp, target)
+                if args.json:
+                    print(json.dumps({"ok": True, "event": "model_file", "file": item.path, "state": "verified"}), flush=True)
+            finally:
+                Path(temp).unlink(missing_ok=True)
     state = module.check_model(backend, dest)
     if state["state"] != "installed_verified":
         fail(f"model did not verify: {state['reason']}")
