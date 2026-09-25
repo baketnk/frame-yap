@@ -2,10 +2,11 @@
 
 **User goal:** install from GitHub with a `curl … | bash`-style command, without a
 Steam store AppID. An idempotent archive installer and native-only local artifacts
-are now implemented/tested; no public release is published. The full bundled-ASR
-experience remains blocked on runtime permission. This document retains the target
-design; see [current packaging](packaging.md), [POC evidence](evidence/poc-cpu-overlay-2026-09-24.md)
-and [third-party boundary](third-party.md).
+are now implemented/tested; no public release is published. A bundled-ASR
+experience is not yet offered. This document retains the target
+design; see [current packaging](packaging.md) and [third-party notes](third-party.md).
+Planned installer work (binary-or-source choice, flag-driven operation) is in
+[TODO.md](../TODO.md).
 
 The read-only `scripts/install-preflight.sh` checks whether a host appears suitable
 for the **proposed** Linux ARM64 glibc package format and has the expected basic
@@ -66,16 +67,15 @@ confirmation from stdin while the installer itself is arriving through that pipe
   no external application libraries/assets and no system Python modification.
 - Model fetched during explicit installation/setup, with pinned revision/hash and
   attribution. A documented `--without-model` option can defer the large download.
-  No surprise first-utterance downloads. Licensing may require obtaining particular
-  runtime components from their vendor instead of redistributing them in our tarball.
+  No surprise first-utterance downloads. Runtime components are installed from
+  their own package index rather than redistributed in our tarball.
 - Install under `$XDG_DATA_HOME/frameyap` (default `~/.local/share/...`),
   configuration under `$XDG_CONFIG_HOME/frameyap`, optional launcher in
   `~/.local/bin`; transient audio stays in a private `$XDG_RUNTIME_DIR` directory.
 - No sudo, OS read-only-root changes, package-manager installs, udev changes,
   `/dev/uinput` permission changes or modifications to unrelated launchers.
 - No Steam store AppID, Steamworks SDK, root service or network ASR dependency.
-- Distribution license/third-party notices must be resolved before publication;
-  the small model file alone is not the full runtime or redistribution permission.
+- Third-party notices for everything we redistribute must be included with a release.
 
 ## Installer lifecycle and safety
 

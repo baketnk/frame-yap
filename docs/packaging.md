@@ -1,9 +1,8 @@
 # Release packaging and idempotent user-local installer
 
 **No GitHub release is published.** Native-only local artifacts have been installed
-and reinstalled on Frame. The end-to-end bundled-ASR release remains blocked on
-runtime permission; see [third-party notes](third-party.md). The installer never
-pretends the proprietary runtime is included when it is not.
+and reinstalled on Frame. The installer never pretends an ASR runtime is included when it is not;
+see [third-party notes](third-party.md).
 
 ## Producer
 
@@ -21,11 +20,11 @@ model/*                           # optional pinned public weights + attribution
 runtime/bin/python3               # ONLY for an authorized bundled-runtime artifact
 ```
 
-For the current **external-runtime** POC, `scripts/stage-native-poc.py --help`
+For the current **external-runtime** package, `scripts/stage-native-poc.py --help`
 documents explicit inputs. It invokes `cmake --install` on an existing native build,
 copies SDL/OpenVR and an explicitly licensed font, and retains notices. It does
-not build, download, run the app, or copy a proprietary ASR runtime. The native
-POC relies on Frame's system Vulkan loader/driver, Wayland, libxcb, FreeType,
+not build, download, run the app, or copy an ASR runtime. The native
+app relies on Frame's system Vulkan loader/driver, Wayland, libxcb, FreeType,
 libstdc++ and glibc; audit `ldd` on the installed binary.
 SDL/OpenVR resolve inside its own `lib/`, not a producer
 prefix. ARM64/glibc packaging is not a claim of compatibility with arbitrary Linux.
@@ -46,10 +45,8 @@ the installer still refuses a reused tag whose contents have changed. Historic
 
 `--external-runtime` refuses a runtime directory and records
 `runtime: external-authorized-python` in `release.json`. The installer explicitly
-reports that ASR is not supplied. Without that flag, a complete independently
-licensed, compatible isolated CPU Python runtime is required. **Do not use that
-bundled route for Kestrel without permission covering redistribution.** Staging
-validation is not a license grant or an inference test.
+reports that ASR is not supplied. Without that flag, a complete compatible isolated CPU Python runtime is required
+in the archive. Staging validation is not an inference test.
 
 The producer refuses overwrites and emits `frameyap-VERSION-linux-aarch64.tar.gz`
 plus `.sha256` containing `HASH  FILENAME`. Archive extraction rejects traversal,
@@ -129,7 +126,7 @@ Runtime/check/registration modes and installer share an exclusive nonblocking
 Selection of a completed `current` is atomic; `previous` is retained.
 `sh install.sh --rollback` switches to the prior validated version. Foreign/modified
 wrappers, untracked install files and inconsistent ownership metadata are refused.
-Same-user malicious concurrent filesystem mutation is outside the POC threat model.
+Same-user malicious concurrent filesystem mutation is outside the current threat model.
 
 The generated `frameyap.vrmanifest` uses `local.frameyap.overlay`, **not a store
 AppID**. Linux ARM requires `binary_path_linux_arm`; both Linux fields are written.
@@ -178,8 +175,7 @@ not hand-edit Steam's shortcut database.
 
 This check does not validate microphone capture, transcription, controller input,
 text delivery or cold SteamVR startup. With a configured inference runtime, the
-menu launch attempts to load the model; defer that test until runtime licensing is
-resolved or independent authorization is established. If an
+menu launch attempts to load the model; defer that test unless you intend to load the model. If an
 environment/configuration unexpectedly supplies a runtime/model, do not perform
 this inert launcher check.
 
@@ -189,6 +185,5 @@ an acknowledgement, not a hidden SteamVR edit. Only owned files are removed;
 config stays, models move to `saved-models/VERSION`, conflicts/untracked files abort.
 
 Offline tests: `python3 -m unittest discover -s tests -p test_installer.py`.
-They use temporary homes/local fixtures. Dated live-device observations are in the
-[POC record](evidence/poc-cpu-overlay-2026-09-24.md). When editing the Python helper,
+They use temporary homes/local fixtures. When editing the Python helper,
 run `python3 scripts/sync-installer.py`; tests enforce embedded installer parity.

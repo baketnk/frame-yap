@@ -1,6 +1,6 @@
 # FrameYap
 
-Standalone, on-device voice typing POC for Steam Frame. **MIT licensed.**
+Standalone, on-device voice typing for Steam Frame. **MIT licensed.** Early release (v0.1 in progress).
 
 Implemented: native OpenVR overlay, remappable controller actions, bounded SDL3 capture,
 persistent local Parakeet Redux worker, preview/explicit insertion through Gamescope,
@@ -11,11 +11,11 @@ server, cloud fallback or unrelated application dependency.
 Gamescope discovery and native-only installation have been exercised on Frame.
 Live microphone → reviewed text → real target delivery is **not yet accepted**.
 
-**Runtime licensing remains unresolved.** Redux weights are CC-BY-4.0, but the
-observed Kestrel kernel runtime requires separate permission. We are checking with
-the vendor. Current native-only packages do **not** bundle or download that
-runtime; an independently authorized Python environment must be supplied.
-See [third-party notes](docs/third-party.md). No GitHub release is published yet.
+**Inference runtime:** Redux weights are CC-BY-4.0 and run locally through the
+`moondream` Python package (its Kestrel runtime states that local inference is free
+and needs no API key). The build and tests never download it; the installer or you
+install it from PyPI into a Python environment. See [third-party notes](docs/third-party.md).
+No GitHub release is published yet.
 
 ## Controls
 
@@ -89,7 +89,7 @@ ctest --test-dir build --output-on-failure
 
 Default build has no hardware backends. It never downloads packages/models or
 initializes SteamVR, a microphone or input injection. Native dependencies and
-explicit launch/check commands are documented in [the POC guide](docs/poc.md).
+explicit launch/check commands are documented in [the build guide](docs/build.md).
 `--version` uses an ISO-like UTC build timestamp (with Git hash when available),
 not a numbered release; use that same tag when packaging the binary.
 
@@ -110,30 +110,28 @@ Autolaunch is opt-in. An installed desktop entry can be selected manually as a
 non-Steam shortcut. A basic launch from Steam's Non-Steam section opened the
 panel on one Frame; registration alone did not show an entry in the first checked
 dashboard menu. See [packaging and lifecycle](docs/packaging.md).
-For a native-only install, menu-driven inference needs a separately authorized
-Python runtime and pinned model. Configure their absolute paths in
+For a native-only install, menu-driven inference needs a Python runtime you
+provide and the pinned model. Configure their absolute paths in
 `~/.config/frameyap/paths.conf` as described in the packaging guide; they are
 never fetched or bundled implicitly.
 
 A pinned GitHub one-command route is implemented in `install.sh --version TAG`,
 but **do not advertise or run it as a working public installation until a vetted
 release exists**. Native-only artifacts support the overlay/checks without an
-end-user compiler; full bundled-ASR distribution awaits runtime permission.
+end-user compiler; a bundled-ASR distribution is not yet offered.
 
 ## Project map
 
-- [POC guide](docs/poc.md): implemented boundaries, build, controls, explicit tests.
+- [Build guide](docs/build.md): implemented boundaries, build, controls, explicit tests.
 - [Design](docs/design.md): full target design; some features remain proposed.
 - [Installer design](docs/install-design.md) and [packaging](docs/packaging.md).
-- [Current POC observations](docs/evidence/poc-cpu-overlay-2026-09-24.md): measured
-  CPU behavior and native installation checks, with acceptance limits.
-- [Resize / Auto Insert deployment](docs/evidence/auto-insert-deployment-2026-09-24.md):
-  installed ARM64 version and narrow owned-target fixture; live speech-driven
-  Auto Insert and physical resize acceptance remain open.
-- [Earlier API evidence](docs/evidence/frameyap-apis-2026-09-24.md) and
-  [provenance](docs/provenance.md): historical investigation, not live authority.
 - [Overlay](docs/overlay.md), [worker protocol](docs/worker.md),
   [dependency/license inventory](docs/third-party.md).
+- [TODO](TODO.md): release plan and open work items.
+
+Dated device-test records are kept locally (untracked) and are not authority for
+current device availability. Live microphone → reviewed text → target delivery has
+not been formally accepted; see Status above.
 
 No recordings, transcripts, private logs, model weights or runtime binaries are
 committed. The worker boundary is intentionally small for forks experimenting

@@ -1,4 +1,4 @@
-# Native OpenVR POC panel
+# Native OpenVR panel
 
 `src/overlay.hpp` provides RAII OpenVR ownership and `registration()`. The panel
 only emits UI actions; `src/runtime.cpp` owns audio, transcription and insertion.
@@ -12,7 +12,7 @@ normal build or test.
 Explicit development dependencies: Valve OpenVR SDK v2.15.6, Vulkan headers/loader
 and FreeType 2. The native runtime needs a compatible system Vulkan driver.
 Configure/build must not fetch them. The default font is the bundled Inconsolata
-Regular, also used by kouseki; its OFL and extraction provenance are included in
+Regular; its OFL and notices are included in
 [third-party notes](third-party.md). `--font FILE` overrides the JSON selection.
 A missing selected font falls back to bundled Inconsolata, then a system DejaVu
 Sans face if present. Glyph coverage depends on the selected face; full CJK
@@ -24,7 +24,7 @@ margins for a thin grab underline and an external L-shaped scale handle. `src/ov
 persistent Vulkan RGBA8 image and submits it with `SetOverlayTexture`. The image,
 staging allocation and command buffer are reused; tabs do not create extra
 overlays or render targets. The rounded mint-to-blue perimeter,
-shallow curved accent, and dark cards borrow kouseki's VR visual language. Rounded
+shallow curved accent, and dark cards form the panel's visual language. Rounded
 preview, status and control surfaces use independently rasterized antialiased edges
 and restrained baked neon halos rather than GPU bloom. The recording indicator and
 selected controls remain distinguishable by their labels, not color alone. Rounded
@@ -43,13 +43,10 @@ transfer before reusing staging memory. Image barriers finish in
 [OpenVR's Vulkan contract](https://github.com/ValveSoftware/openvr/wiki/Vulkan).
 The queue is used on the overlay thread; GPU resources outlive `VR_Shutdown`.
 The device selection, texture description and persistent panel-upload patterns
-were compared with kouseki's `openvr_session.cpp` and `vulkan_renderer.cpp` at
-`738569f4c41ff4c8fc9edd5bfff9c861957ea39e`; FrameYap owns this implementation.
+are FrameYap's own implementation.
 GPU setup/submission errors stop startup or the run with an explicit error.
 This replaces the raw-upload rendering path; headset flicker acceptance still
-requires an on-device comparison. The
-[Vulkan deployment record](evidence/vulkan-overlay-2026-09-24.md) documents the
-native installation and offscreen GPU checks separately from headset acceptance.
+requires an on-device comparison. Native installation and offscreen GPU checks are separate from headset acceptance.
 
 The header shows local time and date instead of the former on-device/review
 and current-mount labels. It updates when the displayed minute or date changes,
@@ -280,16 +277,13 @@ and panel-front (controller +Z and -X), keeping panel-up unchanged so it faces
 inward with upright, unmirrored text. The controller-relative center is
 (0, 0.18, 0.089) m, approximating the compact HUD's surface center: its
 0.12 m wrist lift, 0.09 m bottom anchor and ~0.03 m panel-center correction;
-Z combines the fallback 0.054 m wrist calibration and 0.035 m finger-back offset. This copies placement geometry, not
-VR Workspace's avatar-dependent wrist calibration. Wrist-mounted panels now use
-the same *behavior* as kouseki's watch HUD: fully visible while their entire
+Z combines the fallback 0.054 m wrist calibration and 0.035 m finger-back offset. Wrist-mounted panels are fully visible while their entire
 orientation is within 60° of an upright, viewer-facing panel; linear opacity
 fade from 60° to 75°, then hidden (including laser interaction). Pitch, yaw and
 roll contribute together; turning the wrist away or moving the head around it
 changes the angle. OpenVR's overlay alpha changes without rerendering the panel.
 World and head mounts do not fade. Missing headset tracking hides a wrist panel;
-a lost wrist still uses the existing world-space fallback. This was implemented
-independently with no kouseki library or runtime dependency. Headset readability,
+a lost wrist still uses the existing world-space fallback. Headset readability,
 fade feel and interaction at the threshold still need live acceptance.
 
 To tune the selected wrist, set `wrist` in `config.json` as in the example above:

@@ -1,8 +1,9 @@
-# Frame Dictation development
+# FrameYap development
 
 This is an independent project, not a plugin for another application.
-Read README.md and docs/design.md before implementation. Dated evidence records
-past observations; it never proves current device availability or grants a live run.
+Read README.md and docs/design.md before implementation. Dated device evidence is kept
+locally in the untracked `docs/archive/`; it records past observations and never proves
+current device availability or grants a live run.
 
 - Keep dependencies explicit and small. Do not add a dependency/submodule/symlink
   to an unrelated application's build tree, assets or Python environment.

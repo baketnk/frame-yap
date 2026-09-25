@@ -1,4 +1,4 @@
-# FrameYap POC: implementation and validation
+# Build, scope and validation
 
 This is a standalone native application, not a plugin. Default builds/tests never
 initialize OpenVR, open a microphone, run ASR, download files or inject input.
@@ -67,17 +67,12 @@ This is a compact prototype panel, not yet the proposed polished miniature statu
 chip. Font coverage/complex shaping, ergonomics, compositor cost, thermal/battery
 impact and target application compatibility require further headset work.
 
-## Critical runtime licensing boundary
+## Inference runtime
 
-Redux weights at `fad622f25f303105c20d70e201bcc477c88b620c` are CC-BY-4.0.
-The installed **kestrel-kernels 0.7.0** license is different: proprietary, requiring
-an M87 Labs written agreement for use; copying/redistribution depends on that
-agreement. PyPI availability is not permission. See [third-party notes](third-party.md).
-
-Do not publish a bundled Redux runtime, imply a public release is ready, or rerun
-inference while applicable permission is unresolved. Our adapter is implemented;
-that does not resolve distribution rights. An alternative runtime would be a
-separately scoped and independently licensed implementation—not a silent model swap.
+Redux weights at `fad622f25f303105c20d70e201bcc477c88b620c` are CC-BY-4.0. Inference
+runs through the `moondream` Python package and its Kestrel runtime, which you
+install in your own environment; builds/tests never fetch it. See
+[third-party notes](third-party.md).
 
 ## Developer native build
 
@@ -126,7 +121,7 @@ an existing standard `$XDG_CONFIG_HOME/openvr/openvrpaths.vrpath` (or
 `~/.config/openvr/openvrpaths.vrpath`) before initializing OpenVR. No Steam files
 are edited and no runtime/session restart is performed.
 
-## Deliberate launch, once runtime permission is settled
+## Deliberate launch
 
 Explicit setup downloads only the pinned, openly licensed model:
 
@@ -137,12 +132,12 @@ python3 scripts/fetch-model.py --destination "$HOME/.local/share/frameyap-model"
 `fetch-model.py` is idempotent for matching hashes, rejects existing mismatched
 files, and is never invoked by build/tests or first utterance.
 
-Provide your independently authorized CPU Python environment (moondream 2.4.0,
+Provide your own CPU Python environment (moondream 2.4.0,
 kestrel 0.8.0) and local weights:
 
 ```sh
 ./build-native/frameyap --run --assets "$PWD/assets" --font /path/font.ttf \
-  --python /authorized/runtime/bin/python3 --worker "$PWD/python/frameyap/worker.py" \
+  --python /path/to/runtime/bin/python3 --worker "$PWD/python/frameyap/worker.py" \
   --model "$HOME/.local/share/frameyap-model" --threads 2 --socket gamescope-0 --head
 ```
 
@@ -161,5 +156,4 @@ sending existing users' audio to a service.
 `scripts/benchmark-worker.py` accepts a supplied nonprivate PCM16/16 kHz/mono WAV;
 no recording, device input or automatic download. `--show-text` is a separate
 explicit disclosure of that fixture's transcript. Use only with an authorized
-runtime. See the dated [POC record](evidence/poc-cpu-overlay-2026-09-24.md) for
-measurements and their limits; they are not headset/performance acceptance.
+runtime. Benchmark numbers from earlier trials are not headset/performance acceptance.

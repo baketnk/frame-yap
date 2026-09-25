@@ -1,14 +1,12 @@
 # FrameYap native dictation overlay — proposal
 
-Standalone project design; see
-[provenance](provenance.md) and [historical Frame probes](evidence/frameyap-apis-2026-09-24.md).
-This document is the full target design, not a blanket implementation claim.
-The native POC now implements overlay/actions, bounded SDL3 capture, a persistent
+Standalone project design. This document is the full target design, not a blanket
+implementation claim. The native app now implements overlay/actions, bounded SDL3 capture, a persistent
 Redux adapter, review-first Gamescope insertion and a user-local archive installer.
 Opt-in conservative Xwayland focus tracking is implemented locally but not yet
 accepted for live automatic typing on Frame. Polished status-chip UX and full hardware
-acceptance remain proposed. See [current scope](poc.md), [device observations](evidence/poc-cpu-overlay-2026-09-24.md)
-and [runtime licensing boundary](third-party.md).
+acceptance remain proposed. See [build and scope](build.md) and [third-party notes](third-party.md).
+Future work is tracked in [TODO.md](../TODO.md).
 
 ## Recommendation
 
@@ -105,11 +103,9 @@ not an application-rendered hand-pose animation loop. Do not promise a particula
 GPU cost until measured.
 
 A scene renderer's canvas/MSDF resources are not an OpenVR overlay backend and
-are not imported here. The Inconsolata TTF used by kouseki is independently
-bundled under its retained OFL; the panel renderer is original FrameYap code.
-The neon HUD frame is a visual reference, not an engine dependency. Further
-source/asset reuse requires an explicit license-reviewed extraction, never a
-runtime path into the engine checkout.
+are not imported here. The bundled Inconsolata TTF is under its retained OFL; the panel renderer is
+original FrameYap code. Further source/asset reuse requires an explicit
+license-reviewed extraction, never a runtime path into another project's checkout.
 
 ### Controller bindings
 
@@ -261,7 +257,7 @@ processing timeout. No shell commands in IPC and no input authority in the worke
   no CUDA device/runtime assumption. Do not copy the desktop's x86 venv.
 - Weights are ~178 MB; Torch, kernels, temporary conversion and activations mean
   install size/RSS will be larger. Measure cold load, peak RSS and package size.
-  Review runtime redistribution licensing separately from model attribution.
+  Keep runtime notices separate from model attribution.
 
 Microphone access does not mute VRChat or any other social-voice app. Shared
 PipeWire capture may let both hear the same utterance; the overlay must not claim
@@ -312,4 +308,4 @@ Hardware-free tests should cover state transitions, bounded PCM/transcripts,
 worker framing/timeout/cancellation, duplicate/stale replies and focus generations
 with fakes. Separate opt-in Frame checks cover protocol availability, owned-window
 insertion, microphones, inference and overlays. No fixture establishes physical
-headset acceptance. See [provenance](provenance.md) for historical source anchors.
+headset acceptance.

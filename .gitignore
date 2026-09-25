@@ -11,3 +11,6 @@ __pycache__/
 .env.*
 !.env.example
 .DS_Store
+
+# Local archive of dated device evidence and old provenance notes (not published)
+/docs/archive/

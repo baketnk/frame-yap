@@ -46,7 +46,7 @@ thread-pool variables set before import. It uses
 `md.photon("moondream/parakeet-redux", model_path=<absolute local directory>,
 device="cpu", cpu_threads=threads)` and persistent
 `transcribe(audio=<numpy float32>, sample_rate=16000)["text"]`.
-Install an **isolated** Python runtime with the separately reviewed
+Install an **isolated** Python runtime with the
 moondream 2.4.0, kestrel 0.8.0 and compatible CPU dependencies; provide
 preinstalled local weights from revision
 `fad622f25f303105c20d70e201bcc477c88b620c` and pass its directory
@@ -58,11 +58,9 @@ flags do not prove every third-party internal is unable to access a network.
 Runtime/build/tests perform no downloads; the separate explicit setup utility
 `scripts/fetch-model.py` can provision the public pinned weights.
 
-**Licensing blocker:** the observed kestrel-kernels 0.7.0 license requires a
-separate M87 Labs agreement; do not treat wheel availability as permission for use
-or bundling. See [third-party notes](third-party.md). No public runtime bundle has
-been released. Limited ARM64 measurements are in the [POC record](evidence/poc-cpu-overlay-2026-09-24.md),
-not a claim of complete headset acceptance.
+Release archives do not bundle the runtime; see [third-party notes](third-party.md). No public
+runtime bundle has been released. Limited ARM64 measurements were taken during development;
+they are not a claim of complete headset acceptance.
 
 ## Advanced debugging
 

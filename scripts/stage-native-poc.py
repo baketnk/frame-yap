@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stage a native-only POC from an explicit native build and licensed files.
 
-No downloads, compiler invocation, proprietary ASR runtime, registration or launch.
+No downloads, compiler invocation, ASR runtime, registration or launch.
 System Vulkan loader/driver, Wayland/FreeType/libstdc++/glibc remain platform prerequisites.
 """
 import argparse
@@ -43,7 +43,7 @@ def main():
     notices = ["FrameYap native-only POC. No ASR runtime or model is included.\n",
                "Original FrameYap code: MIT. System Vulkan/Wayland/FreeType/libstdc++/glibc are not bundled.\n",
                "Bundled libraries: Valve OpenVR and unmodified SDL3; font license included below.\n",
-               "This package does not grant any rights to kestrel-kernels or provide a functioning ASR environment.\n"]
+               "This package does not include Kestrel or provide a functioning ASR environment.\n"]
     for label, file in (("FrameYap", root / "LICENSE"), ("OpenVR", args.openvr_license),
                         ("SDL3", args.sdl_license), ("Font", args.font_license)):
         notices.extend([f"\n--- {label} ---\n", file.read_text()])

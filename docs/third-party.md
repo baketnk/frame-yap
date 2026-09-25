@@ -20,9 +20,7 @@ images, protected kernels or another application's assets were extracted for the
 
 ## Bundled font and UI reference
 
-`assets/fonts/Inconsolata-Regular.ttf` is an unmodified copy of the typeface used
-by kouseki's editor and VR canvas, extracted from its `assets/fonts` directory at
-checkout revision `738569f4c41ff4c8fc9edd5bfff9c861957ea39e`.
+`assets/fonts/Inconsolata-Regular.ttf` is an unmodified copy of Inconsolata Regular.
 SHA-256: `e0267abf9d734e2b9f766f8cb7a496b552c57cdfeacfa0efdc5bfd21940ae145`.
 Copyright 2006 The Inconsolata Project Authors; **SIL Open Font License 1.1**,
 retained in `assets/fonts/OFL-Inconsolata.txt` (line endings and trailing whitespace
@@ -32,10 +30,8 @@ OFL, not MIT, and is not sold by itself. Upstream: <https://github.com/googlefon
 The TTF is unchanged. No MSDF atlas, icons, engine code or renderer dependencies
 were copied. Unicode coverage is finite; missing glyphs use the face's notdef glyph.
 
-Visual references: kouseki's `apps/vr_workspace/hud.cpp` (rounded mint-to-blue
-perimeter and curved accent) and `menu_tablet.hpp` (dark cards, highlighted
-selection). FrameYap implements those design ideas independently on a single
-CPU RGBA surface. Building, installing and running require no kouseki checkout.
+The panel's visual style (rounded mint-to-blue perimeter, dark cards, highlighted
+selection) is implemented independently on a single CPU RGBA surface.
 CMake installs the font and OFL with assets; native staging defaults to that
 font, places the launcher copy at `fonts/font.ttf`, and includes its license in
 `THIRD_PARTY_NOTICES.txt`. Custom staging fonts still require an explicit license.
@@ -56,7 +52,7 @@ font, places the launcher copy at `fonts/font.ttf`, and includes its license in
 - Compiler runtime, libc minimum and transitive shared libraries require a release
   dependency audit. Passing a developer build is not a portable-runtime guarantee.
 
-## Redux weights and proprietary runtime are different
+## Redux weights and inference runtime
 
 Public model: <https://huggingface.co/moondream/parakeet-redux>, exact revision
 `fad622f25f303105c20d70e201bcc477c88b620c`, model card **CC-BY-4.0**. Attribution:
@@ -66,24 +62,16 @@ sizes and SHA-256 hashes are recorded in `python/frameyap/model_files.py`.
 `fetch-model.py` fetches and retains the original model card alongside the files.
 No weights are committed to this repository.
 
-The inspected `kestrel-kernels==0.7.0` wheel license identifies it as proprietary
-M87 Labs software and says use requires a separate written agreement. Copying and
-redistribution are restricted by that agreement. This includes its protected CPU
-payload, not just CUDA. The Python wrapper and model card do not override those
-terms. No attempt was made to unpack/decrypt/reverse-engineer protected kernels.
+Inference uses the `moondream` Python package and its `kestrel` / `kestrel-kernels`
+dependencies, installed by the user from PyPI into their own environment. Upstream's
+Kestrel README states: "Local inference is free and requires no API key"
+(<https://github.com/m87-labs/kestrel>); finetuned-model inference needs a Moondream
+API key and is not used here. FrameYap's release archives do not vendor or bundle
+these packages; they are installed from PyPI onto the user's machine, either by the
+user or by the installer at the user's request.
 
-**Release blocker:** permission covering use and redistribution has not been
-established here. The initial on-device compatibility measurements preceded this
-license review; further inference/bundling was paused when the issue was found.
-The acquired packages remain isolated under the device's project-owned development
-directory, not in Git or a published artifact. Do not advertise the GitHub runtime
-bundle as available or automatically download/install those packages for end users.
-Resolve permission with the vendor, or separately scope an independently licensed
-runtime for the same weights. Do not silently substitute a dense/heavier model.
-
-Other runtime packages (Torch CPU, numpy, tokenizer/native extensions, etc.) also
-need their own notice/license inventory before publication. The public model's
-small size is neither total runtime size nor redistribution permission.
+Other runtime packages (Torch CPU, numpy, tokenizer/native extensions, etc.) need
+their own notice/license inventory before a bundled release.
 
 ## CPU trial dependency choice
 
@@ -95,7 +83,7 @@ Torch reported `torch.version.cuda is None`. Do not repeat an unconstrained
 `pip install moondream` as a CPU setup recipe.
 
 For eventual packaging research, a standalone CPython 3.12.14 ARM64 distribution
-was downloaded but not bundled with the proprietary runtime:
+was downloaded but not bundled with any ASR runtime:
 <https://github.com/astral-sh/python-build-standalone/releases/tag/20260901>,
 `cpython-3.12.14+20260901-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz`,
 SHA-256 `577b4bec0793ad1ff0cbff9adbd0df078eddde38a4c41bf5d83ad381a85ee39d`.

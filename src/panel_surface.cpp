@@ -171,7 +171,7 @@ struct PanelSurface::Impl {
             }
     }
     void frame() {
-        // Independently rasterized version of kouseki's HUD visual language:
+        // Independently rasterized neon-frame HUD style:
         // rounded mint-to-blue perimeter and a second shallow curved accent.
         for (int y = 0; y < CH; ++y) for (int x = 0; x < CW; ++x) {
             if (x > 34 && x < CW - 34 && y > 34 && y < CH - 34) continue;
