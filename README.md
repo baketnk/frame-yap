@@ -1,138 +1,47 @@
 # FrameYap
 
-Standalone, on-device voice typing for Steam Frame. **MIT licensed.** Early release (v0.1 in progress).
+Voice typing on Steam Frame, with recognition on the headset rather than a desktop or cloud server.
+Hold a controller button to record, review the transcript, then deliberately type it into the focused app.
+Standalone MIT-licensed OpenVR overlay; no Steam store AppID or sudo. First v0.1 release is in progress.
 
-Implemented: native OpenVR overlay, remappable controller actions, bounded SDL3 capture,
-persistent local Parakeet Redux worker, preview/explicit insertion through Gamescope,
-and an idempotent user-local installer. No Steam store AppID, sudo, desktop ASR
-server, cloud fallback or unrelated application dependency.
+## Requirements
 
-**Status:** native ARM64 build, CPU inference on a public clip, overlay visibility,
-Gamescope discovery and native-only installation have been exercised on Frame.
-Live microphone → reviewed text → real target delivery is **not yet accepted**.
+- Steam Frame with usable SteamVR/OpenVR and Gamescope for the **native** overlay and text delivery; Linux ARM64/glibc for the current installer payload format. Binary compatibility must be checked against each actual release artifact, not inferred from a developer build.
+- For voice recognition, separately provision a compatible **CPU Python runtime** (moondream 2.4.0 / Kestrel 0.8.0 and dependencies) and the pinned local Parakeet Redux model. Neither is bundled or installed with pip by the current native-only installer. There is no fallback ASR service.
+- A local source build needs CMake 3.20+, C++20 and explicit native libraries/SDK; the default hardware-free build needs only CMake and C++20. See [build requirements](docs/build.md).
 
-**Inference runtime:** Redux weights are CC-BY-4.0 and run locally through the
-`moondream` Python package (its Kestrel runtime states that local inference is free
-and needs no API key). The build and tests never download it; the installer or you
-install it from PyPI into a Python environment. See [third-party notes](docs/third-party.md).
-No GitHub release is published yet.
+## Install (local artifacts only)
 
-## Controls
-
-- **Right X (default Frame binding):** hold to record; release to
-  transcribe. Repeated presses reached the controls-only diagnostic on Frame;
-  live mic capture through this shortcut still needs guided acceptance. This
-  PTT action is remappable through SteamVR bindings.
-- **Right B:** cancel/discard (or close quick chat). **Right A:** insert reviewed text with a trailing space.
-  **Right Y:** open quick chat; press again to cycle its highlighted choice.
-  **Submit** on the overlay (or double-tap left grip when active) sends that choice
-  verbatim then Enter; outside quick chat it inserts pending review + Enter, or
-  sends Enter alone when there is no text. Edit the `quick_inputs` list in
-  `$XDG_CONFIG_HOME/frameyap/config.json` (restart to apply). Nothing submits
-  automatically. Auto Insert is opt-in and off by default.
-- **Overlay:** Record/Stop, Cancel, paginated preview, Insert, Submit and Hold Quit
-  (hold the button for 0.9 seconds before releasing).
-  Review and settings share one Inconsolata/neon-framed surface. The header
-  shows local time/date; Settings selects 12/24-hour time and date format/off.
-  Hold the thin bar below the panel to freely move and rotate it with your
-  controller; release to leave it at that pose. Drag the external lower-right
-  bracket to scale it (world, head or wrist), keeping the upper-left anchored.
-  Both handles use the app's gradient in transparent margins, like Steam's
-  window handles. Settings → **Lock grab/scale** hides and disables both handles;
-  the lock is saved. Position/size changes last for this run only.
-  Wrist mounting fades the panel as its full orientation turns away from an
-  upright viewer-facing pose (60°–75°), hiding interaction past that angle;
-  world and head mounting do not fade.
-  **Bindings** requests SteamVR's binding editor directly. Existing SteamVR overrides may supersede defaults. World-space by
-  default; settings offer left wrist, right wrist and head mounting, plus recenter.
-  Dashboard lasers provide clickable controls. Settings → Lasers anytime is an
-  opt-in, default-off system-wide laser mode while the panel is visible; it may
-  affect games and is separate from experimental input overrides.
-- **Theme and controls:** optional `$XDG_CONFIG_HOME/frameyap/config.json` selects
-  panel colors, a font path and Frame controller button mappings; missing fonts
-  fall back to bundled Inconsolata. The installer creates/checks this file and
-  backs it up before repairs. See [overlay configuration](docs/overlay.md#user-theme-and-controller-configuration).
-- **Advanced debugging:** Settings toggle / `"advanced_debug": true` in config.
-  Off by default. Restarts the worker and discards current work; full exceptions,
-  worker output and transcripts go to private, bounded local logs. No raw audio
-  archive. See [diagnostics](docs/worker.md#advanced-debugging).
-- **Experimental input priority:** set `"input_priority": "experimental"` in
-  that config and enable SteamVR's Developer option **Enable global input from
-  overlays**. FrameYap then requests priority for its bound controller sources.
-  This may consume controls used by games or the dashboard; coexistence on Frame
-  is under test. The default is `"normal"`; restart FrameYap after changing it.
-- **Review by default:** focus your destination, then press Insert (text + space) or
-  explicitly Enter (text + space, then Enter). Settings → Auto insert is off by default:
-  when enabled, it queues text + space only if Xwayland keyboard focus, active
-  window and Gamescope focus match continuously from recording through delivery.
-  Any uncertainty leaves a preview for manual Insert; it never sends Enter.
-  This is not yet validated for live transcription on Frame. Maximum clip 20 seconds;
-  accidental taps under 200 ms are discarded.
-- While the native app is Ready, it keeps the mic device open and discards idle
-  audio instead of opening/closing on every PTT. Quit releases the device. Other
-  apps may still hear/transmit your voice; FrameYap does not mute them.
-
-Physical gesture timing, global bindings during games, mic capture, target-app
-compatibility and headset comfort still need coordinated validation. Successful
-API initialization is not delivered input or human acceptance.
-
-## Build and test offline
-
-CMake 3.20+, C++20 compiler. Python 3.10+ runs the additional hardware-free tests.
+**No public release is published.** To install a locally vetted, checksummed ARM64 native-only archive without a compiler:
 
 ```sh
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
-./build/frameyap --help
-```
-
-Default build has no hardware backends. It never downloads packages/models or
-initializes SteamVR, a microphone or input injection. Native dependencies and
-explicit launch/check commands are documented in [the build guide](docs/build.md).
-`--version` uses an ISO-like UTC build timestamp (with Git hash when available),
-not a numbered release; use that same tag when packaging the binary.
-
-## Installation
-
-The real installer accepts a versioned, checksummed prebuilt ARM64 archive:
-
-```sh
-sh install.sh --archive /path/to/frameyap-VERSION-linux-aarch64.tar.gz \
+sh install.sh --mode binary --archive /path/to/frameyap-VERSION-linux-aarch64.tar.gz \
   --sha256 ARCHIVE_SHA256 --version VERSION
 ```
 
-This is the **local-artifact command shape**, not an available public download.
-Installation is user-local, retains rollback, refuses active-app upgrades and
-foreign files, and does not launch or register automatically. Registration uses
-OpenVR application key `local.frameyap.overlay`, not a Steam store AppID.
-Autolaunch is opt-in. An installed desktop entry can be selected manually as a
-non-Steam shortcut. A basic launch from Steam's Non-Steam section opened the
-panel on one Frame; registration alone did not show an entry in the first checked
-dashboard menu. See [packaging and lifecycle](docs/packaging.md).
-For a native-only install, menu-driven inference needs a Python runtime you
-provide and the pinned model. Configure their absolute paths in
-`~/.config/frameyap/paths.conf` as described in the packaging guide; they are
-never fetched or bundled implicitly.
+`VERSION` is numeric `0.1.YYYYMMDDHHMM` for this release line; a future release tag will be `vVERSION`. The installer has an explicit local source-build path with toolchain/dependency inputs, and a read-only `--print-plan`/machine-readable `--json` mode; the producer stage→archive path still needs a clean-account artifact test and release audit. See [packaging](docs/packaging.md). Installation is user-local with rollback, no automatic launch or registration, and no Steam store AppID. Before voice typing, independently supply a licensed Python CPU environment and pinned weights, and configure their absolute paths in `~/.config/frameyap/paths.conf` (or the XDG config equivalent). Model download is opt-in and separate: `sh install.sh --install-model --backend redux --print-plan --json` inspects pinned metadata, while `--yes` explicitly authorizes installation from the *installed* manifest; `--expected-manifest-sha256 HASH` additionally binds consent to its exact bytes. The locally implemented Settings → Models chooser offers selection/restart and a two-click Install/Confirm Install with source, size, license, attribution and manifest SHA-256; it has not been validated as an installed/headset flow. No chooser action installs the Python runtime. Do not mistake a native-only install for working ASR. The pinned GitHub download route must not be advertised as functional until a vetted release exists.
 
-A pinned GitHub one-command route is implemented in `install.sh --version TAG`,
-but **do not advertise or run it as a working public installation until a vetted
-release exists**. Native-only artifacts support the overlay/checks without an
-end-user compiler; a bundled-ASR distribution is not yet offered.
+## Controls (default Frame binding)
 
-## Project map
+| Button / control | Action |
+| --- | --- |
+| Right X, hold / release | Record while held; release to transcribe. |
+| Right B | Cancel/discard, or close the Quick phrases picker. |
+| Right A | **Type:** queue reviewed text, normally with a trailing space. |
+| Right Y | Open **Quick phrases**; press again to cycle the selection. |
+| Left grip, double-tap | **Type + Enter:** queue the selected phrase verbatim + Enter, pending review (normally + space) then Enter, or Enter alone if neither exists. |
+| Overlay Record / Stop | Click-to-start/stop alternative to the PTT binding. |
+| Overlay Type / Type + Enter | The same deliberate text / Enter actions. |
+| Overlay Hold Quit | Hold for 0.9 seconds, then release to quit (prevents accidental exit). |
 
-- [Build guide](docs/build.md): implemented boundaries, build, controls, explicit tests.
-- [Design](docs/design.md): full target design; some features remain proposed.
-- [Installer design](docs/install-design.md) and [packaging](docs/packaging.md).
-- [Overlay](docs/overlay.md), [worker protocol](docs/worker.md),
-  [dependency/license inventory](docs/third-party.md).
-- [TODO](TODO.md): release plan and open work items.
+Controls are remappable in SteamVR. Grip gestures may be unavailable with the dashboard open; pointer controls are an alternative. At the 4096-byte transcript limit, Type preserves the full text without appending a space if none fits. No speech commands, automatic Enter or automatic submit. Review is the default; Settings → Auto insert is opt-in, normally text + space only under continuously observed Xwayland focus. Check the focused destination before Type or Type + Enter. Edit literal Quick phrases (`quick_inputs`) in `$XDG_CONFIG_HOME/frameyap/config.json`, then restart. See [overlay and settings](docs/overlay.md).
 
-Dated device-test records are kept locally (untracked) and are not authority for
-current device availability. Live microphone → reviewed text → target delivery has
-not been formally accepted; see Status above.
+## Status / not yet validated
 
-No recordings, transcripts, private logs, model weights or runtime binaries are
-committed. The worker boundary is intentionally small for forks experimenting
-with other models/APIs; the default remains local-only Redux.
+Native ARM64 build, CPU inference on a public clip, overlay visibility, Gamescope API discovery, a controls-only Right X probe and native-only installation have been exercised on Frame. **Live microphone → reviewed transcript → real target delivery has not been formally accepted.** Focus guard and insertion have offline/owned-target checks, not general app compatibility or human headset acceptance. Global bindings, physical gesture feel, Auto insert with speech, latency, battery/thermal cost and controller coexistence still require opt-in headset testing. Front-prefix loss on repeated submissions (P1) remains under separate investigation; do not treat it as fixed. An old-code fixture crashed the Gamescope session, not the OS, and does not prove the new delivery path. Local code/build status does not mean the device was updated. A completed Gamescope IME call means *input queued*, not that an app consumed or submitted it.
+
+The native app normally keeps the mic device open while Ready and discards idle audio; it never mutes other applications' microphones. Settings → **Close mic when idle** (default OFF) closes it between clips, but reopening on PTT can cause an audio spike, delay or first-syllable clipping. **Lasers anytime** (default OFF) requests system-wide lasers while the panel is visible, potentially affecting games; it is not SteamVR's experimental input override. Review, settings, placement and diagnostic details: [overlay](docs/overlay.md), [worker](docs/worker.md), [design](docs/design.md).
+
+Version output is numeric `frameyap MAJOR.MINOR.YYYYMMDDHHMM` (currently `0.1`); a development build may print `git HASH` and optionally `(uncommitted changes)` on a **separate** line. The UTC timestamp is set at configuration time (`SOURCE_DATE_EPOCH` can supply it); release archives must be built from a clean `v0.1.<timestamp>` tag. Offline model inventory and pinned SHA-256 checks in a source-tree build: `./build/frameyap --list-models`, `./build/frameyap --check-model redux --model-dir /absolute/model`, or `python3 scripts/model-status.py` with the same options. Packaging retains the verifier script for installed CLI use, which still needs a clean-account artifact check. Native `--run` accepts `--backend ID`, `--model-store /absolute/dir`, `--manifest-dir /absolute/dir` overrides; the installed launcher passes explicit flags through to the binary. These locally wired paths do not imply an installed release was tested or a model/runtime was supplied. No model or runtime is downloaded by status checks or on normal launch. [Dependency licenses and outstanding release audit](docs/third-party.md); [TODO](TODO.md).
+
+No recordings, transcripts, private logs, weights or CPU runtime binaries are committed. No default build/test downloads or initializes SteamVR, microphone or input injection.

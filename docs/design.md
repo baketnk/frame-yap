@@ -1,11 +1,16 @@
-# FrameYap native dictation overlay — proposal
+# FrameYap native dictation overlay — design and remaining goals
 
 Standalone project design. This document is the full target design, not a blanket
 implementation claim. The native app now implements overlay/actions, bounded SDL3 capture, a persistent
-Redux adapter, review-first Gamescope insertion and a user-local archive installer.
+Redux adapter, review-first Gamescope insertion and a user-local archive installer
+with explicit source-build option. Redux's pinned manifest, offline status CLI,
+manifest-driven dispatcher and in-panel Models selection/confirmation are
+implemented locally. The installed chooser/installer handoff is **not yet
+end-to-end verified on Frame**; the native-only archive needs an external CPU
+runtime for speech.
 Opt-in conservative Xwayland focus tracking is implemented locally but not yet
-accepted for live automatic typing on Frame. Polished status-chip UX and full hardware
-acceptance remain proposed. See [build and scope](build.md) and [third-party notes](third-party.md).
+accepted for live automatic typing on Frame. A separate status chip and full hardware
+acceptance remain possible future work. See [build and scope](build.md) and [third-party notes](third-party.md).
 Future work is tracked in [TODO.md](../TODO.md).
 
 ## Recommendation
@@ -17,7 +22,9 @@ as explicit fallbacks. No desktop ASR server, network hop, LLM cleanup, scene
 renderer, avatar, desktop capture or root service is needed in the primary path.
 
 A first-class product goal is a **one-command GitHub install without a Steam store
-AppID**. Package a prebuilt native executable and isolated CPU runtime; use a normal
+AppID**. Package a prebuilt native executable; the current native-only archive requires a
+separately supplied, compatible CPU runtime (no automatic pip install). A future
+isolated runtime bundle requires its own license and compatibility audit. Use a normal
 OpenVR application key for registration, not Steamworks. Installation must remain
 user-local with opt-in autolaunch. See [installation design](install-design.md).
 
@@ -31,12 +38,14 @@ one persistent local Parakeet Redux CPU worker
 correlated literal transcript → focus/delivery policy
           ↓
 Gamescope IME set_string + commit → focused Frame application
-          ↘ overlay preview / error / explicit Insert when delivery is unsafe
+          ↘ overlay preview / error / explicit Type when delivery is unsafe
 ```
 
 The CPU worker is local process isolation, not remote inference or a service
-framework. Implement a small transport owned by this repository. Keep the model
-loaded between utterances; do not spawn Python/load 178 MB for every release.
+framework. The locally implemented manifest dispatcher uses a small bounded
+transport owned by this repository; only Redux inference is shipped. Keep the
+model loaded between utterances; do not spawn Python/load 178 MB for every release.
+A correlated bad transcript is a request-level failure, not a model unload.
 
 ## Minimal interaction
 
@@ -53,27 +62,29 @@ armed remains a possible refinement, not a second implemented overlay. See
 Recording…  00:04           [ Cancel ]
 
 "The recognized text appears here."
-[ Insert + space ]  [ Discard ]     [ Insert + Enter — explicit ]
+[ Type + space ]  [ Discard ]     [ Type + Enter — explicit ]
 ```
 
-- States: disabled, warming, ready, recording, transcribing, review, inserted,
-  unavailable/error. Recording uses visible icon + text, not color alone.
+- States: warming, ready, recording, transcribing, review, input queued,
+  unavailable/error. Input queued is not an application receipt. Recording uses
+  visible icon + text, not color alone.
 - Default Frame bindings: hold right X to speak, release to finish; B cancels,
-  A inserts with a trailing space, Y opens/cycles the quick-chat selection.
-  Overlay Submit or left-grip double-tap submits the selected literal + Enter,
-  or pending review + Enter, or Enter alone if neither is present.
-  The alternate right-grip tap-then-hold gesture and left-grip double-tap Submit
+  A types with a trailing space, Y opens/cycles the Quick phrases selection.
+  Overlay Type + Enter or left-grip double-tap submits the selected literal + Enter,
+  or pending review (normally + space) then Enter, or Enter alone if neither is present.
+  The alternate right-grip tap-then-hold gesture and left-grip double-tap Type + Enter
   remain available. All are remappable through the Bindings button's SteamVR editor.
   A click-to-start/stop overlay button provides
   a binding-independent alternative. Bound recording to 20 seconds; discard
   accidental taps (initial threshold: 200 ms).
-- **Quick typing (opt-in, locally implemented):** insert on completion only when
+- **Auto insert (opt-in, locally implemented):** type on completion only when
   uninterrupted Xwayland target observation remains valid. **Review mode (default):**
-  wait for Insert. Bring up review on uncertainty rather than silently losing a
+  wait for Type. Bring up review on uncertainty rather than silently losing a
   transcript or typing into a new target. Live Frame acceptance remains open.
-- Submit requires its own explicit control activation: insert pending review with
-  a trailing space, then queue Enter only if the text step succeeds. With no
-  review, it queues only Enter. Never interpret "submit", "delete" or other speech
+- Type + Enter requires its own explicit control activation: type pending review
+  (normally with a trailing space), then queue Enter only if the text step succeeds.
+  At the 4096-byte bound, preserve the entire transcript without a suffix if no
+  space fits. With no review, it queues only Enter. Never interpret "submit", "delete" or other speech
   as commands. Transcription completion never auto-submits.
 - No generic "undo last dictation" initially: another application's edits/cursor
   cannot be reliably rolled back by a guessed number of backspaces.
@@ -109,7 +120,7 @@ license-reviewed extraction, never a runtime path into another project's checkou
 
 ### Controller bindings
 
-Expose PTT, cancel and explicit insert/Enter as named SteamVR actions; let the
+Expose PTT, cancel and explicit Type/Type + Enter as named SteamVR actions; let the
 user bind them. Do not assume a scene app's left-bumper mapping works globally or
 silently takes a game's button away. Check action activity and neutral rearm.
 
@@ -143,7 +154,7 @@ The server implements text through synthetic key events and a temporary keymap,
 not a guaranteed rich-text/IME edit operation in every app. Verify actual target
 toolkits and games. Respect singleton/unavailable handling and Steam-keyboard
 coexistence. Never use the installed `gamescope-type` CLI as a transcript pipe:
-its inspected sample loop is byte-oriented and interprets newline as Submit.
+its inspected sample loop is byte-oriented and interprets newline as Enter.
 
 ### 2. Explicit fallbacks, not a framework built up front
 
@@ -183,11 +194,11 @@ Gamescope exposes focus-display/window root properties, but their encoding and
 relationship to seat focus need implementation-specific validation. Do not infer
 that X display `:0` is always the destination, or that an X focus observation
 identifies a native Wayland text field. For unobservable native Wayland focus,
-require explicit review/Insert; do not advertise safe auto-targeting.
+require explicit review/Type; do not advertise safe auto-targeting.
 
-If focus changes, keep the result in review. A fresh Insert explicitly approves
+If focus changes, keep the result in review. A fresh Type explicitly approves
 the current destination and creates a new delivery authorization. Recheck again
-at insertion. This minimizes stale delivery but does **not** eliminate a race
+at typing. This minimizes stale delivery but does **not** eliminate a race
 between the final check and global input processing; do not claim otherwise.
 A Wayland roundtrip means compositor processing, not application consumption.
 Report `input queued`, never `message sent`.
@@ -221,9 +232,11 @@ that tiny dataset; keep transcript visibility and a cheap retry.
 
 Implement a small independent audio/worker adapter with explicit capture,
 single-request bounds, owner-only runtime files, correlated replies and cancellation.
-The worker should be implemented independently; do not link, vendor or import
-another application's speech code. Avoid a generic provider framework: one
-explicit Redux worker is enough for the first version.
+The worker is independently implemented; do not link, vendor or import another
+application's speech code. A narrow manifest dispatcher now selects a checked
+local backend launcher; this is not a general cloud/provider framework and only
+Redux is supplied with a runtime implementation. Other manifests require their
+own audited offline engine, launcher and tests.
 
 Suggested ownership, introduced only as implementation needs it:
 
@@ -243,12 +256,20 @@ processing timeout. No shell commands in IPC and no input authority in the worke
   native kernel pools. Choose measured latency versus compositor contention,
   not the desktop's thread count by habit. No real-time scheduling or permanent
   CPU pinning initially; inspect runtime affinity behaviour during measurement.
-- Explicit local model path and offline loading. Missing runtime/weights produces
-  an actionable error, not an unsolicited download/network fallback.
-- Optional explicit enable/warm-up before first PTT; warming must not record audio.
-  Expose that lifecycle explicitly rather than warming on import or construction.
-  Otherwise display first-use loading honestly. Keep
-  model reuse after normal completion; cancellation may restart the owned worker.
+- Explicit local model path and offline loading. Pinned files and attribution live
+  in `assets/backends/redux.json`; `python/frameyap/model_files.py` validates its
+  schema and hashes. The CLI's offline `--list-models`/`--check-model` checks
+  never start inference. Settings → Models selects/saves the manifest ID and
+  restarts the worker, invalidating any audio/review/delivery authorization.
+  Install requires a separate confirmation showing source, size, license,
+  attribution and exact-manifest SHA-256; only that click hands off to the
+  installer for pinned model files. Missing runtime/weights produces an
+  actionable error, not an unsolicited download/network fallback.
+- Native `--run` explicitly starts offline verification then warms a verified
+  selected local model before PTT; warming must not record audio. Missing or
+  unverified files disable Record rather than prompting a background download.
+  Keep model reuse after normal completion and request-local transcript errors;
+  cancellation may restart the owned worker.
 - Use a private owner-only directory under `$XDG_RUNTIME_DIR` for bounded
   tmpfs-backed clips; remove them on completion, error, cancellation and shutdown.
   Avoid persistent audio/transcripts by default. Local IPC is not a network hop;
@@ -278,14 +299,14 @@ These are proposed implementation gates, **not completed acceptance**:
    confirm dashboard/hand placement, input events, close/reopen and no scene-focus
    takeover. Validate global PTT separately rather than blocking the clickable
    prototype on experimental override support.
-3. **Real dictation path:** microphone → local Redux → preview → explicit insert
-   into a disposable target; then enable quick typing after target tracking tests.
+3. **Real dictation path:** microphone → local Redux → preview → explicit Type
+   into a disposable target; then validate opt-in Auto insert after target tracking tests.
    Test Unicode, punctuation, long bounded clips, silence, cancellation, duplicate
    replies, lost mic, worker crash and missing model without persisting speech.
 4. **Target matrix:** Xwayland terminal/browser and selected native/Proton game
    text fields; Steam keyboard coexistence; native Wayland targets separately.
    Test focus changes during capture/inference, rapid loss/regain, held modifiers,
-   explicit Insert retargeting, no hidden Enter, and no second delivery.
+   explicit Type retargeting, no hidden Enter, and no second delivery.
 5. **In-headset acceptance:** readable feedback and comfortable PTT; measured
    release-to-insert latency and compositor timing while an actual scene runs;
    no noticeable sustained thermal/battery regression. Set numeric budgets after
@@ -301,8 +322,9 @@ without moving recognition off Frame. It is not part of this initial design.
 The default hardware-free build needs only CMake and a C++20 compiler (Python
 runs additional offline tests). `FRAMEYAP_NATIVE=ON` explicitly selects OpenVR,
 SDL3, FreeType and Wayland client/generated protocol bindings. A separately
-authorized Python Redux environment is explicitly supplied at launch. Pin revisions
-and review licenses when introduced. No automatic fetch/install in configure or normal tests; no external checkout discovery.
+authorized Python Redux environment is explicitly supplied at launch; the
+native-only installer neither bundles it nor pip-installs one. Pin revisions
+and review licenses for each introduced dependency. No automatic fetch/install in configure or normal tests; no external checkout discovery.
 
 Hardware-free tests should cover state transitions, bounded PCM/transcripts,
 worker framing/timeout/cancellation, duplicate/stale replies and focus generations

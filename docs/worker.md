@@ -1,8 +1,10 @@
-# Offline Redux worker adapter (component, not an installed product)
+# Offline worker adapter and backend dispatcher
 
 `src/worker.hpp` provides `frameyap::Worker`: call `start(python, script, model,
-threads=2, advanced_debug=false)` explicitly, poll until `ready()`, then `submit(id, pcm)` and poll for
-one `WorkerReply` (text or privacy-safe per-request error). One request at a time;
+threads=2, advanced_debug=false)` explicitly for the legacy Redux script, or
+supply the optional `backend`, `manifest_dir`, `root` arguments for the manifest
+dispatcher. Poll until `ready()`, then `submit(id, pcm)` and poll for one
+`WorkerReply` (text or privacy-safe per-request error). One request at a time;
 no queue, no capture and no input injection. `stop()` discards pending audio,
 terminates/reaps **only its direct child** (TERM, bounded 500 ms, then KILL),
 and is safe to repeat. Destruction stops it. `start()` returns without waiting
@@ -36,13 +38,19 @@ requests reading the fixed clip; `Y` means ready; `F` means load failure
 missing Python dependency, `D` for runtime/model load failure); `R` + ID + UTF-8
 text and `E` + ID + privacy-safe UTF-8 error are replies. Text is at most 4096
 bytes. An unexpected or duplicate reply, wrong ID, extra frame, closed pipe
-or oversized frame stops the worker. Warmup deadline is 120 s, transcription
-deadline 60 s; `poll()` must be called regularly to enforce deadlines. It
-never initializes a headset or starts a recording. There is no auto restart.
+or oversized frame stops the worker. A correlated `E` reply or an invalid
+transcript is a **request-level** failure: the Controller drops that clip,
+keeps the ready model loaded and allows Record to retry. A broken protocol,
+worker crash or explicit in-flight cancellation is different and can require a
+reload. Warmup deadline is 120 s, transcription deadline 60 s; `poll()` must
+be called regularly to enforce deadlines. It never initializes a headset or
+starts a recording. There is no auto restart after a process failure.
 
-`python/frameyap/worker.py` lazily imports `moondream` only after explicit CLI
-startup, with HF/Transformers/Datasets offline variables and bounded native
-thread-pool variables set before import. It uses
+Parakeet Redux is the **model** (`moondream/parakeet-redux`); `moondream` is
+its Python inference package, not a second model or cloud endpoint. Kestrel is
+a native dependency of that local runtime. `python/frameyap/worker.py` lazily
+imports `moondream` only after explicit CLI startup, with HF/Transformers/Datasets
+offline variables and bounded native thread-pool variables set before import. It uses
 `md.photon("moondream/parakeet-redux", model_path=<absolute local directory>,
 device="cpu", cpu_threads=threads)` and persistent
 `transcribe(audio=<numpy float32>, sample_rate=16000)["text"]`.
@@ -51,16 +59,31 @@ moondream 2.4.0, kestrel 0.8.0 and compatible CPU dependencies; provide
 preinstalled local weights from revision
 `fad622f25f303105c20d70e201bcc477c88b620c` and pass its directory
 explicitly. The code verifies exact sizes and SHA-256 of weights/config/tokenizer
-against `model_files.py` before importing model libraries. Protocol stdout is
-isolated at the file-descriptor level from third-party diagnostics. Thread limits
-cover Torch interop/native pools and CUDA is not selected. Offline environment
+against `assets/backends/redux.json` via the shared, offline
+`python/frameyap/model_files.py` schema/verifier before importing model libraries.
+`frameyap --list-models` and `frameyap --check-model redux --model-dir /absolute/model`
+(or `scripts/model-status.py`) read local manifests and optionally hash local
+files; they never load the worker or download weights. For native `--run`,
+`--backend ID`, `--model-store /absolute/store`, and
+`--manifest-dir /absolute/manifests` are wired through the installed launcher
+as explicit overrides; default selection is saved in `config.json` (`redux`). The dispatcher
+`python/frameyap/backend_worker.py` validates a selected manifest and hashes
+its local model, resolves an in-release relative Python/executable launcher
+without a shell, then supervises one child over `frameyap-worker-v1` (ready,
+correlated request/reply and failure frames). The launcher must accept
+`{model_dir}` and `{clip_dir}` (optional `{threads}`); matching manifest and
+pinned weights are **not** a runtime or automatically trusted new backend.
+Only Redux is supplied today. Protocol stdout is isolated at the file-descriptor
+level from third-party diagnostics. Thread limits cover Torch interop/native
+pools and CUDA is not selected. Offline environment
 flags do not prove every third-party internal is unable to access a network.
 Runtime/build/tests perform no downloads; the separate explicit setup utility
 `scripts/fetch-model.py` can provision the public pinned weights.
 
-Release archives do not bundle the runtime; see [third-party notes](third-party.md). No public
-runtime bundle has been released. Limited ARM64 measurements were taken during development;
-they are not a claim of complete headset acceptance.
+Current native-only archives do not bundle or pip-install the runtime; see
+[third-party notes](third-party.md). No public runtime bundle has been released.
+Limited ARM64 measurements were taken during development; they are not a claim
+of complete headset acceptance.
 
 ## Advanced debugging
 

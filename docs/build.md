@@ -11,8 +11,9 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
   mode while FrameYap is visible; it may affect games, and is not an input override.
 - Remappable SteamVR actions. The default Steam Frame binding maps right X
   (hold to record, release to transcribe) to the existing PTT action using the
-  observed `frame_controller` profile. Right B cancels, A inserts + space, and Y
-  inserts pending text + Enter (or Enter only with no preview). The Bindings button
+  observed `frame_controller` profile. Right B cancels, A requests Type (text +
+  space), and Y opens/cycles Quick phrases. Type + Enter is the explicit overlay
+  control or left-grip double-tap (Enter alone if no preview/phrase). The Bindings button
   requests SteamVR's remapping editor directly. Grip bindings remain, but both grip
   actions were inactive in the observed dashboard check; do not rely on them.
   If left grip becomes active, two short taps request explicit Enter.
@@ -22,27 +23,41 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
 - SDL3 default recording device, mono float32 conversion at 16 kHz, 200 ms minimum,
   20 second maximum. In the native app the microphone stream opens after model
   warm-up, stays running between utterances, and discards idle samples; PTT does
-  not open/pause/close the device. Quit, worker restart, device failure or capture
-  failure closes it. This avoids repeated capture-device transitions but does not
-  promise glitch-free playback on every audio stack. Other apps may still
+  not open/pause/close the device **by default**. Settings → Close mic when idle
+  (`"close_mic_when_idle": true`, default **false**) closes it between clips and
+  reopens on PTT; repeated transitions caused an audio spike on Frame and may
+  add latency or clip the first syllable. Quit, worker restart, device failure
+  or capture failure also closes it. Keeping it open does not promise glitch-free
+  playback on every audio stack. Other apps may still
   transmit your voice: this app does **not** mute VRChat or any other app.
+- Local Models chooser and bounded manifest-driven dispatcher: selecting a listed
+  backend restarts the worker and invalidates pending clip/review/focus authority;
+  a missing or invalid model disables recording. A separate Install then Confirm
+  Install exposes pinned source/size/license/attribution and exact manifest-byte
+  SHA-256 before installer handoff. These are local implementations, not a tested
+  installed UI or an approved additional inference engine. Only Redux is supplied.
 - Persistent local Redux worker, correlated bounded pipes, private tmpfs clips,
   cancellation/reaping and deadlines; exact pinned model SHA-256 verification.
-  Model imports are lazy and loading is offline. Normal repeats, request-local
-  transcription failures and microphone failures retain the loaded model;
+  Model imports are lazy and loading is offline. A correlated bad transcript/
+  `E` reply is a request-level failure: Record can retry without dropping the
+  ready model. Normal repeats and microphone failures retain the loaded model;
   microphone device failure releases the stream for explicit retry. A cancelled
   in-flight request or broken worker protocol may require reloading. No
   cloud/desktop fallback.
 - Gamescope IME v2 generated bindings, per-action short-lived lease, unavailable
-  handling, UTF-8/control validation and explicit Submit action for Enter.
-  Insert ensures a trailing space without doubling an existing one. Enter
-  first inserts pending review, releases the text lease, then acquires a fresh
-  lease for Submit. Failed/uncertain text never proceeds to Submit; failed
-  Submit acquisition never replays text. A full 4096-byte transcript without
-  room for a space is preserved with an error, never silently truncated.
-- Idempotent user-local release-archive installer: SHA-256, safe extraction,
-  atomic current-version selection, retained rollback, runtime/install lock,
-  foreign-file refusal and explicit unregister-before-uninstall acknowledgement.
+  handling, UTF-8/control validation and explicit Type + Enter action.
+  Type ensures a trailing space without doubling an existing one. Type + Enter
+  first types pending review, releases the text lease, then acquires a fresh
+  lease for Enter. Failed/uncertain text never proceeds to Enter; failed
+  Enter acquisition never replays text. If a validated transcript fills the
+  4096-byte bound and lacks a trailing space, Type preserves all its bytes and
+  queues it **without** the usual space; it does not signal a separate error.
+  Destination consumption and repeated-delivery behavior remain unaccepted.
+- User-local installer with checked binary-archive or explicitly provisioned
+  source-build mode, safe extraction, atomic current-version selection, retained
+  rollback, runtime/install lock, foreign-file refusal and explicit
+  unregister-before-uninstall acknowledgement. Source mode needs a local
+  compiler, SDK, libraries and license inputs; no runtime is pip-installed.
 
 ## Deliberately not claimed
 
@@ -63,15 +78,26 @@ fallback, streaming-PC bridge, or automatic Enter. No general undo. Grip binding
 are not guaranteed globally active in every scene/dashboard state, and the app
 never enables SteamVR's experimental overlay overrides on your behalf.
 
-This is a compact prototype panel, not yet the proposed polished miniature status
-chip. Font coverage/complex shaping, ergonomics, compositor cost, thermal/battery
-impact and target application compatibility require further headset work.
+This is one compact panel, not a separate miniature status chip. Front-prefix
+loss on repeated submissions (P1) is under separate investigation, **not fixed**
+by the chooser/worker documentation or any speculative delivery change. Font
+coverage/complex shaping, ergonomics, compositor cost, thermal/battery impact
+and target application compatibility require further headset work.
 
 ## Inference runtime
 
-Redux weights at `fad622f25f303105c20d70e201bcc477c88b620c` are CC-BY-4.0. Inference
-runs through the `moondream` Python package and its Kestrel runtime, which you
-install in your own environment; builds/tests never fetch it. See
+Redux weights at `fad622f25f303105c20d70e201bcc477c88b620c` are CC-BY-4.0. Pinned
+file sizes/hashes and attribution live in `assets/backends/redux.json`; offline
+`--list-models`/`--check-model redux --model-dir /absolute/model` (or
+`scripts/model-status.py`) verify without inference or downloads. Manifest
+schema/verification are in `python/frameyap/model_files.py`. The local generic
+dispatcher resolves a manifest's in-release Python/executable launcher and
+checks request/reply correlation; a new manifest still needs its own licensed,
+compatible offline runtime and independent tests. Native `--run` flags `--backend ID`, `--model-store /absolute/store` and
+`--manifest-dir /absolute/manifests` are wired through
+the installed launcher as an explicit override, not a provisioning command.
+Inference uses the `moondream` Python package and Kestrel runtime, separately
+provisioned in your own environment; builds/tests/installer do not pip-install them. See
 [third-party notes](third-party.md).
 
 ## Developer native build
@@ -142,12 +168,16 @@ kestrel 0.8.0) and local weights:
 ```
 
 Use a disposable text destination first. `--run` loads the model but does not
-record until an explicit recording control. Click Insert only after focusing your
+record until an explicit recording control. Click Type only after focusing your
 intended text field. Quit or SIGINT/SIGTERM closes capture, invalidates delivery
 and terminates only the owned worker. Installer upgrades refuse an active app.
 
-The worker API is intentionally small: a fork can replace the worker implementation
-or add its own model/API integration without changing overlay and delivery code.
+The `Controller` receives injected `ControllerAudio`, `ControllerWorker`,
+`ControllerFocus` and delivery factory interfaces; hardware-free fakes can test
+state, retry, authorization and mic lifetime without initializing OpenVR or
+recording speech. The worker API is intentionally small: a fork can replace the
+worker implementation or add its own model/API integration without changing
+overlay and delivery code.
 The default product remains local-only Redux; extending a fork does not authorize
 sending existing users' audio to a service.
 

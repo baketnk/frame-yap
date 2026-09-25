@@ -11,53 +11,71 @@ build with `FRAMEYAP_NATIVE=ON`, and stage this layout (regular files, no links)
 
 ```
 bin/frameyap
-lib/*                             # compatible bundled native libraries
-assets/actions.json               # and adjacent controller binding JSON
+bin/install.sh                    # managed installer helper when required by layout
+lib/*                             # explicitly supplied compatible native libraries
+assets/actions.json               # plus binding JSON and backends/redux.json
 fonts/font.ttf
 python/frameyap/*.py
+scripts/model-status.py           # offline CLI verifier; also backend-service.py, fetch-model.py
 licenses/THIRD_PARTY_NOTICES.txt
 model/*                           # optional pinned public weights + attribution
 runtime/bin/python3               # ONLY for an authorized bundled-runtime artifact
 ```
 
-For the current **external-runtime** package, `scripts/stage-native-poc.py --help`
-documents explicit inputs. It invokes `cmake --install` on an existing native build,
-copies SDL/OpenVR and an explicitly licensed font, and retains notices. It does
+The stage copies the self-contained installer into `bin/` and CMake installs
+`scripts/model-status.py` alongside the backend manifests. The package allowlist
+permits `scripts/`; installed `frameyap --list-models` expects the verifier at
+`../scripts/model-status.py`. **No actual staged archive has been audited/tested
+from a clean account for publication**; exercise the entire producer pipeline
+and the installed CLI before treating the payload layout as release-ready.
+
+For the current **external-runtime** package, `scripts/stage-native.py --help`
+documents explicit inputs. The old `scripts/stage-native-poc.py` is retained as
+a deprecated migration wrapper for that command, not the documented or shipped
+staging interface. The stage invokes `cmake --install` on an existing native
+build, copies SDL/OpenVR and an explicitly licensed font, and retains notices. It does
 not build, download, run the app, or copy an ASR runtime. The native
 app relies on Frame's system Vulkan loader/driver, Wayland, libxcb, FreeType,
-libstdc++ and glibc; audit `ldd` on the installed binary.
+libstdc++ and glibc. Audit the actual staged ARM64 binaries' `NEEDED`,
+`GLIBC_*`/`GLIBCXX_*` symbol versions, ELF interpreter and notices; then test
+on a clean target. No compatible libc floor is yet established.
 SDL/OpenVR resolve inside its own `lib/`, not a producer
 prefix. ARM64/glibc packaging is not a claim of compatibility with arbitrary Linux.
 
 ```sh
 python3 scripts/package-release.py --stage /path/to/stage --output /existing/output \
-  --version 2026-09-24T162712Z-g417f81c --arch linux-aarch64 \
+  --version 0.1.202609241627 --arch linux-aarch64 \
   --model-revision fad622f25f303105c20d70e201bcc477c88b620c --external-runtime
 ```
 
-Use the actual binary's UTC build stamp (`frameyap --version`) for the archive
-tag, not this illustrative timestamp. CMake generates `YYYY-MM-DDTHHMMSSZ`
-at configuration time (plus `-gSHORTSHA` for a Git checkout and `-dirty` for
-uncommitted tracked changes); producers may pin `-DFRAMEYAP_VERSION=...` to
-embed a vetted release stamp. A timestamp distinguishes same-day archives;
-the installer still refuses a reused tag whose contents have changed. Historic
-`v0.1.0-poc*` local artifacts remain valid for reinstall/rollback.
+Use the actual binary's numeric `MAJOR.MINOR.YYYYMMDDHHMM` UTC version
+(currently `0.1`), not this illustrative value, for `--version` and filename;
+tag a vetted clean tree as `vVERSION`. CMake generates this stamp at
+configuration time (`SOURCE_DATE_EPOCH` may supply it);
+`-DFRAMEYAP_VERSION=0.1.YYYYMMDDHHMM` can pin it. Development `--version`
+may print a *separate* `git HASH` line, with `(uncommitted changes)` only if
+dirty: that line is not part of the version, tag or archive name. The installer
+rejects a reused tag with different contents; historic local versions may
+remain selectable for rollback, not as new releases.
 
 `--external-runtime` refuses a runtime directory and records
 `runtime: external-authorized-python` in `release.json`. The installer explicitly
 reports that ASR is not supplied. Without that flag, a complete compatible isolated CPU Python runtime is required
 in the archive. Staging validation is not an inference test.
 
-The producer refuses overwrites and emits `frameyap-VERSION-linux-aarch64.tar.gz`
-plus `.sha256` containing `HASH  FILENAME`. Archive extraction rejects traversal,
+The producer refuses overwrites and emits `frameyap-VERSION-linux-aarch64.tar.gz` plus `.sha256` containing
+`HASH  FILENAME`. Archive extraction rejects traversal,
 links/special files, duplicate members, oversized metadata/payloads and invalid
 layout. Checksums detect corruption, not a malicious/compromised publisher;
 authenticate release metadata independently. No packaging/installation model fetch.
 
 ## Consumer
 
-Bootstrap: Linux ARM64/glibc, Python 3.12+, curl, sha256sum and tar. **No compiler,
-sudo, Steam store AppID or engine checkout.** Download/inspect a pinned installer
+Bootstrap for a binary archive: Linux ARM64/glibc, Python 3.12+ (installer
+bootstrap, **not** the inference runtime), curl for network release downloads,
+sha256sum and tar for archive handling. **No compiler, sudo, Steam store AppID
+or engine checkout in binary mode.** No minimum glibc floor has been certified;
+preflight alone cannot guarantee compatibility. Download/inspect a pinned installer
 before running it. Current local artifact route:
 
 ```sh
@@ -65,17 +83,62 @@ sh install.sh --archive /path/to/frameyap-VERSION-linux-aarch64.tar.gz \
   --sha256 64_HEX_DIGIT_HASH --version VERSION
 ```
 
-After an actual vetted release exists, `sh install.sh --version TAG` retrieves
-that GitHub release and its versioned checksum; no `latest` or moving-branch
+After an actual vetted release exists, use a real numeric version (for example,
+`sh install.sh --mode binary --version 0.1.202609241627 --yes`); the installer
+will retrieve tag `v0.1.202609241627` and its versioned checksum; no `latest` or moving-branch
 lookup. A pipe invocation is supported, never prompts on stdin, and must also
 pin a real published tag. **There is no functional public download command yet.**
 
-`--without-model` omits bundled model files from staging, never deletes a current
-model on rerun, and records the choice. Same digest/version/choice is idempotent
-and repairs missing managed wrappers. Different digest or model choice for the
-same version is refused. External model provisioning is always deliberate.
+`--without-model` omits any model files in the selected archive, never deletes
+an existing current model on rerun, and records the choice. Same
+digest/version/choice is idempotent and repairs missing managed wrappers. Different digest or model choice for the
+same version is refused. External model provisioning is always deliberate: the
+local installer accepts `sh install.sh --install-model --backend redux --yes`
+(optional `--model-dir /absolute/path`) to explicitly download and verify files from the
+installed pinned manifest, not an ASR runtime. Inspect the model/size first
+with `sh install.sh --install-model --backend redux --print-plan --json`.
+`--expected-manifest-sha256 HASH` additionally binds consent to the exact raw
+installed `redux.json` bytes: under the model lock a mismatch fails **before**
+a model directory is created or any network request. In the locally implemented
+Models UI, Install displays source, rounded size, license text, attribution and
+the fingerprint; only the second Confirm Install click passes that fingerprint
+through the backend helper to the installer. Installation alone does not
+provision a CPU Python runtime; no in-panel flow has been accepted on Frame.
+In the source tree, `python3 scripts/model-status.py --list-models` or
+`--check-model redux --model-dir /absolute/model` hash-checks local files;
+the native `frameyap --list-models` / `--check-model` entry points use the
+adjacent installed verifier script; verify this in a staged archive before release. Manifest schema,
+source, size/hash and attribution live in `assets/backends/redux.json` and are
+validated by `python/frameyap/model_files.py`.
 
-The installed launcher defaults to `--run`. For a native-only package, supply
+For an explicit local **source** install, e.g.:
+
+```sh
+sh install.sh --mode source --source /absolute/source --openvr-root /absolute/sdk \
+  --openvr-library /absolute/libopenvr_api.so --openvr-license /absolute/openvr/LICENSE \
+  --sdl-library /absolute/libSDL3.so.0 --sdl-license /absolute/sdl/LICENSE \
+  --version 0.1.202609241627
+```
+
+It checks tools and native dependencies, builds/stages/packages in a private
+workspace, then installs the result. Unlike binary mode, this requires a C++
+compiler, CMake, SDK, SDL3, Wayland/scanner, libxcb, FreeType, Vulkan development
+files and producer-supplied
+licenses; it still does not install Python ASR packages. `--print-plan` performs
+a read-only plan, `--json` gives machine-readable results/errors (model installs
+also stream file events), and `--yes` authorizes network downloads. Bare TTY
+invocation can guide choices and prints equivalent flags; non-TTY runs require
+explicit arguments and never prompt. `--autolaunch`/`--no-autolaunch` are explicit
+OpenVR registration choices, off by default; do not pass either during an inert
+install if a running SteamVR session must remain untouched.
+
+The installed launcher defaults to `--run` and forwards explicit run flags
+(including `--backend ID`, `--model-store /absolute/store` and
+`--manifest-dir /absolute/manifests`) to the binary. These overrides select
+local metadata/model paths, not a runtime download; the latter two require
+absolute paths without dot segments. `--backend` selects for that run unless
+changed in the panel; a saved `config.json` backend is otherwise used. For a
+native-only package, supply
 `FRAMEYAP_PYTHON=/absolute/authorized/python` and `FRAMEYAP_MODEL=/absolute/model`,
 or override `--python`/`--model` on an explicit `--run`. For menu launches, create
 `$XDG_CONFIG_HOME/frameyap/paths.conf` (default `~/.config/frameyap/paths.conf`):
@@ -157,7 +220,7 @@ without configured model/runtime cannot transcribe; it should show **Unavailable
 (possibly after a brief Warming transition), rather than record or infer.
 Only perform this check on an unconfigured native-only installation: verify
 that `current/runtime/bin/python3` and `current/model` are absent and no
-user-local paths are configured; do not press Record, Insert or Enter.
+user-local paths are configured; do not press Record, Type or Type + Enter.
 The installer also provides a desktop entry; where Steam's UI supports adding a
 non-Steam app, the user may select that entry or browse to the installed launcher.
 Shortcut discovery/persistence after a normal restart is not yet verified. Do

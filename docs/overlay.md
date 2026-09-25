@@ -2,10 +2,12 @@
 
 `src/overlay.hpp` provides RAII OpenVR ownership and `registration()`. The panel
 only emits UI actions; `src/runtime.cpp` owns audio, transcription and insertion.
-Native `--run` wiring in `src/main.cpp` is implemented behind the explicit
-`FRAMEYAP_NATIVE` build option. Neither hardware-free tests nor a successful
-compile establish Frame input, visibility, comfort or text delivery. Launching the runtime is explicit, never part of a
-normal build or test.
+Native `--run` wiring in `src/main.cpp` is behind the explicit
+`FRAMEYAP_NATIVE` build option. The Models chooser, offline verification and
+explicit installer handoff are implemented locally, **not** an accepted Frame
+install/voice-typing path or a published release. Neither hardware-free tests
+nor a successful compile establish Frame input, visibility, comfort or text
+delivery. Launching the runtime is explicit, never part of a normal build or test.
 
 ## Rendering and controls
 
@@ -49,7 +51,9 @@ This replaces the raw-upload rendering path; headset flicker acceptance still
 requires an on-device comparison. Native installation and offscreen GPU checks are separate from headset acceptance.
 
 The header shows local time and date instead of the former on-device/review
-and current-mount labels. It updates when the displayed minute or date changes,
+and current-mount labels. Settings explains Hold Quit (hold 0.9 seconds then
+release) and Lasers anytime (system-wide lasers may affect games). The review
+tab describes Type and Type + Enter. It updates when the displayed minute or date changes,
 not every frame. Settings toggles 12/24-hour time and cycles date Off →
 MM/DD/YYYY → DD/MM/YYYY → YYYY-MM-DD → Off. These only affect display;
 mount choices remain in Settings.
@@ -58,23 +62,25 @@ The complete transcript preview is paginated by glyph width and four-line
 height; Previous and Next navigate it without changing the source transcript.
 Status fits on the single status line; the old bottom detail label is gone.
 The footer remains available on all tabs: Record (labelled Stop while recording),
-Cancel, Insert, Submit, Hold Quit. Hold Quit needs a 900 ms press and release on
+Cancel, Type, Type + Enter, Hold Quit. Hold Quit needs a 900 ms press and release on
 that same button; its thin progress bar shows the hold. Record can retry after an
 error; it is disabled while warming/transcribing and until an existing review is
-inserted or discarded. Cancel can stop worker startup. Insert and Submit are
+typed or discarded. Cancel can stop worker startup. Type and Type + Enter are
 disabled during recording and transcription. A pointer action requires
 a press/release on the same enabled control from the same cursor; focus loss,
-tab changes, action-state changes and relocation clear pending presses. Submit is *always* a separate
-deliberate action, not inferred from text. Insert appends a trailing space (without
-doubling an existing trailing space). Submit inserts any pending review and then
-queues Enter; with no pending text it queues Enter only. Y opens the quick-chat
-list over the review area; each further Y press cycles its highlighted choice.
-Cancel closes the picker without discarding an existing review. Submit sends the
-selected text *without* a trailing space, then Enter. The choices are short
+tab changes, action-state changes and relocation clear pending presses. Type + Enter
+is *always* a separate deliberate action, not inferred from text. Type normally
+appends a trailing space (without doubling an existing one); a full 4096-byte
+transcript without room for that suffix is queued unchanged, with no extra error
+for the missing space. Type + Enter types any pending review and then queues
+Enter; with no pending text it queues Enter only. Y opens the Quick phrases
+list over the review area; each further Y press cycles its highlighted choice. Cancel closes the picker without discarding an
+existing review. Type + Enter sends the selected phrase *without* a trailing
+space, then Enter. The choices are short
 single-line literals, not speech commands. A failed text step never proceeds to
 Enter. Recording never automatically submits. Auto insert, when
-explicitly enabled, can queue text + space after transcription only under the
-stable Xwayland focus guard described below.
+explicitly enabled, can queue text (normally + space) after transcription only
+under the stable Xwayland focus guard described below.
 
 ### Bindings button
 
@@ -107,6 +113,8 @@ installer creates one with defaults on first install. Copy the shipped
   "input_priority": "normal",
   "advanced_debug": false,
   "auto_insert": false,
+  "close_mic_when_idle": false,
+  "backend": "redux",
   "lock_layout": false,
   "clock_24h": false,
   "date_format": "mdy",
@@ -149,6 +157,18 @@ config, retaining other fields and formatting; invalid/unwritable configs are
 left untouched and return failure. The installer backs up original bytes before
 repairing invalid values, while valid `true` and `false` are retained.
 
+`close_mic_when_idle` is a separate boolean, default **false**, also available
+as Settings → **Close mic when idle**. Normally the SDL capture device stays
+open while Ready and idle samples are discarded. Enabling this toggle closes it
+between clips and opens it on PTT: this avoids an open idle capture device but
+can cause an audio spike (observed with per-PTT transitions on Frame), startup
+latency or first-syllable clipping. Settings persistently displays **OFF: discard
+idle audio; ON: spike / start latency** below the toggle, as well as an ON/OFF
+indicator; the status/detail line also explains a change when toggled. The
+native setting is saved to `config.json`; a failed save applies only for this
+session and warns. This is not a mute switch for other applications. Quit and
+failure still close the device.
+
 `auto_insert` is a separate boolean, default `false`, also available as a
 Settings toggle. Only a **new** recording arms it. It observes the Xwayland
 display selected by `DISPLAY`; its root `_NET_ACTIVE_WINDOW` and
@@ -156,40 +176,76 @@ display selected by `DISPLAY`; its root `_NET_ACTIVE_WINDOW` and
 Both properties and focus are rechecked after IME lease acquisition. A watched
 focus-out, root focus-property change (even if the same window returns), window
 destruction, held keyboard key, missing X display or any disagreement permanently
-disarms that clip. The transcript then remains for explicit review/Insert.
+disarms that clip. The transcript then remains for explicit review/Type.
 Native Wayland focus and child text-field focus cannot be safely inferred here;
 those cases fall back to review. No automatic Enter, speech commands or retry.
 The compositor can still change focus in the gap between the final check and
 global delivery, and IME commit is not an application receipt. This path has
 offline synthetic focus tests and a separate owned-target IME fixture; live
-speech-driven Auto Insert, target coverage and headset acceptance remain
+speech-driven Auto insert, target coverage and headset acceptance remain
 unverified. The setting is preserved on upgrade
 and a failed preference write applies only to the current session.
 
 `quick_inputs` is an editable list of 1–6 nonempty, printable ASCII strings,
 each at most 64 characters. Edit the JSON file and restart; there is no headset
 text editor. Inputs are literal (not expanded or interpreted by FrameYap) and
-are sent to the current Gamescope focus, so check the destination before Submit.
+are sent to the current Gamescope focus, so check the destination before Type + Enter.
 `buttons` maps named OpenVR actions (`left_grip`, `right_grip`, `ptt`, `cancel`,
 `insert`, `enter`, `quick_chat`) to Frame physical `/user/hand/{left|right}/input/NAME`
 button paths. Omitted actions retain their bundled defaults; an empty string
 disables a mapping, including after an upgrade. The Frame defaults are right
-X = hold-to-talk, B = Cancel, A = Insert + space, Y = quick chat. Enter has no
-single-button mapping by default; the left grip double-tap still submits.
-An existing config mapping `enter` to right Y is migrated to quick chat in memory
+X = hold-to-talk, B = Cancel, A = Type + space, Y = Quick phrases. Enter has no
+single-button mapping by default; the left grip double-tap still requests Type + Enter.
+An existing config mapping `enter` to right Y is migrated to Quick phrases in memory
 when `quick_chat` is absent; this does not overwrite custom mappings.
 Existing configs with empty actions retain those disabled mappings; change them explicitly
 or use SteamVR's binding editor. Paths must be distinct. Only the Frame binding is customized;
 SteamVR user overrides may still supersede it. On customized launches a generated
 action manifest and adjacent bindings are placed in `$XDG_CACHE_HOME/frameyap/bindings`
 (or `~/.cache/frameyap/bindings`); the bundled manifest remains unchanged. The
-config is read once at launch, not hot-reloaded. On install/upgrade the installer
-fills missing fields, removes retired keys, and resets invalid entries. It saves
-the exact prior bytes under `config.json.backup-*` before a repair and refuses
-symlink/oversized config paths; valid customizations remain intact. The installed
-launcher no longer pins `--font`, so this selection takes effect. Direct native
+config is read once at launch, not hot-reloaded (the in-panel backend selection
+is saved separately). On install/upgrade the installer fills known missing fields,
+including `close_mic_when_idle` and `backend`, removes retired keys and resets
+invalid entries. It saves the exact prior bytes under `config.json.backup-*`
+before a repair and refuses symlink/oversized config paths; valid customizations
+remain intact. The installed launcher no longer pins `--font`, so this selection takes effect. Direct native
 launches with bad JSON, colors or button mappings fail startup rather than
 silently changing input behavior.
+
+### Models / backends (local implementation)
+
+Settings → **Models / backends** opens a paginated local chooser. The saved
+`"backend": "redux"` selects a *manifest ID*, not a model download;
+`--backend ID` overrides it for that `--run` invocation. Selecting a listed backend
+restarts the owned worker and closes capture, discarding pending audio, review
+and any prior focus/delivery authorization. A failed preference write leaves the
+choice active only for this session. The currently listed Redux model is the
+only inference implementation supplied; adding a manifest alone does not add
+an inference runtime. The Models tab labels local checks as checking, missing
+(`not_installed`), invalid, or installed/verified; for the selected model it
+also reports loading, ready or failed. An install-in-progress note reports
+model provisioning, followed by a new offline check; a verified status alone
+is not proof the CPU runtime loaded. Recording is disabled until the selected
+files verify offline and the worker warms; missing files never trigger a silent
+download. Model loading and the default open-while-Ready idle microphone policy
+are unchanged. The panel's state and successful helper calls do **not** prove
+microphone transcription, input delivery or headset acceptance.
+
+For a missing/invalid selected model, **Install** first presents a separate
+confirmation showing pinned source, approximate download size, license text,
+attribution and the exact raw manifest SHA-256 fingerprint. Only **Confirm
+Install** launches the local installer with that fingerprint; leaving the view
+or changing metadata invalidates consent. The installer rechecks the *installed*
+manifest bytes under its model lock before creating a download target or using
+the network, downloads only on the explicit click, hashes pinned files and then
+the app checks them again offline before enabling recording. Existing invalid
+or unsafe model files are refused rather than silently overwritten. This
+installs model files, **not** Python, Torch, moondream, Kestrel or other runtime
+dependencies.
+The source-tree UI needs an installed release for installer-backed provisioning;
+a hand-edited manifest is not an approved artifact. The installer handoff and
+native UI have not yet been accepted on a clean Frame. See
+[packaging](packaging.md#consumer) for an inspection-first CLI path.
 
 ### Experimental controller input priority
 
@@ -348,7 +404,7 @@ recentring and readability still require a separately authorized headset check.
 
 The opt-in native `--check-controls` probe logs pointer counters and action
 callbacks to the terminal rather than repainting them on the panel. Its canvas
-stays static for Record/Cancel/Insert/Enter clicks so those clicks can be checked
+stays static for Record/Cancel/Type/Type + Enter clicks so those clicks can be checked
 without diagnostic texture uploads. Switching tabs or mount still updates
 the visible panel. Diagnostics identify `renderer=Vulkan` and count
 `textureUploads`; raw/file `ImageLoaded` events are not GPU upload completions.
@@ -367,8 +423,10 @@ cmake --build build-native --target frameyap_texture_check
 
 It does not initialize OpenVR or establish compositor/headset acceptance.
 
-`assets/actions.json` names six actions: left/right grip, PTT, cancel, insert,
-Enter. `bindings_frame_controller.json` maps right X click to hold-to-talk PTT;
+`assets/actions.json` names seven actions: left/right grip, PTT, cancel,
+Type, Type + Enter and Quick phrases. `insert`, `enter`, and `quick_chat` remain
+internal binding keys; visible controls read Type, Type + Enter, Quick phrases.
+`bindings_frame_controller.json` maps right X click to hold-to-talk PTT;
 the grip bindings remain for optional remapping/diagnosis. In one dashboard
 probe grips were inactive; a later controls-only probe delivered repeated right
 X PTT BeginRecord/EndRecord callbacks. The wearer reports controller actions
@@ -384,7 +442,7 @@ second squeeze **down** within 350 ms starts capture; hold as long as needed
 action explicitly begins on down and ends on up. On tracking-pose invalidity,
 action inactivity or overlay focus loss, a held capture emits Cancel, and
 reconnection requires a neutral observation before any new press. PTT and left
-Enter require an enabled panel; clickable Record remains available for retry
+Type + Enter require an enabled panel; clickable Record remains available for retry
 after an error and Cancel is always available. The action set defaults to normal
 priority; the experimental config request is described above. Neither priority
 guarantees delivery while a game or dashboard owns input.

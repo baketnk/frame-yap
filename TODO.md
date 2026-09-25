@@ -6,95 +6,110 @@ M ≈ a day, L ≈ multi-day.
 
 Guardrails from `AGENTS.md` apply to every item: offline default build, no implicit
 downloads, no automatic Enter, small verified commits, docs must state implemented
-vs proposed behavior honestly.
+vs proposed behavior honestly. Checked source-work items below mean the local
+implementation is present, **not** a shipped or headset-accepted release.
+
+## Implemented locally; offline tested; installed/headset validation pending
+
+The current working tree includes the source changes for A3, A5–A7, B1–B4,
+C1–C3, D1–D2, E2–E3 and F1–F2. Offline checks passed 23/23 default,
+24/24 strict UI, and 28/28 on a private native ARM64 snapshot. Later review
+fixes require a fresh final native build before deployment.
+These checkboxes close the *source tasks*, not their empirical acceptance gates.
+C1's second backend is a fake executable fixture, **not** a second shipped ASR
+engine. C2's two-click model consent, SHA-bound installer handoff, and D1/D2's
+source/attended installer paths still need an audited native archive and an
+installed clean-account/Frame exercise. A4 (exact artifact ABI/license closure),
+D3 (publication and clean-account acceptance), P1 (real-target delivery), G1
+(browser), and H (live headset acceptance) remain open. No new build is claimed
+deployed to Frame; local code/tests cannot establish a fixed delivery regression.
+
+## Priority regression (reported during implementation)
+
+- [ ] **P1. Repeated delivery loses the beginning of later submissions.** After
+  the first Type + Enter, later text reportedly loses a dozen to a few dozen leading
+  bytes. Investigate preview versus destination loss, retain the full bounded
+  literal transcript, and add repeated/long/Unicode delivery regression tests.
+  Do not assume a larger buffer fixes it or retry uncertain delivery automatically.
+  An old-code delivery fixture crashed the Gamescope session, **not** the OS;
+  this is not evidence of a fix. Real-target confirmation remains required after
+  a tested fix is deployed.
 
 ## A. First release (v0.1) blockers
 
 - [x] **A1. Remove the runtime-license blocker notes.** Upstream's Kestrel README
   states local inference is free; blocker text removed from README/docs/scripts and
   replaced with a neutral dependency note in `docs/third-party.md`.
-- [x] **A2. Remove references to the unrelated app (kouseki).** (S)
-  Docs and one `src/panel_surface.cpp` comment were cleaned; remaining check is a
-  final grep. Keep the Inconsolata/OFL attribution and cite the
-  upstream font source (googlefonts/Inconsolata) instead.
-  *Done when:* `grep -ri kouseki` is empty and the font SHA/attribution remains.
-- [ ] **A3. Commit the pending `AGENTS.md` rename** ("Frame Dictation" →
-  "FrameYap"). (S)
+- [x] **A2. Remove references to the unrelated app.** (S)
+  Tracked references were removed while preserving Inconsolata/OFL attribution,
+  font SHA-256 and upstream googlefonts/Inconsolata source. A tracked,
+  case-insensitive grep for the former app name must remain empty.
+- [x] **A3. Commit the pending `AGENTS.md` rename** ("Frame Dictation" →
+  "FrameYap"). (S) Done in baseline checkpoint `07c03ea`.
 - [ ] **A4. Inventory the remaining runtime dependencies' licenses.** (M)
-  Torch CPU, numpy, tokenizers, SDL3, wayland, libxcb, FreeType (pick FTL or GPL
-  option), compiler runtime / libc floor. Prerequisite for shipping a prebuilt
-  archive that includes any of them.
-- [ ] **A5. Drop "POC" from the shipped surface.** (S) `--help` text, README,
-  `scripts/stage-native-poc.py`, `CMakeLists.txt` messages,
-  installer strings. v0.1 is a first small release.
-- [ ] **A6. Rewrite the README front.** (M) 3-line pitch, requirements, install,
-  controls **table** (button → action), then a "Status / not yet validated" section.
-  Today it reads as a lab notebook and Controls is a wall of text.
+  Upstream inventory and the FreeType FTL choice are documented, but the exact
+  staged ARM64 native/runtime binaries, transitive wheel/library notices, symbol
+  versions, loader and libc floor still require artifact-specific review before
+  publishing any prebuilt archive.
+- [x] **A5. Drop "POC" from the shipped surface.** (S) Public help, README,
+  CMake and installer use the release name. `scripts/stage-native-poc.py` remains
+  a deprecated compatibility wrapper for `scripts/stage-native.py`, not the
+  documented or shipped staging entry point. v0.1 is a first small release.
+- [x] **A6. Rewrite the README front.** (M) Pitch, requirements, local-only install,
+  controls table and explicit "Status / not yet validated" section are present.
 - [x] **A7. Archive docs.** Dated evidence (`docs/evidence/`) and `provenance.md` moved
   to the untracked, gitignored `docs/archive/`; `poc.md` renamed `docs/build.md`.
-  Remaining: skim `design.md`/`overlay.md`/`packaging.md` for stale "proposal" and
-  hedging language before v0.1.
+  Current design/overlay/packaging docs distinguish implemented local behavior
+  from proposed and unaccepted headset/release behavior.
 
 ## B. Correctness / robustness
 
-- [ ] **B1. A malformed transcript must not kill the worker.** (S)
-  `src/runtime.cpp:141` → `session.reply()` → `literal_text()` throws on control
-  characters or bad UTF-8; the catch at ~line 167 calls `worker.stop()` and
-  `session.fail()`, unloading the model (reload can take up to 120 s). Treat it as a
-  request-level error (like the `E` path: keep the worker, show "transcription
-  failed", allow retry). Add a test with a control-character reply asserting the
-  worker stays ready.
-- [ ] **B2. Make the C++ side engine-agnostic.** (S) `src/worker.cpp` hardcodes
-  "moondream/torch" in the user-facing `F`/`I` errors. Use neutral wording or a
-  worker-supplied message code. Prerequisite for C1.
-- [ ] **B3. "Close mic when idle" setting, default OFF.** (M)
-  Default keeps the mic open while Ready (opening/closing per PTT causes an audio
-  spike on the physical hardware, and it avoids first-syllable clipping). The
-  setting closes it between clips for people who don't want a live device. Document
-  the tradeoff (spike/latency) next to the toggle, in Settings and in the docs.
-  Persist in `config.json`; add to the panel Settings tab.
-- [ ] **B4. Extract the interaction logic from `run()` and test it.** (L)
-  `run()` in `src/runtime.cpp` is one ~220-line function of captured lambdas with no
-  tests. Pull out a `Controller` (events + worker/audio/input interfaces → `Panel`)
-  so PTT, cancel, quick phrases, auto-insert and error transitions are testable
-  without hardware. B1 is the first regression test.
+- [x] **B1. Keep malformed transcripts request-local.** (S)
+  `Controller::tick()` catches a correlated bad UTF-8/control reply and fails the
+  request without stopping the ready worker; hardware-free fakes test retry.
+- [x] **B2. Use engine-neutral C++ worker errors.** (S)
+  `F`/`I` messages no longer name Redux's Python engine.
+- [x] **B3. "Close mic when idle" setting, default OFF.** (M)
+  Config/Settings and fake-backed mic-lifetime tests cover default idle draining
+  versus opt-in close/reopen; the physical spike/latency tradeoff is documented.
+- [x] **B4. Extract/test interaction logic from `run()`.** (L)
+  `Controller` receives injectable audio/worker/focus/delivery interfaces; offline
+  tests cover PTT, cancel, phrases, Auto insert and error/retry transitions.
 
 ## C. Backends and model management
 
-- [ ] **C1. Multiple ASR backends behind the worker protocol.** (L)
-  Keep Redux as the default, allow additional backends (whisper.cpp, faster-whisper,
-  sherpa-onnx Parakeet, …) as separate worker executables speaking the existing
-  `Y`/`T`/`R`/`E` framing. Define a small backend manifest (id, display name,
-  launcher, pinned model files + hashes + attribution, license text, CPU/GPU
-  requirements) so nothing is hardcoded in C++ or `model_files.py`.
-  *Done when:* Redux is expressed as a manifest, and a second backend can be added
-  without touching `worker.cpp`/`runtime.cpp`.
-- [ ] **C2. Model/backend state and a chooser in the UI.** (L) Depends on C1 + B4.
-  Settings page listing backends/models with state (not installed / installed and
-  verified / loading / ready / failed), the active one marked, and selection that
-  restarts the worker. Target user is non-technical: an **Install** button on the
-  panel runs the installer's machine-readable mode (D2) as a child process and shows
-  progress/errors in the panel, so nobody needs a terminal. The click is the consent;
-  there are still no implicit or background downloads, and the panel states what
-  will be downloaded and how large it is before it starts. Persist the choice in
-  `config.json`.
-- [ ] **C3. Model status CLI.** (S) `frameyap --list-models` / `--check-model ID`
-  (offline, hash-verifies installed files) so the UI and installer share one
-  implementation.
+- [x] **C1. Manifest-driven worker backends (source capability).** (L)
+  Redux's pinned manifest and a generic local dispatcher implement the existing
+  `Y`/`T`/`R`/`E` framing. An offline fake second executable backend works without
+  edits to C++ worker/runtime; only Redux has a shipped inference engine. New
+  backends still require license/runtime and actual inference validation.
+- [x] **C2. Model/backend state and chooser (local source).** (L)
+  Settings lists manifest-backed model status and active/loading/ready/failure
+  states; selection persists and invalidates/restarts worker, clip and review.
+  Install → Confirm Install displays pinned source, size, license, attribution and
+  manifest SHA-256; confirmation launches an owned installer helper with that
+  digest and offline rechecks afterward. Full consent metadata is paginated;
+  the panel shows bounded per-file download/verification events and sanitized
+  errors. Installer output alone never proves success. No implicit downloads or
+  runtime install. **Installed chooser/consent behavior on Frame remains unvalidated.**
+- [x] **C3. Offline model status CLI.** (S) `frameyap --list-models` and
+  `--check-model ID` dispatch pinned local manifest/hash checks, without ASR or
+  downloads. Installed archive CLI still needs clean-account verification.
 
 ## D. Installer
 
-- [ ] **D1. Installer with a binary-or-source choice.** (L)
-  `install.sh` offers *prebuilt archive* (checksummed) or *build from source*
-  (checks toolchain/deps via `install-preflight.sh`, builds in a private dir), then
-  continues automatically through install after the user's choices. Retain rollback,
-  idempotency, no sudo, no Steam AppID, opt-in autolaunch.
-- [ ] **D2. Model-agnostic, attended-or-unattended operation.** (M)
-  Every prompt has a flag (`--mode binary|source`, `--backend ID`, `--model-dir`,
-  `--yes`, `--autolaunch`/`--no-autolaunch`, `--without-model`, `--print-plan`,
-  `--json` output) so a model/agent can run it non-interactively; interactive
-  prompts only run on a TTY and print the equivalent flags they chose. Exit codes
-  and messages must be machine-readable.
+- [x] **D1. Local binary-or-source installer paths.** (L)
+  `install.sh` has a checksummed binary route and explicit local source/toolchain
+  preflight/build/stage/install route, with rollback and no default registration.
+  A native archive was exercised in private HOME/XDG roots on Frame: install,
+  installed model-status CLI, idempotency, wrapper repair and uninstall. This
+  same-user/system-library fixture is not clean-account acceptance.
+- [x] **D2. Attended-or-unattended model-agnostic installer interface.** (M)
+  TTY choices have equivalent flags; `--mode binary|source`, `--backend ID`,
+  `--model-dir`, `--yes`, `--autolaunch`/`--no-autolaunch`, `--without-model`,
+  `--print-plan` and `--json` support offline plans and structured outcomes;
+  explicit model installs use installed pinned manifests. Tested with local
+  fixtures only, not a released archive or an installed Frame UI handoff.
 - [ ] **D3. Publish a first prebuilt ARM64 archive.** (M) Depends on A4. Follow the
   release checklist in `docs/packaging.md`; do not advertise the one-command route
   until the archive and its checksum are actually published and tested from a clean
@@ -106,32 +121,24 @@ vs proposed behavior honestly.
   says what it is; no rename churn before the first tag. If a hardware-neutral
   project name is wanted later (e.g. plain "Yap", with FrameYap as the Steam Frame
   front end), decide it before the cross-window work in G, not now.
-- [ ] **E2. Rename/explain UI terms.** (S) Delivery actions become **Type** (text +
-  space) and **Type + Enter**; align overlay buttons, `--check-controls` output,
-  README, help text and `docs/overlay.md`, and keep `UiAction::Enter` internal only
-  if labels are consistent. "Quick chat" → "Quick phrases". Add one-line Settings
-  explanations for "Hold Quit" and "Lasers anytime". Explain the "Parakeet Redux"
-  vs `moondream` naming once in `docs/worker.md`.
-- [ ] **E3. Version scheme `MAJOR.MINOR.YYYYMMDDHHMM`.** (S)
-  e.g. `0.1.202609241530`: valid semver (numeric patch, no leading zeros), sorts
-  correctly, keeps the build date visible, URL/filename-safe. The version field is
-  just that string. The old `-gHASH` (which commit) and `-dirty` (uncommitted
-  changes) suffixes were only for telling developer builds apart, so they move out
-  of the version: `--version` prints `frameyap 0.1.202609241530`, and for a dev
-  build adds a second line like `git abc12345 (uncommitted changes)`. Release
-  archives are built from a clean tag, so users never see it. Update the CMake
-  version regex/`FRAMEYAP_VERSION`, `tests/cli.cmake`, `package-release.py`,
-  installer version checks and docs. `SOURCE_DATE_EPOCH` still drives the
-  timestamp. Tag releases `v0.1.<timestamp>`.
+- [x] **E2. User-facing Type / Type + Enter / Quick phrases labels.** (S)
+  Overlay, diagnostics, README/help and overlay docs align on these controls;
+  `insert`, `enter`, `quick_chat` remain internal binding/API names. Settings
+  explains Hold Quit and Lasers anytime; worker docs distinguish the Redux model
+  from its `moondream` Python inference package.
+- [x] **E3. Numeric `MAJOR.MINOR.YYYYMMDDHHMM` version source work.** (S)
+  CMake, CLI/tests, package producer and installer use numeric release versions;
+  dev git info is a separate `--version` line. `SOURCE_DATE_EPOCH` can supply
+  the configuration timestamp. A clean release tag/archive still needs D3.
 
 ## F. Code structure (non-urgent)
 
-- [ ] **F1. Move `--check-*` diagnostics out of `main.cpp`** (S) — ~70 lines of
-  inline UI plus hand-rolled per-mode argument checks; use a `check.cpp` and a
-  table-driven option parser.
-- [ ] **F2. Split `overlay.cpp`'s `Impl`** (M) — ~40 loosely related members (drag
-  state, save-failure flags, counters, pose caches): separate drag, persistence and
-  diagnostics.
+- [x] **F1. Move `--check-*` diagnostics out of `main.cpp`.** (S)
+  `src/check.cpp` owns native checks; `src/cli.cpp` provides the table-driven
+  parser. Device behavior remains separately gated.
+- [x] **F2. Split `overlay.cpp`'s `Impl`.** (M)
+  Drag state, persistence/save failures and diagnostics now have separate grouped
+  owners; native snapshot build and offline panel/drag tests cover the refactor.
 
 ## G. Other windows (post-release)
 
@@ -158,7 +165,7 @@ this app is future design and out of scope for v0.1.
   across a normal restart (without restarting sessions just for the test). Confirm no
   runtime/model environment override before future live checks.
 - [ ] Live acceptance on Frame: microphone → reviewed text → real target delivery,
-  Auto Insert with speech, physical resize.
+  Auto insert with speech, physical resize and a verified deployed version.
 
 ---
 
@@ -179,4 +186,5 @@ this app is future design and out of scope for v0.1.
 
 ## Open questions
 
-None currently blocking.
+Release artifact compatibility/license audit, publication, P1 real-target behavior
+and live headset validation are unresolved gates, not implied by checked source tasks.
