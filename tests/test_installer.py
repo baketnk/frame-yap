@@ -762,8 +762,10 @@ class InstallTests(unittest.TestCase):
                         output.extend(os.read(master, 8192))
                     except OSError:
                         break
-                self.assertEqual(child.wait(timeout=8), 2)
+                # Dev tree: usage error. Release: defaults to its pin, then needs --yes.
+                self.assertEqual(child.wait(timeout=8), 1 if installer.RELEASE_VERSION else 2)
                 self.assertNotIn(b"Mode [binary/source]:", output)
+                self.assertNotIn(b"[y/n]:", output)
                 self.assertFalse((self.data / "frameyap").exists())
             finally:
                 if child.poll() is None:

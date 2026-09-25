@@ -1,8 +1,10 @@
 # Installation goal and current boundary
 
 Goal: a one-command, pinned GitHub release install for Steam Frame without a Steam
-store AppID, sudo or end-user compiler. **No public archive or verified clean
-install is published. Do not advertise a `curl | sh` command as functional.**
+store AppID, sudo or end-user compiler. Release v0.1.202609251506 publishes an
+ARM64 archive, its `.sha256` and `install.sh` on GitHub, built on a Frame with
+`scripts/build-release.sh`; `curl …/releases/latest/download/install.sh | sh`
+runs the attended flow. A clean-install check on Frame is the remaining gate.
 The local installer has binary-archive and explicitly provisioned source-build
 modes, machine-readable plans/results and an attended TTY path. The native-only
 artifact does not include an ASR runtime; a separate explicit

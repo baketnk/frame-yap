@@ -2,7 +2,7 @@
 
 Voice typing on Steam Frame, with recognition on the headset rather than a desktop or cloud server.
 Hold a controller button to record, review the transcript, then deliberately type it into the focused app.
-Standalone OpenVR overlay; no Steam store AppID or sudo. First v0.1 release is in progress.
+Standalone OpenVR overlay; no Steam store AppID or sudo. First release: v0.1.202609251506.
 
 ## Requirements
 
@@ -10,16 +10,17 @@ Standalone OpenVR overlay; no Steam store AppID or sudo. First v0.1 release is i
 - For voice recognition, a **CPU Python runtime** (moondream 2.4.0 / Kestrel 0.8.0, CPU Torch 2.8.0) and the pinned local Parakeet Redux model. Neither is bundled; each has its own explicit install step: `sh install.sh --install-model --backend redux --yes` and `sh install.sh --install-runtime --yes` (needs Python 3.10–3.13 with venv; about 200 MB download). Use `--print-plan` first to see exactly what each fetches. There is no fallback ASR service.
 - A local source build needs CMake 3.20+, C++20 and explicit native libraries/SDK; the default hardware-free build needs only CMake and C++20. See [build requirements](docs/build.md).
 
-## Install (local artifacts only)
+## Install
 
-**No public release is published.** To install a locally vetted, checksummed ARM64 native-only archive without a compiler:
+On the Frame, open a terminal (desktop mode's Konsole, or SSH) and run:
 
 ```sh
-sh install.sh --mode binary --archive /path/to/frameyap-VERSION-linux-aarch64.tar.gz \
-  --sha256 ARCHIVE_SHA256 --version VERSION
+curl -fsSL https://github.com/baketnk/frame-yap/releases/latest/download/install.sh | sh
 ```
 
-`VERSION` is numeric `0.1.YYYYMMDDHHMM` for this release line; a future release tag will be `vVERSION`. The installer has an explicit local source-build path with toolchain/dependency inputs, and a read-only `--print-plan`/machine-readable `--json` mode; the producer stage→archive path still needs a clean-account artifact test and release audit. See [packaging](docs/packaging.md). Installation is user-local with rollback, no automatic launch or registration, and no Steam store AppID. Before voice typing, independently supply a licensed Python CPU environment and pinned weights, and configure their absolute paths in `~/.config/frameyap/paths.conf` (or the XDG config equivalent). Model download is opt-in and separate: `sh install.sh --install-model --backend redux --print-plan --json` inspects pinned metadata, while `--yes` explicitly authorizes installation from the *installed* manifest; `--expected-manifest-sha256 HASH` additionally binds consent to its exact bytes. The locally implemented Settings → Models chooser offers selection/restart and a two-click Install/Confirm Install with source, size, license, attribution and manifest SHA-256; it has not been validated as an installed/headset flow. No chooser action installs the Python runtime. Do not mistake a native-only install for working ASR. The pinned GitHub download route must not be advertised as functional until a vetted release exists.
+You can download and read `install.sh` first; it is one self-contained file. The installer pins its own release (currently `v0.1.202609251506`) and verifies the archive's SHA-256. It asks three y/n questions: install FrameYap, download the Parakeet Redux speech model (about 180 MB, CC-BY-4.0), and pip-install the CPU Python runtime (moondream/Kestrel with CPU Torch; about 200 MB download, roughly 1–1.5 GB on disk). Everything goes under your home directory: no sudo, compiler or Steam store AppID. Afterwards, launch **FrameYap** from the desktop application menu.
+
+The release archive contains FrameYap, SDL3 and the OpenVR client library only; Kestrel, Torch, moondream and the model weights are fetched on your machine from PyPI and Hugging Face. For automation, the same steps are `sh install.sh --yes`, `sh install.sh --install-model --backend redux --yes` and `sh install.sh --install-runtime --yes`; add `--print-plan --json` to preview any step. Maintainers build release archives on Linux ARM64 with `sh scripts/build-release.sh WORKDIR VERSION`. See [packaging](docs/packaging.md) and [install design](docs/install-design.md).
 
 ## Controls (default Frame binding)
 
