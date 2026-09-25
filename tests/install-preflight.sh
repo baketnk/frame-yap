@@ -33,8 +33,20 @@ check() {
 check 0 'Git: missing (not required' /usr/bin/env
 check 0 'uv: missing (not required' /usr/bin/env
 check 0 'Preflight passed' /usr/bin/env
-check 0 'older than 3.12' /usr/bin/env MOCK_PYTHON='Python 3.11.9'
+check 1 'older than 3.12' /usr/bin/env MOCK_PYTHON='Python 3.11.9'
+for dep in cmake c++ pkg-config wayland-scanner; do
+    printf '#!/bin/sh\nexit 0\n' > "$tmp/bin/$dep"
+    /bin/chmod +x "$tmp/bin/$dep"
+done
+output=$(PATH="$tmp/bin" /bin/sh "$script" --source 2>&1)
+case "$output" in *'Source dependency: vulkan found'*) ;; *) echo "Source preflight missed Vulkan: $output" >&2; exit 1;; esac
+printf '#!/bin/sh\n[ "$2" != vulkan ]\n' > "$tmp/bin/pkg-config"
+/bin/chmod +x "$tmp/bin/pkg-config"
+status=0
+output=$(PATH="$tmp/bin" /bin/sh "$script" --source 2>&1) || status=$?
+[ "$status" -eq 1 ] || { echo "Expected failing source preflight: $output" >&2; exit 1; }
+case "$output" in *'Source dependency: vulkan MISSING'*) ;; *) echo "Missing Vulkan failure: $output" >&2; exit 1;; esac
 check 1 'Linux AArch64 only' /usr/bin/env MOCK_ARCH=x86_64
 check 1 'require glibc' /usr/bin/env MOCK_LIBC=musl
-/bin/rm "$tmp/bin/curl"
-check 1 'curl MISSING' /usr/bin/env
+/bin/rm "$tmp/bin/python3"
+check 1 'python3 MISSING' /usr/bin/env

@@ -1,5 +1,9 @@
 """FrameYap installer implementation. Embedded verbatim in install.sh for piped installs."""
 import argparse
+import contextlib
+from datetime import datetime
+import io
+import importlib.util
 import fcntl
 import hashlib
 import json
@@ -7,24 +11,28 @@ import os
 from pathlib import Path
 import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 from urllib.parse import quote
+import urllib.request
 
 KEY = "local.frameyap.overlay"
 MARKER = "# FrameYap managed launcher v1\n"
 ARCHIVE_LIMIT = 12 * 1024**3
 MEMBER_LIMIT = 50000
-VERSION_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}\Z")
+VERSION_RE = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[1-9][0-9]{11}\Z")
 DIGEST_RE = re.compile(r"[a-fA-F0-9]{64}\Z")
 CONFIG_DEFAULTS = {
     "font": "",
     "input_priority": "normal",
     "advanced_debug": False,
     "auto_insert": False,
+    "close_mic_when_idle": False,
+    "backend": "redux",
     "lock_layout": False,
     "clock_24h": False,
     "date_format": "mdy",
@@ -41,6 +49,7 @@ CONFIG_DEFAULTS = {
 }
 COLOR_RE = re.compile(r"#[0-9a-fA-F]{6}\Z")
 BUTTON_RE = re.compile(r"/user/hand/(left|right)/input/[A-Za-z0-9_]+\Z")
+BACKEND_RE = re.compile(r"[a-z][a-z0-9_-]{0,47}\Z", re.ASCII)
 
 
 def fail(message):
@@ -92,6 +101,10 @@ def normalized_config(data):
     fixed["advanced_debug"] = debug if type(debug) is bool else False
     automatic = data.get("auto_insert", False)
     fixed["auto_insert"] = automatic if type(automatic) is bool else False
+    close_mic = data.get("close_mic_when_idle", False)
+    fixed["close_mic_when_idle"] = close_mic if type(close_mic) is bool else False
+    backend = data.get("backend", "redux")
+    fixed["backend"] = backend if isinstance(backend, str) and BACKEND_RE.fullmatch(backend) else "redux"
     layout = data.get("lock_layout", False)
     fixed["lock_layout"] = layout if type(layout) is bool else False
     clock = data.get("clock_24h", False)
@@ -193,8 +206,12 @@ def check_digest(value):
 
 
 def check_version(value):
-    if not VERSION_RE.fullmatch(value) or value in (".", ".."):
-        fail("invalid release version/tag")
+    if not VERSION_RE.fullmatch(value):
+        fail("version must be numeric MAJOR.MINOR.YYYYMMDDHHMM (no leading zeros, v prefix or git suffix)")
+    try:
+        datetime.strptime(value.rsplit(".", 1)[1], "%Y%m%d%H%M")
+    except ValueError:
+        fail("invalid UTC date/time in version")
     return value
 
 
@@ -235,7 +252,7 @@ def verify_members(archive):
         total += member.size
         if total > ARCHIVE_LIMIT:
             fail("archive uncompressed limit exceeded")
-        if (parts[0] not in ("release.json", "bin", "lib", "assets", "python", "runtime", "model", "fonts", "licenses")
+        if (parts[0] not in ("release.json", "bin", "lib", "assets", "python", "scripts", "runtime", "model", "fonts", "licenses")
                 or (parts[0] == "release.json" and (len(parts) != 1 or not member.isfile()))
                 or (len(parts) == 1 and parts[0] != "release.json" and not member.isdir())):
             fail(f"unexpected archive path: {name}")
@@ -273,9 +290,11 @@ def validate_payload(root, version, without_model=False, installed=False):
         fail("missing declared model")
     if meta["runtime"] == "external-authorized-python" and (root / "runtime").exists():
         fail("external runtime payload must not include a runtime")
-    for name in ("bin/frameyap", "runtime/bin/python3", "python/frameyap/worker.py", "assets/actions.json", "fonts/font.ttf"):
+    for name in ("bin/frameyap", "bin/install.sh", "runtime/bin/python3", "python/frameyap/worker.py", "assets/actions.json", "fonts/font.ttf"):
         if name == "runtime/bin/python3" and meta["runtime"] == "external-authorized-python":
             continue
+        if name == "bin/install.sh" and installed and not VERSION_RE.fullmatch(version):
+            continue  # legacy installed release, before a managed UI child existed
         if not (root / name).is_file():
             fail(f"missing payload file: {name}")
     for name in ("lib", "fonts"):
@@ -437,6 +456,194 @@ def installed_choice(path):
     return choice["without_model"]
 
 
+class ManifestMismatch(ValueError):
+    """The installed manifest does not match the UI's selected metadata."""
+
+
+def manifest_digest(path):
+    """Hash the exact installed ID.json bytes, never a symlink or directory."""
+    import stat
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 65536:
+            fail("installed backend manifest is oversized or unsafe")
+        raw = stream.read(65537)
+        if len(raw) > 65536:
+            fail("installed backend manifest is oversized or unsafe")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def installed_backend(root, backend_id):
+    current = selected(root, "current")
+    if not current:
+        fail("no installed release; install a verified archive before provisioning models")
+    version = root / current
+    installed_choice(version)
+    check_inventory(version)
+    module_path = version / "python/frameyap/model_files.py"
+    if module_path.is_symlink() or not module_path.is_file():
+        fail("installed release has no shared backend manifest verifier")
+    if module_path.stat().st_size > 262144:
+        fail("installed backend verifier exceeds size limit")
+    spec = importlib.util.spec_from_file_location("frameyap_installed_model_files", module_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    # Executing compiled bytes avoids __pycache__ inside the inventory-protected
+    # installed release; a machine-readable installer must not mutate it.
+    exec(compile(module_path.read_bytes(), str(module_path), "exec"), module.__dict__)
+    manifests = module.load_backends(version / "assets/backends")
+    if backend_id not in manifests:
+        fail(f"unknown backend: {backend_id}; available: {', '.join(sorted(manifests))}")
+    # load_backends enforces filename == manifest id. Hash only that selected file,
+    # not all manifests or their parsed/reformatted representation.
+    digest = manifest_digest(version / "assets/backends" / (backend_id + ".json"))
+    return module, manifests[backend_id], digest
+
+
+def check_expected_manifest(args, installed_sha):
+    if args.expected_manifest_sha256 and args.expected_manifest_sha256.lower() != installed_sha:
+        raise ManifestMismatch(f"installed {args.backend}.json manifest SHA-256 mismatch: "
+                               f"expected {args.expected_manifest_sha256.lower()}, got {installed_sha}")
+
+
+def model_target(args, root):
+    if args.model_dir:
+        if not args.model_dir.is_absolute():
+            fail("--model-dir must be an absolute local path")
+        return args.model_dir
+    return root / "models" / args.backend
+
+
+def install_model(args, root):
+    module, backend, manifest_sha = installed_backend(root, args.backend)
+    check_expected_manifest(args, manifest_sha)  # under .model.lock, before model mkdir/network
+    dest = model_target(args, root)
+    # No credentials, redirects to HTTP, symlinks or overwrite of mismatched files.
+    for ancestor in (dest, *dest.parents):
+        if ancestor.is_symlink():
+            fail(f"refusing symlink in model directory path: {ancestor}")
+    owned_dir(dest)
+    if not backend.source.startswith("https://"):
+        fail("model source must be HTTPS")
+    for item in backend.files:
+        target = dest / item.path
+        owned_dir(target.parent)
+        reason, _ = module.check_file(dest, item)
+        if reason is None:
+            if args.json:
+                print(json.dumps({"ok": True, "event": "model_file", "file": item.path, "state": "verified"}), flush=True)
+            continue
+        if reason not in ("missing_files",):
+            fail(f"refusing mismatched or unsafe model file: {target} ({reason})")
+        url = f"{backend.source}/resolve/{quote(backend.revision, safe='')}/{quote(item.path, safe='/')}"
+        if args.json:
+            print(json.dumps({"ok": True, "event": "model_file", "file": item.path, "state": "downloading", "bytes": item.size}), flush=True)
+        fd, temp = tempfile.mkstemp(prefix=".download-", dir=target.parent)
+        try:
+            with os.fdopen(fd, "wb") as output:
+                # The shared verifier is used for both pre-existing and downloaded files.
+                request = urllib.request.Request(url, headers={"User-Agent": "frameyap-installer"})
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    if response.geturl().split(":", 1)[0] != "https":
+                        fail("model URL redirected away from HTTPS")
+                    total = 0
+                    while chunk := response.read(1024 * 1024):
+                        total += len(chunk)
+                        if total > item.size:
+                            fail(f"model download exceeded pinned size: {item.path}")
+                        output.write(chunk)
+                output.flush()
+                os.fsync(output.fileno())
+            temporary = type(item)(Path(temp).name, item.size, item.sha256)
+            if module.check_file(target.parent, temporary)[0] is not None:
+                fail(f"pinned SHA-256/size mismatch: {item.path}")
+            if target.exists() or target.is_symlink():
+                fail(f"model destination changed during download: {target}")
+            os.replace(temp, target)
+            if args.json:
+                print(json.dumps({"ok": True, "event": "model_file", "file": item.path, "state": "verified"}), flush=True)
+        finally:
+            Path(temp).unlink(missing_ok=True)
+    state = module.check_model(backend, dest)
+    if state["state"] != "installed_verified":
+        fail(f"model did not verify: {state['reason']}")
+    if not args.json:
+        print(f"Backend {backend.id} model verified at {dest}; license {backend.license_id}. Configure runtime/model paths explicitly for launch.")
+
+
+def source_preflight(args):
+    """Read-only checks before the installer creates its install root."""
+    source = Path(args.source).expanduser().resolve(strict=True)
+    if not source.is_dir() or not (source / "CMakeLists.txt").is_file():
+        fail("--source must name a local FrameYap source directory")
+    for script in ("scripts/install-preflight.sh", "scripts/stage-native.py", "scripts/package-release.py"):
+        if not (source / script).is_file() or (source / script).is_symlink():
+            fail(f"source missing regular packaging script: {script}")
+    sdk = Path(args.openvr_root).expanduser().resolve(strict=True)
+    if not (sdk / "headers/openvr.h").is_file():
+        fail("--openvr-root must contain headers/openvr.h")
+    inputs = {}
+    for name in ("openvr_library", "openvr_license", "sdl_library", "sdl_license"):
+        path = Path(getattr(args, name)).expanduser().resolve(strict=True)
+        if not path.is_file():
+            fail(f"--{name.replace('_', '-')} must be a local file")
+        inputs[name] = str(path)
+    for tool in ("cmake", "c++", "pkg-config", "wayland-scanner"):
+        if not shutil.which(tool):
+            fail(f"source prerequisite missing: {tool}; no download/package install attempted")
+    preflight = subprocess.run(["sh", str(source / "scripts/install-preflight.sh"), "--source"],
+                              capture_output=True, text=True, check=False)
+    if preflight.returncode:
+        fail(f"source preflight failed (exit {preflight.returncode}): {preflight.stderr[-2000:]}")
+    for dep in ("sdl3", "wayland-client", "xcb", "freetype2", "vulkan"):
+        if subprocess.run(["pkg-config", "--exists", dep], check=False).returncode:
+            fail(f"source dependency missing: {dep}; provide local native dependencies")
+    return source, sdk, inputs
+
+
+def source_model_revision(source):
+    """Use the explicit source tree's pinned manifest, not a frozen installer hash."""
+    manifest = source / "assets/backends/redux.json"
+    if manifest.is_symlink() or not manifest.is_file() or manifest.stat().st_size > 65536:
+        fail("source missing safe pinned Redux backend manifest")
+    data = json.loads(manifest.read_text())
+    if not isinstance(data, dict) or data.get("id") != "redux" or not isinstance(data.get("model"), dict):
+        fail("invalid source Redux backend manifest")
+    revision = data["model"].get("revision")
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        fail("invalid pinned Redux model revision in source manifest")
+    return revision
+
+
+def source_archive(args, work):
+    """Build only explicitly supplied local sources/dependencies in private work dir."""
+    source, sdk, inputs = source_preflight(args)
+    revision = source_model_revision(source)
+    build = work / "build"
+    stage = work / "stage"
+    output = work / "out"
+    output.mkdir(mode=0o700)
+    commands = [
+        ["cmake", "-S", str(source), "-B", str(build), "-DFRAMEYAP_NATIVE=ON",
+         f"-DOPENVR_ROOT={sdk}", f"-DFRAMEYAP_VERSION={args.version}"],
+        ["cmake", "--build", str(build)],
+        [sys.executable, str(source / "scripts/stage-native.py"), "--build", str(build),
+         "--destination", str(stage), *[x for name in inputs for x in ("--" + name.replace("_", "-"), inputs[name])]],
+        [sys.executable, str(source / "scripts/package-release.py"), "--stage", str(stage),
+         "--output", str(output), "--arch", "linux-aarch64", "--version", args.version,
+         "--model-revision", revision, "--external-runtime"],
+    ]
+    for cmd in commands:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if result.returncode:
+            fail(f"source command failed ({cmd[0]}, exit {result.returncode}): {result.stderr[-2000:]}")
+    archive = output / release_name(args.version)
+    if not archive.is_file():
+        fail("source packaging did not produce the expected release archive")
+    return archive, digest_file(archive)
+
+
 def do_install(args, root, launcher):
     version = check_version(args.version)
     versions = root / "versions"
@@ -446,17 +653,20 @@ def do_install(args, root, launcher):
     # Refuse foreign wrappers/launcher directories before installing a new version.
     owned_dir(launcher.parent)
     check_wrappers(root, launcher)
-    if args.archive:
-        archive = Path(args.archive).expanduser().resolve(strict=True)
-        expected = check_digest(args.sha256)
-        do_download = False
-    else:
-        do_download = True
-        archive = None
     with tempfile.TemporaryDirectory(prefix=".download-", dir=root) as td:
+        if args.source:
+            archive, expected = source_archive(args, Path(td))
+            do_download = False
+        elif args.archive:
+            archive = Path(args.archive).expanduser().resolve(strict=True)
+            expected = check_digest(args.sha256)
+            do_download = False
+        else:
+            do_download = True
+            archive = None
         if do_download:
             name = release_name(version)
-            url = f"https://github.com/{args.repo}/releases/download/{quote(version)}/{name}"
+            url = f"https://github.com/{args.repo}/releases/download/{quote('v' + version)}/{name}"
             archive = Path(td) / name
             sidecar = Path(td) / (name + ".sha256")
             download(url + ".sha256", sidecar)
@@ -552,66 +762,249 @@ def uninstall(root, launcher):
     print("FrameYap removed; config and saved models preserved. OpenVR unregister acknowledgement was required.")
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(prog="install.sh", description="User-local FrameYap release installer (no SteamVR actions)")
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--archive", help="local release archive (requires --sha256 and --version)")
-    mode.add_argument("--rollback", action="store_true")
-    mode.add_argument("--uninstall", action="store_true")
+class UsageError(ValueError):
+    pass
+
+
+class InstallerParser(argparse.ArgumentParser):
+    def error(self, message):
+        raise UsageError(message)
+
+
+def resolve_args(argv):
+    parser = InstallerParser(prog="install.sh", description="User-local FrameYap installer; never launches the overlay")
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--archive", help="local release archive (requires --sha256 and --version)")
+    action.add_argument("--rollback", action="store_true")
+    action.add_argument("--uninstall", action="store_true")
+    action.add_argument("--install-model", action="store_true", help="explicit model provisioning for installed backend")
+    parser.add_argument("--mode", choices=("binary", "source"), default="binary")
+    parser.add_argument("--source", help="explicit local FrameYap source tree (source mode only)")
+    parser.add_argument("--openvr-root", help="local OpenVR SDK root (source mode)")
+    for name in ("openvr-library", "openvr-license", "sdl-library", "sdl-license"):
+        parser.add_argument("--" + name, help="explicit local source packaging input")
     parser.add_argument("--sha256")
-    parser.add_argument("--version")
+    parser.add_argument("--version", help="numeric MAJOR.MINOR.YYYYMMDDHHMM; GitHub tag is vVERSION")
     parser.add_argument("--repo", default="baketnk/frame-yap")
+    parser.add_argument("--backend", default="redux")
+    parser.add_argument("--model-dir", type=Path)
+    parser.add_argument("--expected-manifest-sha256", help="SHA-256 of selected installed backend ID.json bytes")
+    parser.add_argument("--yes", action="store_true", help="explicit consent to network/model provisioning")
+    parser.add_argument("--autolaunch", dest="autolaunch", action="store_true", default=None)
+    parser.add_argument("--no-autolaunch", dest="autolaunch", action="store_false")
     parser.add_argument("--without-model", action="store_true")
+    parser.add_argument("--print-plan", action="store_true", help="read-only plan; no lock, download or install")
+    parser.add_argument("--json", action="store_true", help="one JSON result or error on stdout")
     parser.add_argument("--unregistered", action="store_true", help="acknowledge explicit OpenVR removal before uninstall")
     args = parser.parse_args(argv)
     if args.repo != "baketnk/frame-yap":
         parser.error("only the pinned baketnk/frame-yap release repository is supported")
+    source_inputs = ("openvr_root", "openvr_library", "openvr_license", "sdl_library", "sdl_license")
+    if args.mode == "source":
+        if not args.source or any(not getattr(args, name) for name in source_inputs):
+            parser.error("--mode source requires --source and explicit --openvr-root, --openvr-library, --openvr-license, --sdl-library, --sdl-license")
+        if args.archive or args.sha256 or args.rollback or args.uninstall or args.install_model:
+            parser.error("source mode cannot combine with binary archive or lifecycle operations")
+    elif args.source or any(getattr(args, name) for name in source_inputs):
+        parser.error("source inputs require --mode source")
     if args.archive and (not args.sha256 or not args.version):
         parser.error("--archive requires --sha256 and --version")
+    if args.archive and not DIGEST_RE.fullmatch(args.sha256):
+        parser.error("--sha256 must be a 64-character hex SHA-256")
     if not args.archive and args.sha256:
         parser.error("--sha256 only applies to --archive")
-    if not (args.rollback or args.uninstall or args.archive) and not args.version:
-        parser.error("--version TAG is required; no moving/latest release")
-    if args.uninstall and not args.unregistered:
-        parser.error("uninstall requires --unregistered after explicit OpenVR unregister")
-    if args.unregistered and not args.uninstall:
-        parser.error("--unregistered only applies to --uninstall")
+    if not (args.rollback or args.uninstall or args.install_model) and not args.version:
+        parser.error("--version VERSION is required; no moving/latest release")
+    if args.uninstall != args.unregistered:
+        parser.error("--uninstall requires --unregistered after explicit OpenVR unregister")
+    if args.model_dir and not args.install_model:
+        parser.error("--model-dir applies only to --install-model")
+    if args.expected_manifest_sha256 is not None:
+        if not args.install_model:
+            parser.error("--expected-manifest-sha256 applies only to --install-model")
+        if not DIGEST_RE.fullmatch(args.expected_manifest_sha256):
+            parser.error("--expected-manifest-sha256 must be a 64-character hex SHA-256")
+    if args.model_dir and not args.model_dir.is_absolute():
+        parser.error("--model-dir must be an absolute local path")
+    if args.backend != "redux" and not args.install_model:
+        parser.error("--backend ID currently applies only to --install-model; select the active backend in FrameYap settings")
+    if args.install_model and (args.without_model or args.version or args.archive or args.autolaunch is not None):
+        parser.error("--install-model uses the installed version; cannot combine with archive/version/without-model/autolaunch")
+    if (args.rollback or args.uninstall) and (args.version or args.without_model or args.autolaunch is not None or args.backend != "redux"):
+        parser.error("lifecycle actions cannot combine with installation/model flags")
     if args.version:
-        check_version(args.version)
+        try:
+            check_version(args.version)
+        except ValueError as error:
+            parser.error(str(error))
+    return args
+
+
+def plan(args):
+    operation = ("uninstall" if args.uninstall else "rollback" if args.rollback else
+                 "install-model" if args.install_model else "install")
+    return {"operation": operation, "mode": args.mode, "version": args.version,
+            "tag": "v" + args.version if args.version else None,
+            "archive": str(args.archive) if args.archive else None,
+            "source": str(args.source) if args.source else None,
+            "backend": args.backend, "model_dir": str(args.model_dir) if args.model_dir else None,
+            "expected_manifest_sha256": (args.expected_manifest_sha256.lower() if args.expected_manifest_sha256 else None),
+            "without_model": args.without_model, "autolaunch": args.autolaunch,
+            "network": bool(args.install_model or (operation == "install" and not args.archive and not args.source)),
+            "registration": ("explicit --register --autostart" if args.autolaunch is True else
+                             "explicit --register (autostart off)" if args.autolaunch is False else "none")}
+
+
+def main(argv=None):
+    args = resolve_args(argv)
+    if args.print_plan:
+        result = plan(args)
+        if args.install_model:
+            data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share").expanduser().absolute()
+            root = data / "frameyap"
+            _, backend, manifest_sha = installed_backend(root, args.backend)
+            check_expected_manifest(args, manifest_sha)
+            result.update(model_dir=str(model_target(args, root)), model=backend.description(),
+                          installed_manifest_sha256=manifest_sha)
+        if args.json:
+            print(json.dumps({"ok": True, "event": "plan", **result}, sort_keys=True))
+        else:
+            print(json.dumps(result, indent=2, sort_keys=True))
+        return
     check_host()
+    if args.mode == "source":
+        source_preflight(args)
+    if (not args.archive and not args.source and not args.rollback and not args.uninstall) and not args.yes:
+        fail("network/model install requires explicit --yes (no stdin prompts); use --print-plan first")
     data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share").expanduser().absolute()
     root = data / "frameyap"
     launcher = Path.home() / ".local/bin/frameyap"
     owned_dir(root)
-    lock = root / ".lock"
+    # UI child model provisioning must work while the overlay holds .lock.
+    # Models live outside versions and never replace a running executable.
+    lock = root / (".model.lock" if args.install_model else ".lock")
     if lock.is_symlink():
         fail("refusing symlink lock")
     with lock.open("a+b") as fd:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            fail("FrameYap installer or application is running (.lock held); try again later")
-        if args.uninstall:
-            uninstall(root, launcher)
-        elif args.rollback:
-            owned_dir(root / "versions")
-            current, previous = selected(root, "current"), selected(root, "previous")
-            if not current or not previous:
-                fail("no previous installation to roll back to")
-            check_wrappers(root, launcher)
-            choice = installed_choice(root / previous)
-            check_inventory(root / previous)
-            validate_payload(root / previous, Path(previous).name, choice, installed=True)
-            select(root, "current", previous)
-            select(root, "previous", current)
-            print(f"Rolled back to {previous}")
+            fail(f"FrameYap installer or application is running ({lock.name} held); try again later")
+        other = root / ".model.lock"
+        if not args.install_model and other.is_symlink():
+            fail("refusing symlink model lock")
+        with (contextlib.nullcontext() if args.install_model else other.open("a+b")) as model_fd:
+            if model_fd is not None:
+                try:
+                    fcntl.flock(model_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    fail("model provisioning is running (.model.lock held); retry later")
+            if args.uninstall:
+                uninstall(root, launcher)
+            elif args.rollback:
+                owned_dir(root / "versions")
+                current, previous = selected(root, "current"), selected(root, "previous")
+                if not current or not previous:
+                    fail("no previous installation to roll back to")
+                check_wrappers(root, launcher)
+                choice = installed_choice(root / previous)
+                check_inventory(root / previous)
+                validate_payload(root / previous, Path(previous).name, choice, installed=True)
+                select(root, "current", previous)
+                select(root, "previous", current)
+                print(f"Rolled back to {previous}")
+            elif args.install_model:
+                install_model(args, root)
+            else:
+                do_install(args, root, launcher)
+    # The native registration helper takes this same install lock. Never run it
+    # until the installer has released its own lock; never initialize OpenVR by default.
+    if args.autolaunch is not None:
+        command = [str(launcher), "--register", str(root / "frameyap.vrmanifest")]
+        if args.autolaunch:
+            command.append("--autostart")
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.returncode:
+            fail(f"files installed, but opt-in OpenVR autolaunch registration failed (exit {result.returncode}): {result.stderr[-1000:]}")
+        print("OpenVR autolaunch " + ("enabled" if args.autolaunch else "disabled") + " by explicit request")
+
+
+def interactive_options():
+    """Only an empty, actual terminal invocation offers a guided local choice."""
+    print("FrameYap installer: choose binary (verified archive) or source (local build).")
+    mode = input("Mode [binary/source]: ").strip().lower()
+    if mode not in ("binary", "source"):
+        raise UsageError("choose binary or source; no installation started")
+    version = input("Numeric release version (MAJOR.MINOR.YYYYMMDDHHMM): ").strip()
+    check_version(version)
+    chosen = ["--mode", mode, "--version", version]
+    if mode == "binary":
+        archive = input("Local archive path (leave empty for pinned GitHub release): ").strip()
+        if archive:
+            chosen += ["--archive", archive, "--sha256", input("SHA-256 (64 hex digits): ").strip()]
         else:
-            do_install(args, root, launcher)
+            if input("Download verified release v" + version + "? [yes/no]: ").strip().lower() != "yes":
+                raise UsageError("download not approved; no installation started")
+            chosen.append("--yes")
+    else:
+        for flag in ("source", "openvr-root", "openvr-library", "openvr-license", "sdl-library", "sdl-license"):
+            chosen += ["--" + flag, input(flag + " local path: ").strip()]
+    if input("Omit archive model files? [yes/no]: ").strip().lower() == "yes":
+        chosen.append("--without-model")
+    if input("Enable OpenVR autolaunch? [yes/no]: ").strip().lower() == "yes":
+        chosen.append("--autolaunch")
+    print("Equivalent flags: " + " ".join(shlex.quote(item) for item in chosen))
+    return chosen
+
+
+def cli(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    structured = "--json" in argv
+    if not argv and sys.stdout.isatty():
+        # With `sh install.sh`, fd 0 is the embedded Python code, not the
+        # invoking terminal. fd 3 retains original stdin (including a pipe).
+        attended = sys.stdin
+        if not attended.isatty():
+            try:
+                if os.isatty(3):
+                    attended = os.fdopen(3, "r", closefd=False)
+            except OSError:
+                pass  # Direct Python entry point, no saved shell descriptor.
+        if attended.isatty():
+            try:
+                original_stdin = sys.stdin
+                try:
+                    sys.stdin = attended
+                    argv = interactive_options()
+                finally:
+                    sys.stdin = original_stdin
+            except (ValueError, EOFError) as exc:
+                print(f"frameyap installer: {exc}", file=sys.stderr)
+                return 2
+    try:
+        if structured and "--print-plan" in argv:
+            main(argv)  # already emits one JSON plan
+        elif structured and "--install-model" in argv:
+            main(argv)  # streaming per-file JSON events for a UI child
+            print(json.dumps({"ok": True, "event": "complete"}))
+        elif structured:
+            capture = io.StringIO()
+            with contextlib.redirect_stdout(capture):
+                main(argv)
+            print(json.dumps({"ok": True, "event": "complete", "messages": capture.getvalue().splitlines()}))
+        else:
+            main(argv)
+        return 0
+    except (ValueError, OSError, subprocess.CalledProcessError, tarfile.TarError, json.JSONDecodeError, ImportError) as exc:
+        code = 2 if isinstance(exc, UsageError) else 1
+        if structured:
+            print(json.dumps({"ok": False, "code": ("usage" if code == 2 else
+                              "manifest_mismatch" if isinstance(exc, ManifestMismatch) else "operation_failed"),
+                              "message": str(exc), "exit_code": code}))
+        else:
+            print(f"frameyap installer: {exc}", file=sys.stderr)
+        return code
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except (ValueError, OSError, subprocess.CalledProcessError, tarfile.TarError, json.JSONDecodeError) as exc:
-        print(f"frameyap installer: {exc}", file=sys.stderr)
-        sys.exit(1)
+    sys.exit(cli())

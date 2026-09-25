@@ -4,6 +4,7 @@
 This tool does not build/download a runtime, model, native libraries, or licenses.
 """
 import argparse
+from datetime import datetime
 import hashlib
 import io
 import json
@@ -15,8 +16,8 @@ import tarfile
 import tempfile
 
 ARCH = "linux-aarch64"
-ALLOWED = {"bin", "lib", "assets", "python", "runtime", "model", "fonts", "licenses"}
-REQUIRED = ("bin/frameyap", "runtime/bin/python3", "python/frameyap/worker.py",
+ALLOWED = {"bin", "lib", "assets", "python", "scripts", "runtime", "model", "fonts", "licenses"}
+REQUIRED = ("bin/frameyap", "bin/install.sh", "runtime/bin/python3", "python/frameyap/worker.py",
             "assets/actions.json", "fonts/font.ttf", "licenses/THIRD_PARTY_NOTICES.txt")
 
 
@@ -29,8 +30,12 @@ def main(argv=None):
     p.add_argument("--model-revision", required=True, help="exact vetted model revision identifier")
     p.add_argument("--external-runtime", action="store_true", help="omit ASR runtime; user must supply an independently authorized Python environment")
     args = p.parse_args(argv)
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}", args.version) or args.version in (".", ".."):
-        p.error("invalid version")
+    if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[1-9][0-9]{11}", args.version):
+        p.error("--version must be numeric MAJOR.MINOR.YYYYMMDDHHMM (no leading zeros, v prefix or git suffix)")
+    try:
+        datetime.strptime(args.version.rsplit(".", 1)[1], "%Y%m%d%H%M")
+    except ValueError:
+        p.error("--version contains an invalid UTC date/time")
     if not args.model_revision.strip():
         p.error("model revision must be nonempty")
     stage = args.stage.resolve(strict=True)
@@ -47,7 +52,7 @@ def main(argv=None):
             p.error(f"missing file: {name}")
     if args.external_runtime and (stage / "runtime").exists():
         p.error("external-runtime package must not contain a runtime directory")
-    for name in (("bin/frameyap",) if args.external_runtime else ("bin/frameyap", "runtime/bin/python3")):
+    for name in (("bin/frameyap", "bin/install.sh") if args.external_runtime else ("bin/frameyap", "bin/install.sh", "runtime/bin/python3")):
         if not os.access(stage / name, os.X_OK):
             p.error(f"not executable: {name}")
     for name in ("lib", "fonts", "licenses"):
