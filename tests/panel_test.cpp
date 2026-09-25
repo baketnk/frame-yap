@@ -14,7 +14,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
 }
 void no_action(const SurfaceEvent& event) {
     assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
-           !event.lock_layout && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings);
+           !event.close_mic_when_idle && !event.lock_layout && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -28,7 +28,7 @@ void snapshot(PanelSurface& surface, const std::string& path) {
 int main(int argc, char** argv) {
     assert(argc >= 2);
     PanelSurface surface(argv[1], Mount::World);
-    Panel p{"Ready to record", "", "Focus your destination before Insert. Enter is always separate.", false, false};
+    Panel p{"Ready to record", "", "Focus your destination before Type. Enter is always separate.", false, false};
     assert(surface.render(p));
     assert(surface.pixels().size() == size_t(PanelSurface::width * PanelSurface::height * 4));
     assert(!surface.render(p));
@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
     p.enabled = true;
     p.record_available = false;
     p.status = "Review your words";
-    p.transcript = "A quieter way to type in VR.\nKeep the menu where it feels comfortable.\nNothing is sent until you choose Insert.";
+    p.transcript = "A quieter way to type in VR.\nKeep the menu where it feels comfortable.\nNothing is sent until you choose Type.";
     assert(surface.render(p));
     surface.reset_pointers(); surface.render(p);
     if (argc >= 3) snapshot(surface, std::string(argv[2]) + "-review.ppm");
@@ -189,44 +189,56 @@ int main(int argc, char** argv) {
     assert(click(surface, 680, 332).mount == Mount::RightWrist);
     assert(click(surface, 680, 260).mount == Mount::Head);
     assert(click(surface, 180, 260).mount == Mount::World);
-    auto laser = click(surface, 680, 420);
+    auto laser = click(surface, 680, 400);
     assert(laser.lasers_anytime == true && !laser.action && !laser.mount);
     surface.set_lasers_anytime(true); assert(surface.render(p));
-    laser = click(surface, 680, 420);
+    laser = click(surface, 680, 400);
     assert(laser.lasers_anytime == false && !laser.action && !laser.mount);
     surface.set_lasers_anytime(false); assert(surface.render(p));
-    auto automatic = click(surface, 200, 474);
+    auto automatic = click(surface, 200, 446);
     assert(automatic.auto_insert == true && !automatic.action);
     assert(!surface.render(p)); // request alone has no effect
     surface.set_auto_insert(true); assert(surface.render(p));
-    automatic = click(surface, 200, 474);
+    automatic = click(surface, 200, 446);
     assert(automatic.auto_insert == false);
     surface.set_auto_insert(false); assert(surface.render(p));
-    auto debug = click(surface, 680, 474);
+    auto debug = click(surface, 680, 446);
     assert(debug.advanced_debug == true && !debug.action && !debug.mount && !debug.lasers_anytime);
     assert(!surface.render(p)); // an event is only a request; caller sets the accepted value
     surface.set_advanced_debug(true); assert(surface.render(p)); assert(!surface.render(p));
-    surface.pointer_down(1, 680, 474);
+    surface.pointer_down(1, 680, 446);
     surface.set_advanced_debug(false); assert(surface.render(p));
-    no_action(surface.pointer_up(1, 680, 474)); // stale press cannot toggle after state change
-    debug = click(surface, 680, 474);
+    no_action(surface.pointer_up(1, 680, 446)); // stale press cannot toggle after state change
+    debug = click(surface, 680, 446);
     assert(debug.advanced_debug == true);
     surface.set_advanced_debug(true); assert(surface.render(p));
-    debug = click(surface, 680, 474);
+    debug = click(surface, 680, 446);
     assert(debug.advanced_debug == false);
     surface.set_advanced_debug(false); assert(surface.render(p));
-    auto clock = click(surface, 200, 528);
+    auto clock = click(surface, 200, 492);
     assert(clock.clock_24h == true && !clock.action);
     assert(!surface.render(p)); // setting request waits for caller's accepted value
     surface.set_clock_24h(true); assert(surface.render(p));
-    assert(click(surface, 200, 528).clock_24h == false);
+    assert(click(surface, 200, 492).clock_24h == false);
     surface.set_clock_24h(false); assert(surface.render(p));
     for (DateFormat format : {DateFormat::DayMonthYear, DateFormat::Iso, DateFormat::Off, DateFormat::MonthDayYear}) {
-        auto date = click(surface, 680, 528);
+        auto date = click(surface, 680, 492);
         assert(date.date_format == format && !date.action);
         surface.set_date_format(format);
         assert(surface.render(p));
     }
+    auto mic = click(surface, 200, 532);
+    assert(mic.close_mic_when_idle == true && !mic.action);
+    assert(!surface.render(p)); // only the caller can accept a setting event
+    surface.set_close_mic_when_idle(true); assert(surface.render(p));
+    surface.pointer_down(1, 200, 532);
+    surface.set_close_mic_when_idle(false); assert(surface.render(p));
+    no_action(surface.pointer_up(1, 200, 532)); // stale press cannot change mic policy
+    mic = click(surface, 200, 532);
+    assert(mic.close_mic_when_idle == true);
+    surface.set_close_mic_when_idle(true); assert(surface.render(p));
+    assert(click(surface, 200, 532).close_mic_when_idle == false);
+    surface.set_close_mic_when_idle(false); assert(surface.render(p));
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     surface.set_placement_note("Wrist not tracked - using world space until it returns.");
     assert(surface.render(p)); assert(!surface.render(p));
@@ -237,12 +249,13 @@ int main(int argc, char** argv) {
     no_action(click(surface, 100, 160));
     no_action(surface.pointer_up(1, 680, 260));
     no_action(click(surface, 680, 260)); // mount controls not active on Review
-    no_action(click(surface, 680, 420)); // laser toggle only exists on Settings
-    no_action(click(surface, 680, 474)); // debug toggle only exists on Settings
-    no_action(click(surface, 200, 474)); // auto insert only exists on Settings
+    no_action(click(surface, 680, 400)); // laser toggle only exists on Settings
+    no_action(click(surface, 680, 446)); // debug toggle only exists on Settings
+    no_action(click(surface, 200, 446)); // auto insert only exists on Settings
     no_action(click(surface, 790, 160)); // layout lock only exists on Settings
-    no_action(click(surface, 200, 528)); // clock/date controls only exist on Settings
-    no_action(click(surface, 680, 528));
+    no_action(click(surface, 200, 492)); // clock/date controls only exist on Settings
+    no_action(click(surface, 680, 492));
+    no_action(click(surface, 200, 532)); // mic preference only exists on Settings
 
     // Bindings opens SteamVR directly, from either tab, without replacing review.
     surface.pointer_down(1, 480, 610);
@@ -306,5 +319,116 @@ int main(int argc, char** argv) {
     assert(surface.pointer_up(0, 900, 610, at + PanelSurface::quit_hold).action == UiAction::Quit);
     assert(surface.render(p));
     assert(!surface.render(p));
+    // Model page: selection is separate from installation; the first Install
+    // click reveals the source/size/license and cannot launch a child.
+    PanelSurface chooser(argv[1], Mount::World);
+    Panel model_panel{"Ready", "", "", true, false};
+    model_panel.selected_backend = "redux";
+    model_panel.models = {{"redux", "Parakeet Redux", "not_installed", "https://example.org/model",
+                           "CC-BY-4.0", "Pinned license text", "Attribution", 177774490, false, std::string(64, 'a')},
+                          {"fake", "Fixture", "installed_verified", "https://example.org/fake",
+                           "MIT", "Fixture license", "Fixture", 7, true, std::string(64, 'b')}};
+    chooser.render(model_panel);
+    no_action(click(chooser, 290, 160)); // Settings
+    chooser.render(model_panel);
+    no_action(click(chooser, 680, 530)); // Models
+    chooser.render(model_panel);
+    auto select = click(chooser, 100, 310);
+    assert(select.model_action && select.model_action->id == "fake" && !select.model_action->install);
+    model_panel.selected_backend = "fake";
+    chooser.render(model_panel);
+    no_action(click(chooser, 700, 546)); // verified model cannot be installed
+    select = click(chooser, 100, 260);
+    assert(select.model_action && select.model_action->id == "redux" && !select.model_action->install);
+    model_panel.selected_backend = "redux";
+    chooser.render(model_panel);
+    no_action(click(chooser, 700, 546)); // consent preview only
+    chooser.render(model_panel);
+    no_action(click(chooser, 700, 546)); // first page cannot authorize installation
+    while (true) {
+        auto rows = chooser.visible_model_review_lines();
+        assert(!rows.empty());
+        auto before = chooser.pixels();
+        no_action(click(chooser, 370, 546));
+        if (!chooser.render(model_panel)) break; // final page has disabled Next
+        assert(chooser.pixels() != before);
+    }
+    auto install = click(chooser, 700, 546);
+    assert(install.model_action && install.model_action->id == "redux" && install.model_action->install &&
+           install.model_action->manifest_sha256 == std::string(64, 'a'));
+    // Same ID with a new source or fingerprint invalidates displayed approval.
+    no_action(click(chooser, 700, 546));
+    chooser.render(model_panel);
+    model_panel.models[0].source = "https://example.org/changed";
+    model_panel.models[0].manifest_sha256 = std::string(64, 'c');
+    chooser.render(model_panel);
+    no_action(click(chooser, 700, 546)); // now only a new preview, no install
+    chooser.render(model_panel);
+    while (true) {
+        auto before = chooser.pixels();
+        no_action(click(chooser, 370, 546));
+        if (!chooser.render(model_panel)) break;
+        assert(chooser.pixels() != before);
+    }
+    install = click(chooser, 700, 546);
+    assert(install.model_action && install.model_action->manifest_sha256 == std::string(64, 'c'));
+    // Max-length metadata must have every byte represented on navigable pages,
+    // including the source tail, long license text, attribution and exact hash.
+    PanelSurface long_review(argv[1], Mount::World);
+    Panel long_panel{"Ready", "", "", true, false};
+    long_panel.selected_backend = "redux";
+    auto long_model = model_panel.models[0];
+    long_model.source = "https://" + std::string(1016, 's');
+    long_model.license = std::string(1024, 'L');
+    long_model.license_text = std::string(1024, 'T');
+    long_model.attribution = std::string(1024, 'A');
+    long_panel.models = {long_model};
+    long_review.render(long_panel);
+    no_action(click(long_review, 290, 160)); long_review.render(long_panel);
+    no_action(click(long_review, 680, 530)); long_review.render(long_panel);
+    no_action(click(long_review, 700, 546));
+    assert(long_review.visible_model_review_lines().empty()); // preview not yet drawn
+    no_action(click(long_review, 370, 546)); // cannot skip unpainted consent page
+    long_review.render(long_panel);
+    std::string reviewed;
+    int pages = 0;
+    for (;;) {
+        auto rows = long_review.visible_model_review_lines();
+        assert(!rows.empty());
+        for (const auto& row : rows) reviewed += row;
+        ++pages;
+        if (pages == 1) no_action(click(long_review, 700, 546));
+        auto before = long_review.pixels();
+        no_action(click(long_review, 370, 546));
+        if (long_review.visible_model_review_lines().empty()) {
+            no_action(click(long_review, 700, 546)); // next page not painted yet
+            no_action(click(long_review, 370, 546)); // cannot skip next unpainted page
+        }
+        if (!long_review.render(long_panel)) break;
+        assert(long_review.pixels() != before);
+    }
+    assert(pages > 8);
+    for (const auto& value : {long_model.source, long_model.license, long_model.license_text,
+                              long_model.attribution, long_model.manifest_sha256})
+        assert(reviewed.find(value) != std::string::npos);
+    auto long_install = click(long_review, 700, 546);
+    assert(long_install.model_action && long_install.model_action->install &&
+           long_install.model_action->manifest_sha256 == long_model.manifest_sha256);
+    long_panel.model_note = "Downloading: weights.dat";
+    long_review.render(long_panel);
+    auto without_error = long_review.pixels();
+    long_panel.model_note = "Install failed: manifest_mismatch: pinned metadata changed; local model status checked offline.";
+    assert(long_review.render(long_panel));
+    bool footer_note_changed = false;
+    for (int y = 644; y < 680; ++y) for (int x = 32; x < 968; ++x) {
+        auto pixel = (size_t(y) * PanelSurface::width + x) * 4;
+        footer_note_changed |= long_review.pixels()[pixel] != without_error[pixel];
+    }
+    assert(footer_note_changed); // feedback below buttons, never underneath them
+    chooser.render(model_panel);
+    chooser.pointer_down(0, 700, 546);
+    model_panel.model_busy = true;
+    chooser.render(model_panel);
+    no_action(chooser.pointer_up(0, 700, 546)); // change invalidates approval
     std::cout << "panel checks passed (no OpenVR, microphone or input injection)\n";
 }

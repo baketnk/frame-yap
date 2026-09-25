@@ -16,11 +16,13 @@ struct SurfaceEvent {
     std::optional<bool> lasers_anytime;
     std::optional<bool> advanced_debug;
     std::optional<bool> auto_insert;
+    std::optional<bool> close_mic_when_idle;
     std::optional<bool> lock_layout;
     std::optional<bool> clock_24h;
     std::optional<DateFormat> date_format;
     bool recenter = false;
     bool open_bindings = false;
+    std::optional<ModelAction> model_action;
 };
 // One CPU RGBA canvas, independent of OpenVR. Settings replace the review area;
 // status and safety controls remain on the same surface.
@@ -51,11 +53,15 @@ public:
     void set_lasers_anytime(bool enabled);
     void set_advanced_debug(bool enabled);
     void set_auto_insert(bool enabled);
+    void set_close_mic_when_idle(bool enabled);
     void set_clock_24h(bool enabled);
     void set_date_format(DateFormat format);
     void set_clock_time(std::time_t now);
     void set_binding_note(std::string note);
     bool available(UiAction action) const;
+    // Exact text rows currently shown in the consent viewport (empty outside it).
+    // OpenVR has no screen-reader accessibility channel for this canvas.
+    std::vector<std::string> visible_model_review_lines() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

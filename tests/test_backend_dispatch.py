@@ -142,6 +142,14 @@ class BackendDispatchTest(unittest.TestCase):
             self.assertNotEqual(wrong.returncode, 0)
             self.assertFalse(marker.exists(), wrong.stdout)
             self.assertNotIn('DONE', wrong.stdout)
+            self.assertEqual(json.loads(wrong.stdout), {
+                'ok': False, 'code': 'manifest_mismatch',
+                'message': 'selected backend manifest changed since consent'})
+            missing = subprocess.run(install[:-1] + [hashlib.sha256(source.read_bytes()).hexdigest(),
+                                      '--installer', str(root / 'absent.sh')], capture_output=True, text=True)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertEqual(json.loads(missing.stdout)['message'], 'installer missing or unsafe')
+            self.assertFalse(marker.exists())
             # Reusing a backend ID cannot silently re-authorize new sources.
             new = hashlib.sha256(source.read_bytes()).hexdigest()
             self.assertNotEqual(new, old)

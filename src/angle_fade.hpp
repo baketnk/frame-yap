@@ -24,8 +24,8 @@ inline bool normalize(Vec3& v) {
 } // namespace angle_fade_detail
 
 // Wrist-only visibility: compare the entire panel orientation (including roll)
-// to an upright panel pointing at the viewer. Kouseki's watch fades linearly
-// between 60 and 75 degrees; the matrix math here has no engine dependency.
+// to an upright panel pointing at the viewer. Fade linearly between 60 and
+// 75 degrees; the matrix math here has no engine dependency.
 // Both poses must be in the same tracking space, with rigid orthonormal axes.
 // Invalid geometry hides the panel rather than making it clickable at full alpha.
 inline float wrist_view_opacity(const Matrix34& panel, const Matrix34& head) {

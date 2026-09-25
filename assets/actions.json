@@ -18,12 +18,12 @@
   "localization": [{
     "language_tag": "en_US",
     "/actions/frameyap": "FrameYap controls",
-    "/actions/frameyap/in/left_grip": "Double tap left grip: insert pending text + Enter (enabled only)",
+    "/actions/frameyap/in/left_grip": "Double tap left grip: Type + Enter (enabled only)",
     "/actions/frameyap/in/right_grip": "Tap right grip briefly, then squeeze and hold to record; release to finish",
     "/actions/frameyap/in/ptt": "Hold right X to record (default; remappable)",
     "/actions/frameyap/in/cancel": "Cancel recording or discard",
-    "/actions/frameyap/in/insert": "Insert reviewed text + trailing space",
-    "/actions/frameyap/in/enter": "Submit: pending text + Enter, or Enter alone",
-    "/actions/frameyap/in/quick_chat": "Open quick chat / cycle selection"
+    "/actions/frameyap/in/insert": "Type reviewed text + trailing space",
+    "/actions/frameyap/in/enter": "Type + Enter: pending text + Enter, or Enter alone",
+    "/actions/frameyap/in/quick_chat": "Open quick phrases / cycle selection"
   }]
 }

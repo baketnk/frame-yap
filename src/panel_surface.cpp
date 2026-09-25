@@ -30,10 +30,11 @@ struct Rect {
 };
 enum class Control { Review, Settings, Bindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
-                     Clock24h, Date, LockLayout };
-enum class Tab { Review, Settings };
+                     Clock24h, Date, LockLayout, CloseMicWhenIdle, Models, ModelRow,
+                     ModelInstall, ModelPrev, ModelNext };
+enum class Tab { Review, Settings, Models };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 21> buttons{{
+constexpr std::array<Button, 32> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
@@ -42,19 +43,30 @@ constexpr std::array<Button, 21> buttons{{
     {{838, 406, 130, 44}, Control::Next, "Next"},
     {{32, 574, 176, 68}, Control::Record, "Record"},
     {{222, 574, 176, 68}, Control::Cancel, "Cancel"},
-    {{412, 574, 176, 68}, Control::Insert, "Insert"},
-    {{602, 574, 176, 68}, Control::Enter, "Submit"},
+    {{412, 574, 176, 68}, Control::Insert, "Type"},
+    {{602, 574, 176, 68}, Control::Enter, "Type + Enter"},
     {{792, 574, 176, 68}, Control::Quit, "Hold Quit"},
     {{32, 234, 454, 58}, Control::World, "World space"},
     {{514, 234, 454, 58}, Control::Head, "Head"},
     {{32, 308, 454, 58}, Control::Left, "Left wrist"},
     {{514, 308, 454, 58}, Control::Right, "Right wrist"},
-    {{32, 394, 300, 50}, Control::Recenter, "Recenter in front"},
-    {{514, 394, 454, 50}, Control::LasersAnytime, "Lasers anytime"},
-    {{32, 452, 454, 48}, Control::AutoInsert, "Auto insert"},
-    {{514, 452, 454, 48}, Control::AdvancedDebug, "Advanced debug"},
-    {{32, 506, 454, 42}, Control::Clock24h, "Clock"},
-    {{514, 506, 454, 42}, Control::Date, "Date"},
+    {{32, 378, 300, 44}, Control::Recenter, "Recenter in front"},
+    {{514, 378, 454, 44}, Control::LasersAnytime, "Lasers anytime"},
+    {{32, 428, 454, 40}, Control::AutoInsert, "Auto insert"},
+    {{514, 428, 454, 40}, Control::AdvancedDebug, "Advanced debug"},
+    {{32, 474, 454, 36}, Control::Clock24h, "Clock"},
+    {{514, 474, 454, 36}, Control::Date, "Date"},
+    {{32, 516, 454, 32}, Control::CloseMicWhenIdle, "Close mic when idle"},
+    {{514, 516, 454, 32}, Control::Models, "Models / backends"},
+    {{32, 242, 936, 42}, Control::ModelRow, ""},
+    {{32, 290, 936, 42}, Control::ModelRow, ""},
+    {{32, 338, 936, 42}, Control::ModelRow, ""},
+    {{32, 386, 936, 42}, Control::ModelRow, ""},
+    {{32, 434, 936, 42}, Control::ModelRow, ""},
+    {{32, 482, 936, 42}, Control::ModelRow, ""},
+    {{514, 530, 454, 36}, Control::ModelInstall, "Install"},
+    {{32, 530, 214, 36}, Control::ModelPrev, "Previous"},
+    {{260, 530, 214, 36}, Control::ModelNext, "Next"},
 }};
 std::optional<UiAction> action(Control c) {
     switch (c) {
@@ -105,6 +117,7 @@ struct PanelSurface::Impl {
     Color background, card, ink, muted, cyan, pink;
     Tab tab = Tab::Review;
     bool dirty = true, lasers_anytime = false, advanced_debug = false, auto_insert = false;
+    bool close_mic_when_idle = false;
     bool clock_24h = false, layout_locked = false;
     DateFormat date_format = DateFormat::MonthDayYear;
     std::time_t clock_time = std::time(nullptr);
@@ -116,7 +129,41 @@ struct PanelSurface::Impl {
     int drag_cursor = -1;
     std::vector<std::string> lines;
     size_t page = 0;
+    size_t model_page = 0;
+    size_t consent_page = 0;
+    size_t consent_rendered_page = size_t(-1);
+    bool install_confirm = false;
+    std::optional<ModelOption> consent_snapshot;
+    std::vector<std::string> consent_lines;
     static constexpr size_t lines_per_page = 4;
+    static constexpr size_t consent_lines_per_page = 6;
+    size_t consent_pages() const {
+        return std::max(size_t(1), (consent_lines.size() + consent_lines_per_page - 1) / consent_lines_per_page);
+    }
+    std::vector<std::string> visible_consent_lines() const {
+        if (!install_confirm || !consent_snapshot || consent_page != consent_rendered_page) return {};
+        auto first = consent_page * consent_lines_per_page;
+        auto last = std::min(consent_lines.size(), first + consent_lines_per_page);
+        return {consent_lines.begin() + first, consent_lines.begin() + last};
+    }
+    void prepare_consent(const ModelOption& m) {
+        consent_snapshot = m;
+        consent_lines.clear();
+        // Each field is independently wrapped; no hidden tail of the source,
+        // license or attribution may be mistaken for reviewed consent.
+        for (const auto& field : {"Backend: " + m.name + " (" + m.id + ")",
+                                  "Download bytes: " + std::to_string(m.bytes),
+                                  "Source: " + m.source, "License: " + m.license,
+                                  "License text: " + m.license_text,
+                                  "Attribution: " + m.attribution,
+                                  "Manifest SHA-256: " + m.manifest_sha256}) {
+            auto rows = wrap(field, 19, 890);
+            consent_lines.insert(consent_lines.end(), rows.begin(), rows.end());
+        }
+        consent_page = 0;
+        consent_rendered_page = size_t(-1);
+        install_confirm = true;
+    }
 
     Impl(const std::string& font, Mount m, Theme t)
         : mount(m), theme(t), background(t.background), card(t.card), ink(t.ink), muted(t.muted),
@@ -247,19 +294,24 @@ struct PanelSurface::Impl {
     }
     size_t page_count() const { return std::max(size_t(1), (lines.size() + lines_per_page - 1) / lines_per_page); }
     bool available(UiAction a) const {
-        if (a == UiAction::Record) return !panel.quick_open && (panel.recording || panel.record_available);
-        if (a == UiAction::Insert) return !panel.quick_open && panel.enabled && !panel.recording && !panel.transcript.empty();
-        if (a == UiAction::Enter) return panel.enabled && !panel.recording;
-        if (a == UiAction::QuickChat) return panel.enabled && !panel.recording && !panel.quick_inputs.empty();
+        if (a == UiAction::Record) return tab != Tab::Models && !panel.quick_open && (panel.recording || panel.record_available);
+        if (a == UiAction::Insert) return tab != Tab::Models && !panel.quick_open && panel.enabled && !panel.recording && !panel.transcript.empty();
+        if (a == UiAction::Enter) return tab != Tab::Models && panel.enabled && !panel.recording;
+        if (a == UiAction::QuickChat) return tab != Tab::Models && panel.enabled && !panel.recording && !panel.quick_inputs.empty();
         if (a == UiAction::Toggle) return false;
         return true;
     }
     bool visible(Control c) const {
         if (panel.quick_open && c != Control::Cancel && c != Control::Enter && c != Control::Quit) return false;
+        if (c == Control::Models) return tab == Tab::Settings;
+        if (c == Control::ModelRow) return tab == Tab::Models && !install_confirm;
+        if (c == Control::ModelPrev || c == Control::ModelNext) return tab == Tab::Models;
+        if (c == Control::ModelInstall) return tab == Tab::Models;
         if (c == Control::Prev || c == Control::Next) return tab == Tab::Review && !panel.quick_open;
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
             c == Control::AdvancedDebug || c == Control::AutoInsert ||
-            c == Control::Clock24h || c == Control::Date || c == Control::LockLayout) return tab == Tab::Settings;
+            c == Control::Clock24h || c == Control::Date || c == Control::LockLayout ||
+            c == Control::CloseMicWhenIdle) return tab == Tab::Settings;
         return true;
     }
     bool enabled(Control c) const {
@@ -267,11 +319,25 @@ struct PanelSurface::Impl {
         if (c == Control::Prev) return page > 0;
         if (c == Control::Next) return page + 1 < page_count();
         if (c == Control::Recenter) return mount == Mount::World;
+        if (c == Control::ModelRow) return !panel.model_busy;
+        if (c == Control::ModelInstall) {
+            if (panel.model_busy) return false;
+            auto it = std::find_if(panel.models.begin(), panel.models.end(), [&](const auto& m) { return m.id == panel.selected_backend; });
+            return it != panel.models.end() && !it->verified &&
+                   (!install_confirm || (consent_snapshot == *it && consent_page == consent_rendered_page &&
+                                         consent_page + 1 == consent_pages()));
+        }
+        if (c == Control::ModelPrev) return install_confirm ? consent_page > 0 : model_page > 0;
+        if (c == Control::ModelNext) return install_confirm ?
+            consent_page == consent_rendered_page && consent_page + 1 < consent_pages() :
+                                                      (model_page + 1) * 6 < panel.models.size();
         return true;
     }
     int hit(float x, float y) const {
-        for (size_t i = 0; i < buttons.size(); ++i)
+        for (size_t i = 0; i < buttons.size(); ++i) {
+            if (buttons[i].id == Control::ModelRow && model_page * 6 + (i - 23) >= panel.models.size()) continue;
             if (visible(buttons[i].id) && enabled(buttons[i].id) && buttons[i].r.contains(x, y)) return int(i);
+        }
         return -1;
     }
     void reset() {
@@ -285,13 +351,18 @@ struct PanelSurface::Impl {
             dirty = true;
         }
         if (p.transcript != panel.transcript || lines.empty()) {
-            lines = wrap(p.transcript.empty() ? "Your words will appear here.\nReview them, then choose Insert." : p.transcript, 32, 904);
+            lines = wrap(p.transcript.empty() ? "Your words will appear here.\nReview them, then choose Type." : p.transcript, 32, 904);
             page = 0; dirty = true;
         }
         if (p.status != panel.status || p.enabled != panel.enabled || p.recording != panel.recording ||
-            p.quick_open != panel.quick_open || p.quick_selected != panel.quick_selected || p.quick_inputs != panel.quick_inputs)
+            p.quick_open != panel.quick_open || p.quick_selected != panel.quick_selected || p.quick_inputs != panel.quick_inputs ||
+            p.models != panel.models || p.selected_backend != panel.selected_backend ||
+            p.model_note != panel.model_note || p.model_busy != panel.model_busy)
             dirty = true;
-        if (p.quick_open != panel.quick_open) reset();
+        if (p.quick_open != panel.quick_open || p.models != panel.models ||
+            p.selected_backend != panel.selected_backend || p.model_busy != panel.model_busy) {
+            reset(); install_confirm = false; consent_snapshot.reset();
+        }
         panel = p;
         if (panel.quick_open && tab != Tab::Review) { tab = Tab::Review; dirty = true; }
         int progress = 0;
@@ -320,7 +391,7 @@ struct PanelSurface::Impl {
         if (status.size() > 1) text("[...]", 864, 109, 23, muted, 968);
         if (tab == Tab::Review && panel.quick_open) {
             rounded({32, 212, 936, 324}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
-            text("QUICK CHAT    Y: NEXT   SUBMIT: SEND   CANCEL: CLOSE", 48, 243, 22, cyan, 952);
+            text("QUICK PHRASES    Y: NEXT   TYPE + ENTER: CHOICE + ENTER   CANCEL: CLOSE", 48, 243, 21, cyan, 952);
             for (size_t i = 0; i < panel.quick_inputs.size() && i < 6; ++i) {
                 const Rect row{48, 254 + int(i) * 45, 904, 40};
                 const bool selected = i == panel.quick_selected;
@@ -334,23 +405,45 @@ struct PanelSurface::Impl {
                 text(lines[page * lines_per_page + i], 48, 246 + int(i) * 40, 32,
                      panel.transcript.empty() ? muted : ink, 952);
             text("PAGE " + std::to_string(page + 1) + " / " + std::to_string(page_count()), 416, 436, 23, muted, 790);
-            if (!binding_note.empty()) text(binding_note, 32, 203, 20, muted, 968);
+            text(binding_note.empty() ? "Type adds a space; Type + Enter explicitly submits." : binding_note,
+                 32, 203, 20, muted, 968);
+        } else if (tab == Tab::Models) {
+            text("Models: select to restart. Install always needs explicit confirmation.", 32, 202, 19, muted, 968);
+            const auto it = std::find_if(panel.models.begin(), panel.models.end(), [&](const auto& m) { return m.id == panel.selected_backend; });
+            if (it != panel.models.end()) {
+                if (install_confirm && consent_snapshot == *it) {
+                    text("Review every page before Confirm Install. Settings cancels.", 32, 225, 19, pink, 968);
+                    // Only a painted page can advance review or authorize the
+                    // install: multiple pointer events between draws cannot skip it.
+                    consent_rendered_page = consent_page;
+                    const auto rows = visible_consent_lines();
+                    for (size_t i = 0; i < rows.size(); ++i)
+                        text(rows[i], 48, 271 + int(i) * 34, 19, ink, 950);
+                    text("METADATA PAGE " + std::to_string(consent_page + 1) + " / " + std::to_string(consent_pages()),
+                         32, 505, 19, cyan, 968);
+                } else {
+                    text("Select Install to review full source, size and license before download.", 32, 225, 18, cyan, 968);
+                }
+            } else text("No model selected.", 32, 225, 18, pink, 968);
         } else {
-            text("Auto insert needs stable X focus; debug logs may contain speech.", 32, 204, 18, pink, 968);
-            text(placement_note.empty() ? "No automatic Enter; changing debug restarts the worker." : placement_note,
-                 32, 225, 18, muted, 968);
+            text("Hold Quit: hold 0.9s then release. Lasers anytime: system-wide; may affect games.",
+                 32, 204, 18, pink, 968);
+            text(placement_note.empty() ? "Auto insert needs stable X focus; debug logs may contain speech." : placement_note,
+                 32, 225, 17, muted, 968);
         }
         rect({32, 550, 936, 1}, mix(card, cyan, .17f));
         for (size_t i = 0; i < buttons.size(); ++i) {
             const auto& b = buttons[i];
             if (!visible(b.id)) continue;
             bool on = enabled(b.id);
+            if (b.id == Control::ModelRow && model_page * 6 + (i - 23) >= panel.models.size()) continue;
             bool selected = (b.id == Control::Review && tab == Tab::Review) ||
                             (b.id == Control::Settings && tab == Tab::Settings) ||
                             (mounting(b.id) && *mounting(b.id) == mount) ||
                             (b.id == Control::LasersAnytime && lasers_anytime) ||
                             (b.id == Control::AdvancedDebug && advanced_debug) ||
                             (b.id == Control::AutoInsert && auto_insert) ||
+                            (b.id == Control::CloseMicWhenIdle && close_mic_when_idle) ||
                             (b.id == Control::LockLayout && layout_locked);
             const Color fill = !on ? mix(background, card, .40f) :
                                selected ? mix(card, cyan, .14f) : card;
@@ -366,22 +459,40 @@ struct PanelSurface::Impl {
                     PanelSurface::Clock::now() - press_time[cursor]).count()) / PanelSurface::quit_hold.count(), 0.f, 1.f);
                 rect({b.r.x + 7, b.r.y + b.r.h - 9, int((b.r.w - 14) * fraction), 3}, pink);
             }
-            const std::string label = b.id == Control::Record && panel.recording ? "Stop" :
+            const std::string label = b.id == Control::ModelRow ? [&]() {
+                    const auto& m = panel.models[model_page * 6 + i - 23];
+                    return (m.id == panel.selected_backend ? "[ACTIVE] " : "") + m.name + " - " +
+                           (m.id == panel.selected_backend && panel.model_busy ? "checking" : m.state);
+                }() : b.id == Control::ModelInstall && install_confirm ? "Confirm Install" :
+                b.id == Control::Record && panel.recording ? "Stop" :
                 b.id == Control::Clock24h ? (clock_24h ? "Clock: 24 hour" : "Clock: 12 hour") :
                 b.id == Control::Date ? (date_format == DateFormat::Off ? "Date: Off" :
                     date_format == DateFormat::MonthDayYear ? "Date: MM/DD/YYYY" :
                     date_format == DateFormat::DayMonthYear ? "Date: DD/MM/YYYY" : "Date: YYYY-MM-DD") : b.label;
-            text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9, b.id == Control::Date ? 23 : 27,
+            text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9,
+                 b.id == Control::Date ? 23 : b.id == Control::CloseMicWhenIdle ? 22 :
+                 b.id == Control::Enter ? 20 : 27,
                  on ? ink : mix(background, muted, .48f), b.r.x + b.r.w - 8);
             if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
             if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug || b.id == Control::AutoInsert ||
-                b.id == Control::LockLayout) {
+                b.id == Control::LockLayout || b.id == Control::CloseMicWhenIdle) {
                 bool active = b.id == Control::LasersAnytime ? lasers_anytime :
                               b.id == Control::AutoInsert ? auto_insert :
-                              b.id == Control::LockLayout ? layout_locked : advanced_debug;
+                              b.id == Control::LockLayout ? layout_locked :
+                              b.id == Control::CloseMicWhenIdle ? close_mic_when_idle : advanced_debug;
                 text(active ? "ON" : "OFF", b.r.x + b.r.w - 66, b.r.y + b.r.h / 2 + 9, 22,
                      active ? cyan : muted, b.r.x + b.r.w - 12);
             }
+        }
+        if (tab == Tab::Settings)
+            text("OFF: discard idle audio; ON: spike / start latency.", 390, 565, 16, muted, 887);
+        if (tab == Tab::Models && !panel.model_note.empty()) {
+            // The install/navigation controls occupy y=530..566; the status
+            // belongs BELOW the shared footer (574..642), not under buttons.
+            auto rows = wrap(panel.model_note, 15, 904);
+            for (size_t i = 0; i < rows.size() && i < 2; ++i)
+                text(rows[i], 32, 658 + int(i) * 18, 15, pink, 968);
+            if (rows.size() > 2) text("[note shortened]", 805, 677, 13, pink, 968);
         }
         // Screenshot-inspired grab underline and outside corner bracket. No
         // opaque toolbar backing; broad hit targets surround the slender strokes.
@@ -411,6 +522,9 @@ PanelSurface::~PanelSurface() = default;
 bool PanelSurface::render(const Panel& p) { return impl_->render(p); }
 const std::vector<unsigned char>& PanelSurface::pixels() const { return impl_->pixels; }
 bool PanelSurface::available(UiAction a) const { return impl_->available(a); }
+std::vector<std::string> PanelSurface::visible_model_review_lines() const {
+    return impl_->visible_consent_lines();
+}
 bool PanelSurface::dragging(unsigned cursor) const {
     return cursor < impl_->pressed.size() && int(cursor) == impl_->drag_cursor;
 }
@@ -446,13 +560,46 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
     else if (c == Control::LasersAnytime) result.lasers_anytime = !impl_->lasers_anytime;
     else if (c == Control::AdvancedDebug) result.advanced_debug = !impl_->advanced_debug;
     else if (c == Control::AutoInsert) result.auto_insert = !impl_->auto_insert;
+    else if (c == Control::CloseMicWhenIdle) result.close_mic_when_idle = !impl_->close_mic_when_idle;
     else if (c == Control::LockLayout) result.lock_layout = !impl_->layout_locked;
     else if (c == Control::Clock24h) result.clock_24h = !impl_->clock_24h;
     else if (c == Control::Date) result.date_format = static_cast<DateFormat>((static_cast<int>(impl_->date_format) + 1) % 4);
     else if (c == Control::Bindings) { result.open_bindings = true; impl_->reset(); }
+    else if (c == Control::Models) {
+        impl_->tab = Tab::Models; impl_->model_page = 0;
+        impl_->install_confirm = false; impl_->consent_snapshot.reset(); impl_->reset(); impl_->dirty = true;
+    }
+    else if (c == Control::ModelRow) {
+        const auto& model = impl_->panel.models[impl_->model_page * 6 + index - 23];
+        result.model_action = ModelAction{model.id, false, {}};
+        impl_->install_confirm = false; impl_->consent_snapshot.reset(); impl_->reset(); impl_->dirty = true;
+    }
+    else if (c == Control::ModelInstall) {
+        auto it = std::find_if(impl_->panel.models.begin(), impl_->panel.models.end(), [&](const auto& m) {
+            return m.id == impl_->panel.selected_backend;
+        });
+        if (it != impl_->panel.models.end() && !it->verified && !impl_->panel.model_busy &&
+            it->manifest_sha256.size() == 64) {
+            if (impl_->install_confirm && impl_->consent_snapshot == *it)
+                result.model_action = ModelAction{it->id, true, impl_->consent_snapshot->manifest_sha256};
+            else if (!impl_->install_confirm) impl_->prepare_consent(*it);
+        }
+        if (result.model_action) { impl_->install_confirm = false; impl_->consent_snapshot.reset(); }
+        impl_->reset(); impl_->dirty = true;
+    }
+    else if (c == Control::ModelPrev) {
+        if (impl_->install_confirm) --impl_->consent_page;
+        else --impl_->model_page;
+        impl_->reset(); impl_->dirty = true;
+    }
+    else if (c == Control::ModelNext) {
+        if (impl_->install_confirm) ++impl_->consent_page;
+        else ++impl_->model_page;
+        impl_->reset(); impl_->dirty = true;
+    }
     else if (c == Control::Review || c == Control::Settings) {
         impl_->tab = c == Control::Review ? Tab::Review : Tab::Settings;
-        impl_->reset(); impl_->dirty = true;
+        impl_->install_confirm = false; impl_->consent_snapshot.reset(); impl_->reset(); impl_->dirty = true;
     }
     else if (c == Control::Prev) { --impl_->page; impl_->dirty = true; }
     else if (c == Control::Next) { ++impl_->page; impl_->dirty = true; }
@@ -492,6 +639,13 @@ void PanelSurface::set_advanced_debug(bool enabled) {
 void PanelSurface::set_auto_insert(bool enabled) {
     if (impl_->auto_insert != enabled) {
         impl_->auto_insert = enabled;
+        impl_->reset();
+        impl_->dirty = true;
+    }
+}
+void PanelSurface::set_close_mic_when_idle(bool enabled) {
+    if (impl_->close_mic_when_idle != enabled) {
+        impl_->close_mic_when_idle = enabled;
         impl_->reset();
         impl_->dirty = true;
     }

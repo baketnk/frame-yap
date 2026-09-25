@@ -6,6 +6,7 @@ second manifest/JSON/hash implementation. Installer execution is opt-in ONLY.
 """
 import argparse
 import hashlib
+import json
 import os
 import re
 import stat
@@ -38,6 +39,13 @@ def manifest_sha(manifest_dir, ident):
                 after.st_size, after.st_mtime_ns, after.st_ctime_ns):
             raise ValueError("backend manifest changed")
         return hashlib.sha256(raw).hexdigest()
+
+
+def install_error(code, message):
+    # stdout is the manager's bounded event channel; stderr is intentionally
+    # closed there. Never claim success or start an installer on these paths.
+    print(json.dumps({"ok": False, "code": code, "message": message}), flush=True)
+    return 2
 
 
 def main(argv=None):
@@ -87,15 +95,15 @@ def main(argv=None):
     # consent. The exec makes the installer the owned child (no hidden grandchild).
     if (not args.backend or not args.installer or not args.expected_manifest_sha256 or
             not _DIGEST.fullmatch(args.expected_manifest_sha256)):
-        parser.error("backend, installer and 64-character consent fingerprint required")
+        return install_error("usage", "backend, installer and consent fingerprint required")
     try:
         backends = load_backends(args.manifest_dir)
         if args.backend not in backends or manifest_sha(args.manifest_dir, args.backend) != args.expected_manifest_sha256:
-            parser.error("selected backend manifest changed since consent")
+            return install_error("manifest_mismatch", "selected backend manifest changed since consent")
     except (OSError, ValueError) as error:
-        parser.error(f"selected backend manifest unavailable: {type(error).__name__}")
+        return install_error("operation_failed", f"selected backend manifest unavailable: {type(error).__name__}")
     if not args.installer.is_file() or args.installer.is_symlink():
-        parser.error("installer missing or unsafe")
+        return install_error("operation_failed", "installer missing or unsafe")
     dest = args.model_store / args.backend
     os.execv("/bin/sh", ["sh", str(args.installer), "--install-model", "--backend", args.backend,
                           "--model-dir", str(dest), "--expected-manifest-sha256",
