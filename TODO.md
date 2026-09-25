@@ -50,11 +50,14 @@ accepted; local code/tests cannot establish a fixed delivery regression.
 
 ## A. First release (v0.1) blockers
 
-Remaining release gates (2026-09-25): D4 is implemented; next a
-fresh clean install on Frame (install → `--install-model` → `--install-runtime`) that also checks the missing-runtime panel message
-(H), then tag `v0.1.<timestamp>` and update the README install section.
+**v0.1.202609251524 released (2026-09-25).** Built on the Frame with
+`scripts/build-release.sh`, published on GitHub, and installed fresh on the
+Frame by the owner via `curl | sh` (install → model → pip runtime), followed
+by successful live voice typing. The README is now user-facing; technical
+detail lives in `docs/development.md`. Still unchecked: the exact
+missing-runtime panel message and the battery readouts on Frame.
 
-- [x] **A8. UI polish batch (local; deploy pending).** Removed the fixed
+- [x] **A8. UI polish batch (shipped in v0.1.202609251524).** Removed the fixed
   "Type adds a space" hint, grew the review card to six lines to close the empty
   band, added L/HMD/R battery readouts and a Buttons ready/paused dashboard chip,
   and made Type with nothing to review send Enter. Which batteries Frame reports
@@ -213,6 +216,6 @@ this app is future design and out of scope for v0.1.
 
 ## Open questions
 
-The clean-account Frame install (including D4's ARM64 pip run and the
-missing-runtime message) is the remaining unresolved gate; checked source tasks
-do not imply it.
+The fresh Frame install passed (2026-09-25). Open follow-ups: the
+missing-runtime panel message, which batteries Frame reports, browser text
+fields (G1), and whether the installer's y/n defaults suit first-time users.
