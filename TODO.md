@@ -22,8 +22,8 @@ engine. C2's two-click model consent, SHA-bound installer handoff, and D1/D2's
 source/attended installer paths still need an audited native archive and an
 installed clean-account/Frame exercise. A4 (exact artifact ABI/license closure),
 D3 (publication and clean-account acceptance), P1 (real-target delivery), G1
-(browser), and H (live headset acceptance) remain open. No new build is claimed
-deployed to Frame; local code/tests cannot establish a fixed delivery regression.
+(browser), and H (live headset acceptance) remain open. The 0.1.202609250333 build is installed on Frame but not launched or
+accepted; local code/tests cannot establish a fixed delivery regression.
 
 ## Priority regression (reported during implementation)
 
@@ -38,6 +38,13 @@ deployed to Frame; local code/tests cannot establish a fixed delivery regression
   focus-guarded 24-codepoint/150 ms delivery queue is implemented with offline
   regressions, including full-length Unicode and all-space batches. Clipboard
   remains untouched. Real-target confirmation is still required after deployment.
+  Device update (2026-09-24): version 0.1.202609250333 was installed on Frame
+  (version and binary hash checked; not launched; runtime paths preserved; config
+  migration backed up); the deployment peer reported 29/29 native tests. Synthetic
+  repeated text and a full 4,096-byte payload arrived exactly. A later mismatch
+  looks consistent with receiver keymap caching, not Unicode trimming or space
+  substitution, but that is unconfirmed. P1 stays open until real-app delivery is
+  verified; this is not headset acceptance.
 
 ## A. First release (v0.1) blockers
 
