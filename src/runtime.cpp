@@ -1,6 +1,9 @@
 #include "runtime.hpp"
+#include "cli.hpp"
 #include "audio.hpp"
-#include "core.hpp"
+#include "controller.hpp"
+#include "backend_manager.hpp"
+#include "config.hpp"
 #include "overlay.hpp"
 #include "text_input.hpp"
 #include "worker.hpp"
@@ -8,16 +11,12 @@
 #include "focus_guard.hpp"
 #include <algorithm>
 #include <chrono>
-#include <csignal>
 #include <cstdlib>
 #include <filesystem>
-#include <fcntl.h>
-#include <iostream>
+#include <csignal>
+#include <memory>
 #include <stdexcept>
-#include <sys/file.h>
-#include <sys/stat.h>
 #include <thread>
-#include <unistd.h>
 
 namespace frameyap {
 namespace {
@@ -31,240 +30,181 @@ public:
 private:
     TextInput input_;
 };
-std::string state_label(State state) {
-    switch (state) {
-    case State::Warming: return "Warming - on-device Redux CPU";
-    case State::Ready: return "Ready - hold X or click Record";
-    case State::Recording: return "RECORDING";
-    case State::Transcribing: return "Transcribing - on device";
-    case State::Review: return "Review - Insert approves CURRENT focus";
-    case State::Queued: return "Input queued - not a delivery receipt";
-    case State::Error: return "Unavailable - Record to retry";
+class NativeAudio final : public ControllerAudio {
+public:
+    bool open() const override { return audio_.open(); }
+    void prepare() override { audio_.prepare(); }
+    void start() override { audio_.start(); }
+    bool poll() override { return audio_.poll(); }
+    std::vector<float> finish() override { return audio_.finish(); }
+    void cancel() override { audio_.cancel(); }
+    void close() override { audio_.close(); }
+    int seconds() const override { return audio_.seconds(); }
+private:
+    Audio audio_;
+};
+class NativeWorker final : public ControllerWorker {
+public:
+    explicit NativeWorker(const Options& options) : options_(options) {}
+    void configure(std::string backend, std::string model, std::string manifest, std::string root) {
+        backend_ = std::move(backend); model_ = std::move(model);
+        manifest_ = std::move(manifest); root_ = std::move(root);
     }
-    return {};
-}
-}
+    void start(bool advanced_debug) override {
+        const std::string script = backend_.empty() ? options_.worker : root_ + "/python/frameyap/backend_worker.py";
+        worker_.start(options_.python, script, backend_.empty() ? options_.model : model_, options_.threads,
+                      advanced_debug, backend_, manifest_, root_);
+    }
+    bool ready() const override { return worker_.ready(); }
+    void submit(uint64_t id, const std::vector<float>& pcm) override { worker_.submit(id, pcm); }
+    std::optional<WorkerReply> poll() override { return worker_.poll(); }
+    void stop() override { worker_.stop(); }
+private:
+    const Options& options_;
+    Worker worker_;
+    std::string backend_, model_, manifest_, root_;
+};
+class NativeFocus final : public ControllerFocus {
+public:
+    bool arm() override { return guard_.arm(); }
+    bool valid() override { return guard_.valid(); }
+private:
+    FocusGuard guard_;
+};
+} // namespace
 int run(const Options& options) {
     InstanceLock lock;
+    // Authorized sends retain the IME between per-action leases. Release it on
+    // every exit path, after any active delivery stack has unwound; never between
+    // text and its explicitly requested Enter. This is not a delivery receipt.
+    struct ReleaseInput {
+        ~ReleaseInput() { try { TextInput::release_idle(); } catch (...) {} }
+    } release_input;
     interrupted = 0;
     auto old_int = std::signal(SIGINT, signal_stop);
     auto old_term = std::signal(SIGTERM, signal_stop);
     struct Restore { decltype(old_int) a, b; ~Restore() { std::signal(SIGINT, a); std::signal(SIGTERM, b); } } restore{old_int, old_term};
     Overlay overlay(options.assets, options.font, options.mount);
-    Worker worker;
-    Audio audio;
-    Session session;
-    std::string detail;
-    std::string status_note;
-    bool quit = false;
-    bool quick_open = false;
-    size_t quick_selected = 0;
-    bool advanced_debug = overlay.advanced_debug();
-    bool auto_insert = overlay.auto_insert();
-    std::unique_ptr<FocusGuard> armed_focus;
+    NativeWorker worker(options);
+    NativeAudio audio;
     const DeliveryFactory acquire = [&]() -> std::unique_ptr<DeliveryLease> {
         auto input = std::make_unique<NativeDeliveryLease>(options.socket);
         if (interrupted) throw std::runtime_error("Input cancelled before delivery");
         return input;
     };
-    auto delivery_detail = [&](DeliveryResult result, bool submit) {
-        switch (result) {
-        case DeliveryResult::Ignored: break;
-        case DeliveryResult::TextQueued:
-            detail = "Text and trailing space queued to current focus. Enter remains explicit.";
-            status_note = "Text queued - Enter not sent"; break;
-        case DeliveryResult::EnterQueued:
-            detail = submit ? "Explicit Enter queued to current focus; not a delivery receipt."
-                            : "Input queued to current focus; not a delivery receipt.";
-            status_note = "Enter queued - check destination"; break;
-        case DeliveryResult::TextUncertain:
-            detail = "Text delivery uncertain; Enter not sent. Not retried; check destination.";
-            status_note = "Text uncertain - Enter not sent"; break;
-        case DeliveryResult::EnterUncertain:
-            detail = "Enter delivery uncertain; not retried. Check destination.";
-            status_note = "Enter uncertain - check destination"; break;
-        case DeliveryResult::TextQueuedEnterUnavailable:
-            detail = "Text queued; Enter unavailable and not sent. Check destination.";
-            status_note = "Text queued - Enter unavailable"; break;
-        }
-    };
-    auto warm = [&] {
-        status_note.clear(); quick_open = false;
-        audio.close(); worker.stop(); session = Session{}; armed_focus.reset();
-        worker.start(options.python, options.worker, options.model, options.threads, advanced_debug);
-        detail = "Loading local model; microphone closed. Record again when Ready.";
-    };
-    auto stop_record = [&] {
-        if (session.state() != State::Recording) return;
-        auto pcm = audio.finish();
-        if (session.finish(pcm.size())) {
-            worker.submit(session.id(), pcm);
-            detail = armed_focus ? "Release complete; checking stable focus before auto insert." :
-                                   "Release complete. Review before inserting.";
-        } else { armed_focus.reset(); detail = "Short tap discarded (minimum 200ms)."; }
-        std::fill(pcm.begin(), pcm.end(), 0.0f);
-    };
-    auto start_record = [&] {
-        if (session.state() == State::Review || session.state() == State::Transcribing || session.state() == State::Warming) return;
-        if (!worker.ready()) { warm(); return; }
-        if (!audio.open()) audio.prepare(); // recovery only; normal PTT never opens the device
-        if (session.state() == State::Error) session.cancel();
-        if (!session.record()) return;
-        status_note.clear();
-        armed_focus.reset();
-        if (auto_insert) {
-            auto candidate = std::make_unique<FocusGuard>();
-            if (candidate->arm()) armed_focus = std::move(candidate);
-        }
-        audio.start();
-        detail = auto_insert && !armed_focus ? "Focus unverified; recording will require manual Insert." :
-                 "Release to finish. Cancel discards. Maximum 20 seconds.";
-    };
-    try { warm(); }
-    catch (const std::exception& e) { session.fail(); detail = e.what(); }
-    while (!quit && !interrupted) {
-        if (armed_focus && !armed_focus->valid()) {
-            armed_focus.reset();
-            detail = "Focus changed or became uncertain; transcript will require manual Insert.";
-        }
-        try {
-            if (auto reply = worker.poll()) {
-                if (reply->id == session.id() && session.state() == State::Transcribing) {
-                    if (!reply->error.empty()) {
-                        // E is a request-local error. The child still owns its
-                        // loaded model and can accept the next utterance.
-                        session.fail(); detail = reply->error + "; model ready. Record to retry.";
-                        // Worker::poll allows only fixed diagnostic labels here,
-                        // never exception messages, audio, paths or recognized text.
-                        std::cerr << "FrameYap worker: " << reply->error << '\n';
-                    } else {
-                        session.reply(reply->id, reply->text);
-                        detail = session.text().empty() ? "No speech recognized; try again." :
-                                 "Focus your destination, then Insert. Cancel discards.";
-                        if (session.state() == State::Review && auto_insert && armed_focus && armed_focus->valid()) {
-                            // The exclusive IME lease can take time to acquire.
-                            // Recheck *after* acquisition and before consuming the review.
-                            const DeliveryFactory guarded = [&]() -> std::unique_ptr<DeliveryLease> {
-                                auto lease = acquire();
-                                if (!armed_focus || !armed_focus->valid())
-                                    throw std::runtime_error("Focus changed during input authorization");
-                                return lease;
-                            };
-                            try {
-                                const auto outcome = deliver_insert(session, guarded);
-                                delivery_detail(outcome, false);
-                                if (outcome == DeliveryResult::TextQueued)
-                                    detail = "Auto insert queued text + space to verified focus; never Enter. Not a delivery receipt.";
-                            } catch (const std::exception&) {
-                                detail = "Auto insert blocked; text kept for manual review. Check focus and Insert.";
-                            }
-                        }
-                        armed_focus.reset();
-                    }
-                }
+    PacedDelivery paced(acquire, std::chrono::steady_clock::now,
+                        [] { TextInput::release_idle(); }, [] { return !interrupted; });
+    Controller controller(audio, worker, acquire, [] { return std::make_unique<NativeFocus>(); },
+                          overlay.quick_inputs(), overlay.auto_insert(), overlay.advanced_debug(),
+                          overlay.close_mic_when_idle(), &paced);
+    namespace fs = std::filesystem;
+    const auto root = asset_root(options.assets);
+    const auto manifest = options.manifest_dir.empty() ? root / "assets/backends" : fs::path(options.manifest_dir);
+    const auto service = root / "scripts/backend-service.py";
+    const bool generic = (options.worker.empty() || is_managed_worker(options.assets, options.worker)) &&
+                         fs::is_regular_file(root / "python/frameyap/backend_worker.py") &&
+                         fs::is_regular_file(service) && fs::is_directory(manifest);
+    const char* data = std::getenv("XDG_DATA_HOME");
+    const char* home = std::getenv("HOME");
+    const fs::path store = !options.model_store.empty() ? fs::path(options.model_store) :
+        data && fs::path(data).is_absolute() ? fs::path(data) / "frameyap/models" :
+        home && fs::path(home).is_absolute() ? fs::path(home) / ".local/share/frameyap/models" : root / "models";
+    const auto installer = fs::is_regular_file(root / "bin/install.sh") ? root / "bin/install.sh" : root / "install.sh";
+    std::unique_ptr<BackendManager> models;
+    std::string selected = options.backend.empty() ? load_config(default_config_path()).backend : options.backend;
+    size_t revision = 0;
+    std::string selection_note;
+    if (generic) {
+        models = std::make_unique<BackendManager>("python3", service.string(), manifest.string(),
+                    store.string(), fs::is_regular_file(installer) ? installer.string() : "", options.model);
+        models->refresh();
+        controller.backend_changed(false, "Checking installed models offline. Recording unavailable until verified.");
+    } else controller.initialize();
+    bool previous_debug = overlay.advanced_debug();
+    while (!controller.quitting() && !interrupted) {
+        if (models) {
+            models->poll();
+            if (models->revision() != revision) {
+                revision = models->revision();
+                auto it = std::find_if(models->entries().begin(), models->entries().end(),
+                    [&](const auto& entry) { return entry.id == selected; });
+                const bool verified = models->checked() && it != models->entries().end() &&
+                                      it->state == "installed_verified" && !models->busy();
+                if (verified) worker.configure(selected, models->model_path(selected), manifest.string(), root.string());
+                controller.backend_changed(verified, it == models->entries().end() ?
+                    "Selected backend unavailable. Choose a listed model in Settings." :
+                    "Selected model not installed/verified. Select Install in Settings.");
             }
-            if (worker.ready()) session.ready();
-        } catch (const std::exception& e) {
-            armed_focus.reset(); audio.close(); worker.stop();
-            if (session.state() != State::Review && session.state() != State::Queued) session.fail();
-            detail = e.what(); // Preserve an already-correlated preview if the worker dies.
         }
-        try {
-            // Prepare after model warm-up, not on PTT. Keep draining/discarding
-            // idle samples so neither a device transition nor old speech reaches
-            // the next clip. A capture failure still requires an explicit retry.
-            if (session.state() == State::Ready && !audio.open() && worker.ready()) audio.prepare();
-            if (audio.open() && audio.poll()) stop_record();
-        } catch (const std::exception& e) {
-            // A microphone failure is not a model failure.
-            audio.close(); session.fail(); detail = e.what();
-            armed_focus.reset();
+        controller.tick();
+        // Drawing precedes polling actions: Enter is disabled until Ready is visible.
+        auto panel = controller.panel();
+        if (models) {
+            panel.selected_backend = selected;
+            panel.model_note = selection_note.empty() ? models->note() : selection_note;
+            panel.model_busy = models->busy();
+            for (const auto& entry : models->entries())
+                panel.models.push_back({entry.id, entry.name,
+                    entry.id == selected && controller.state() == State::Warming ? "loading" :
+                    entry.id == selected && controller.state() == State::Ready ? "ready" :
+                    entry.id == selected && controller.state() == State::Error && entry.state == "installed_verified" ? "failed" :
+                    entry.state, entry.source, entry.license, entry.license_text, entry.attribution, entry.bytes,
+                    entry.state == "installed_verified", entry.manifest_sha256});
         }
-        // Drawing precedes input polling: Enter is disabled until Ready is visible.
-        const auto status = session.state() == State::Error && worker.ready()
-            ? "Retry available - local model still loaded" : state_label(session.state());
-        if (quick_open && (session.state() == State::Recording || session.state() == State::Transcribing || session.state() == State::Warming || session.state() == State::Error)) quick_open = false;
-        Panel panel{quick_open ? "Quick chat" : status_note.empty() ? status : status_note, session.text(), detail,
-                    session.state() != State::Error && session.state() != State::Warming && session.state() != State::Transcribing,
-                    session.state() == State::Recording,
-                    session.state() != State::Warming && session.state() != State::Transcribing && session.state() != State::Review};
-        panel.quick_open = quick_open;
-        panel.quick_selected = quick_selected;
-        panel.quick_inputs = overlay.quick_inputs();
-        if (panel.recording) panel.status += " - " + std::to_string(audio.seconds()) + " / 20s";
         overlay.draw(panel);
         auto actions = overlay.poll();
-        if (auto_insert != overlay.auto_insert()) {
-            auto_insert = overlay.auto_insert();
-            armed_focus.reset(); // a toggle never retroactively authorizes a capture
-            detail = auto_insert ? "Auto insert enabled for future clips only when X focus stays verified. Never Enter." :
-                                   "Auto insert disabled; review before Insert.";
-        }
-        if (advanced_debug != overlay.advanced_debug()) {
-            advanced_debug = overlay.advanced_debug();
-            // Consent changes take effect before any more work or delivery. The
-            // Settings warning makes the worker restart/cancellation explicit.
-            try { warm(); }
-            catch (const std::exception& e) { session.fail(); detail = e.what(); }
-            std::erase_if(actions, [](UiAction action) { return action != UiAction::Quit; });
-        }
-        for (auto action : actions) {
+        const auto model_actions = overlay.take_model_actions();
+        // A model-row click revokes the current clip/review even when it targets
+        // the selected row, is rejected while busy, or carries stale consent.
+        // Do not dispatch the Cancel/EndRecord generated when the overlay resets
+        // held PTT: it could turn an unavailable backend back into Ready.
+        for (const auto& change : model_actions) {
+            if (!models) continue;
             try {
-                switch (action) {
-                case UiAction::Quit: quit = true; break;
-                case UiAction::Toggle:
-                case UiAction::Record:
-                    if (quick_open) break;
-                    if (session.state() == State::Recording) stop_record(); else start_record();
-                    break;
-                case UiAction::BeginRecord: if (!quick_open) start_record(); break;
-                case UiAction::EndRecord: stop_record(); break;
-                case UiAction::Cancel: {
-                    if (quick_open) { quick_open = false; break; }
-                    status_note.clear();
-                    auto state = session.state();
-                    armed_focus.reset(); audio.cancel(); session.cancel(); detail = "Discarded. Idle microphone samples are discarded.";
-                    if (state == State::Warming || state == State::Transcribing) {
-                        audio.close(); worker.stop(); session.fail(); detail = "Cancelled. Record to reload local worker.";
-                    } else if (state == State::Error && !worker.ready()) {
-                        audio.close();
-                        session.fail(); detail = "Worker unavailable. Record to reload local worker.";
+                if (change.install) {
+                    if (change.id == selected) {
+                        models->install(change.id, change.manifest_sha256);
+                        selection_note.clear();
                     }
-                    break;
+                } else if (change.id != selected && !models->busy()) {
+                    const auto& entries = models->entries();
+                    auto it = std::find_if(entries.begin(), entries.end(),
+                        [&](const auto& entry) { return entry.id == change.id; });
+                    if (it == entries.end()) continue;
+                    selected = change.id;
+                    selection_note = save_backend(default_config_path(), selected) ? "" :
+                        "Backend preference not saved; selection lasts only this session.";
                 }
-                case UiAction::Insert:
-                    if (!quick_open) delivery_detail(deliver_insert(session, acquire), false);
-                    break;
-                case UiAction::Enter:
-                    if (quick_open) {
-                        quick_open = false; // one authorization, no repeat on a stale input
-                        delivery_detail(deliver_quick(overlay.quick_inputs().at(quick_selected), acquire), true);
-                    } else delivery_detail(deliver_enter(session, acquire), true);
-                    break;
-                case UiAction::QuickChat:
-                    if (panel.enabled && !panel.recording && !overlay.quick_inputs().empty()) {
-                        if (quick_open) quick_selected = (quick_selected + 1) % overlay.quick_inputs().size();
-                        else { quick_selected = 0; quick_open = true; }
-                    }
-                    break;
-                }
-            } catch (const std::exception& e) {
-                // Input lease failures preserve preview. Capture failures close
-                // only the microphone; submit failures stop their own child if
-                // the IPC stream was partially written.
-                if (session.state() == State::Recording || session.state() == State::Transcribing) {
-                    audio.close(); session.fail();
-                    status_note.clear();
-                } else {
-                    status_note = "Input unavailable - check destination";
-                }
-                detail = e.what();
+            } catch (const std::exception&) {
+                selection_note = "Model metadata changed or installer unavailable. Recheck and confirm again.";
             }
-            if (quit || interrupted) break;
         }
+        if (models && !model_actions.empty()) {
+            const auto& entries = models->entries();
+            auto it = std::find_if(entries.begin(), entries.end(),
+                [&](const auto& entry) { return entry.id == selected; });
+            const bool verified = models->checked() && !models->busy() &&
+                                  it != entries.end() && it->state == "installed_verified";
+            if (verified) worker.configure(selected, it->model_path, manifest.string(), root.string());
+            controller.backend_changed(verified, verified ? "" :
+                "Selected model unavailable or being checked. Recording disabled until offline verification.");
+        }
+        bool debug_changed = overlay.advanced_debug() != previous_debug;
+        controller.settings(overlay.auto_insert(), overlay.advanced_debug(), overlay.close_mic_when_idle());
+        // Debug consent and model actions cancel work before any stale input.
+        if (debug_changed || !model_actions.empty()) {
+            for (auto action : actions) if (action == UiAction::Quit) controller.action(action);
+        } else {
+            for (auto action : actions) {
+                controller.action(action);
+                if (controller.quitting() || interrupted) break;
+            }
+        }
+        previous_debug = overlay.advanced_debug();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    audio.close(); session.cancel(); worker.stop();
+    controller.shutdown();
+    if (models) models->cancel();
     return 0;
 }
-}
+} // namespace frameyap

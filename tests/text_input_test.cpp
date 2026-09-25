@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include "paced_delivery.hpp"
 #include "text_input.hpp"
 #include "gamescope-input-method-server.h"
 #include <wayland-server.h>
@@ -69,6 +70,7 @@ struct Snapshot {
     int creates = 0, destroyed = 0;
     bool bad_seat = false;
     std::vector<Event> events;
+    std::vector<std::string> pending, delivered;
 };
 class FakeServer {
 public:
@@ -108,6 +110,13 @@ public:
     bool wait_destroyed(int count) {
         std::unique_lock lock(mutex_);
         return changed_.wait_for(lock, 1s, [&] { return state_.destroyed >= count; });
+    }
+    // Model asynchronous target delivery separately from IME request processing.
+    // A Wayland sync can see commit before the destination drains keys.
+    void drain_target() {
+        std::lock_guard lock(mutex_);
+        state_.delivered.insert(state_.delivered.end(), state_.pending.begin(), state_.pending.end());
+        state_.pending.clear();
     }
     static constexpr const char* socket = "frameyap-fake";
 private:
@@ -159,6 +168,7 @@ private:
         {
             std::lock_guard lock(server.mutex_);
             ++server.state_.destroyed;
+            server.state_.pending.clear(); // A teardown may invalidate undrained keys/keymap.
         }
         server.changed_.notify_all();
     }
@@ -166,6 +176,11 @@ private:
         auto& server = owner(r);
         std::lock_guard lock(server.mutex_);
         server.state_.events.push_back({"commit", "", serial});
+        if (server.state_.events.size() >= 2) {
+            const auto& previous = server.state_.events[server.state_.events.size() - 2];
+            if (previous.kind == "string") server.state_.pending.push_back(previous.text);
+            if (previous.kind == "action") server.state_.pending.push_back("<Enter>");
+        }
     }
     static void set_string(wl_client*, wl_resource* r, const char* text) {
         auto& server = owner(r);
@@ -185,16 +200,20 @@ void test_text() {
         TextInput input(server.socket);
         auto initial = server.snapshot();
         CHECK(initial.creates == 1 && !initial.bad_seat && initial.events.empty());
-        input.text("Hello 世界 😀\r\nnext\tline\xe2\x80\xa8 end");
+        input.text("Hello 世界 😀\r\nnext");
         auto state = server.snapshot();
         CHECK(state.events.size() == 2);
         CHECK(state.events[0].kind == "string");
-        CHECK(state.events[0].text == "Hello 世界 😀  next line  end");
+        CHECK(state.events[0].text == "Hello 世界 😀  next");
         CHECK(state.events[1].kind == "commit" && state.events[1].number == 42);
         // Authorization is consumed even when a duplicate delivery is attempted.
         throws([&] { input.enter(); });
         CHECK(server.snapshot().events.size() == 2);
     }
+    CHECK(server.snapshot().destroyed == 0); // sync != target delivery
+    server.drain_target();
+    CHECK((server.snapshot().delivered == std::vector<std::string>{"Hello 世界 😀  next"}));
+    TextInput::release_idle();
     CHECK(server.wait_destroyed(1));
     CHECK(server.snapshot().events.size() == 2);
 }
@@ -213,6 +232,10 @@ void test_enter() {
         throws([&] { input.text("duplicate"); });
         CHECK(server.snapshot().events.size() == 2);
     }
+    CHECK(server.snapshot().destroyed == 0);
+    server.drain_target();
+    CHECK((server.snapshot().delivered == std::vector<std::string>{"<Enter>"}));
+    TextInput::release_idle();
     CHECK(server.wait_destroyed(1));
     CHECK(server.snapshot().events.size() == 2);
 }
@@ -229,6 +252,7 @@ void test_invalid() {
         throws([&] { input.text("\xe2\x82"); });
         throws([&] { input.text("\xc2\x85"); });
         throws([&] { input.text(std::string(4097, 'a')); });
+        throws([&] { input.text(std::string(25, 'a')); }); // server keymap, not Wayland bytes
         throws([&] { input.text("\t\n"); });
         CHECK(server.snapshot().events.empty());
         input.text("submit; $(echo x)");
@@ -236,6 +260,7 @@ void test_invalid() {
         CHECK(events.size() == 2 && events[0].text == "submit; $(echo x)");
         CHECK(events[1].kind == "commit");
     }
+    TextInput::release_idle();
     CHECK(server.wait_destroyed(1));
 }
 
@@ -259,7 +284,131 @@ void test_review_insert() {
         CHECK(events[0].text == "send 世界");
         CHECK(events[1].kind == "commit" && events[1].number == 42);
     }
+    TextInput::release_idle();
     CHECK(server.wait_destroyed(1));
+}
+
+// A fake target queue intentionally decouples compositor commit from target
+// delivery. This regression catches an IME close/recreate between successive
+// sends; it does not claim that a real application's input was acknowledged.
+void test_repeated_full_payloads() {
+    FakeServer server;
+    struct Lease : DeliveryLease {
+        explicit Lease(const char* socket) : input(socket) {}
+        void text(const std::string& s) override { input.text(s); }
+        void enter() override { input.enter(); }
+        TextInput input;
+    };
+    auto now = std::chrono::steady_clock::time_point{};
+    PacedDelivery paced([&]() -> std::unique_ptr<DeliveryLease> {
+        return std::make_unique<Lease>(server.socket);
+    }, [&] { return now; });
+    auto send = [&](std::string payload, bool enter) {
+        paced.start(std::move(payload), enter, [] { return true; }, [] {});
+        int commits = 0;
+        while (paced.active()) {
+            auto before = server.snapshot().pending.size();
+            paced.tick();
+            auto after = server.snapshot().pending.size();
+            CHECK(after == before || after == before + 1);
+            if (after != before) {
+                ++commits;
+                now += 150ms;
+            } else now += 150ms;
+        }
+        return commits;
+    };
+    CHECK(send("first submission ", true) == 2);
+    CHECK(server.snapshot().creates == 1 && server.snapshot().destroyed == 0);
+    throws([&] { TextInput wrong("another-socket"); });
+    // Reproduce six retained-IME, 81-ASCII actions as protocol requests.
+    // This fake cannot emulate Gamescope's rotating keycode implementation.
+    for (int repeat = 0; repeat < 6; ++repeat)
+        CHECK(send(std::string(81, 'r'), false) == 4);
+    CHECK(server.snapshot().creates == 1 && server.snapshot().destroyed == 0);
+    auto repeated = server.snapshot().pending;
+    CHECK(repeated.size() == 26);
+    for (size_t i = 2; i < repeated.size(); i += 4)
+        CHECK(repeated[i] + repeated[i+1] + repeated[i+2] + repeated[i+3] == std::string(81, 'r'));
+    // A long UTF-8 literal stays intact while each protocol message uses a
+    // bounded number of codepoints, not the previous 4080-byte chunk size.
+    std::string bounded = "A";
+    for (int i = 0; i < 1363; ++i) bounded += "界";
+    bounded += "end!!!";
+    CHECK(bounded.size() == 4096);
+    auto count = send(bounded, false);
+    CHECK(count == 58); // ceil(1370 / 24)
+    auto pending = server.snapshot().pending;
+    CHECK(pending.size() == 26 + static_cast<size_t>(count));
+    CHECK(pending[0] == "first submission " && pending[1] == "<Enter>");
+    std::string joined;
+    for (size_t i = 26; i < pending.size(); ++i) {
+        CHECK(literal_text(pending[i]) == pending[i]);
+        size_t points = 0;
+        for (unsigned char ch : pending[i]) if ((ch & 0xc0) != 0x80) ++points;
+        CHECK(points <= 24);
+        joined += pending[i];
+    }
+    CHECK(joined == bounded);
+    server.drain_target();
+    CHECK(server.snapshot().delivered == pending);
+    TextInput::release_idle();
+    CHECK(server.wait_destroyed(1));
+    CHECK(server.snapshot().pending.empty());
+}
+
+void test_space_batches() {
+    FakeServer server;
+    struct Lease : DeliveryLease {
+        explicit Lease(const char* socket) : input(socket) {}
+        void text(const std::string& s) override { input.text(s); }
+        void enter() override { input.enter(); }
+        TextInput input;
+    };
+    auto now = std::chrono::steady_clock::time_point{};
+    PacedDelivery paced([&]() -> std::unique_ptr<DeliveryLease> {
+        return std::make_unique<Lease>(server.socket);
+    }, [&] { return now; });
+    for (const auto& literal : {std::string(24, ' ') + "tail", std::string(24, 'X') + std::string(24, ' ')}) {
+        const auto first = server.snapshot().pending.size();
+        paced.start(literal, false, [] { return true; }, [] {});
+        std::optional<PacedDelivery::Outcome> outcome;
+        while (paced.active()) { outcome = paced.tick(); now += 150ms; }
+        CHECK(outcome && outcome->result == DeliveryResult::TextQueued);
+        const auto pending = server.snapshot().pending;
+        std::string joined;
+        for (size_t i = first; i < pending.size(); ++i) joined += pending[i];
+        CHECK(joined == literal);
+    }
+    CHECK(literal_text(std::string(24, ' ')).empty()); // whole-ASR policy unchanged
+    server.drain_target();
+    TextInput::release_idle();
+    CHECK(server.wait_destroyed(1));
+}
+
+void test_discovery_does_not_hold_ime() {
+    FakeServer server;
+    {
+        TextInput input(server.socket);
+        CHECK(server.snapshot().creates == 1 && server.snapshot().events.empty());
+    }
+    CHECK(server.wait_destroyed(1)); // no input sent: allow other seat IMEs
+    TextInput::release_idle();
+}
+
+void test_release_not_ack() {
+    FakeServer server;
+    const auto before = std::chrono::steady_clock::now();
+    {
+        TextInput input(server.socket);
+        throws([&] { TextInput::release_idle(); }); // active lease is exclusive
+        input.text("undrained");
+    }
+    CHECK(server.snapshot().pending == std::vector<std::string>({"undrained"}));
+    TextInput::release_idle(); // immediate Quit still honors the remaining cooldown
+    CHECK(std::chrono::steady_clock::now() - before >= 100ms);
+    CHECK(server.wait_destroyed(1));
+    CHECK(server.snapshot().delivered.empty()); // fixture models possible loss
 }
 
 void test_unavailable() {
@@ -282,6 +431,8 @@ void test_stalled() {
 int main() {
     try {
         test_text(); test_enter(); test_invalid(); test_review_insert();
+        test_repeated_full_payloads(); test_space_batches();
+        test_discovery_does_not_hold_ime(); test_release_not_ack();
         test_unavailable(); test_stalled();
         std::cout << "native fake Wayland input checks passed\n";
     } catch (const std::exception& e) {

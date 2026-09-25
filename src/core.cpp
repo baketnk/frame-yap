@@ -64,14 +64,11 @@ std::unique_ptr<DeliveryLease> lease(const DeliveryFactory& acquire) {
     return result;
 }
 DeliveryResult send_review(Session& session, const DeliveryFactory& acquire, bool submit) {
-    // literal_text already validated the transcript at reply time. Do not
-    // truncate at the boundary: the suffix is also subject to the 4096-byte
-    // Gamescope text limit, including any existing trailing whitespace.
-    const bool needs_space = session.text().back() != ' ';
-    if (needs_space && session.text().size() >= 4096)
-        throw std::runtime_error("Cannot append space: transcript fills the 4096-byte input limit; discard and dictate a shorter clip");
+    // literal_text already validated the transcript at reply time. A suffix
+    // cannot fit beside a full 4096-byte transcript: prefer the entire literal
+    // with no trailing space over rejecting it or dropping transcript bytes.
     auto spaced = session.text();
-    if (needs_space) spaced += ' ';
+    if (spaced.back() != ' ' && spaced.size() < 4096) spaced += ' ';
     auto input = lease(acquire); // Failed acquisition keeps the review available.
     session.take_insert();      // Consume before any potentially ambiguous send.
     try { input->text(spaced); }

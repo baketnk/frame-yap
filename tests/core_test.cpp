@@ -146,14 +146,13 @@ void delivery_checks() {
     }
     {
         auto s = review(std::string(4096, 'a')); FakeDelivery fake;
-        try { (void)deliver_enter(s, fake.factory()); CHECK(false); }
-        catch (const std::runtime_error&) {}
-        CHECK(s.state() == State::Review && s.text().size() == 4096);
-        CHECK(fake.acquisitions == 0 && fake.events.empty());
+        CHECK(deliver_enter(s, fake.factory()) == DeliveryResult::EnterQueued);
+        CHECK(fake.events == std::vector<std::string>({"text:" + std::string(4096, 'a'), "enter"}));
+        CHECK(s.state() == State::Queued && fake.acquisitions == 2);
         auto with_existing_space = review(std::string(4095, 'a') + " ");
         CHECK(deliver_insert(with_existing_space, fake.factory()) == DeliveryResult::TextQueued);
-        CHECK(fake.events[0] == "text:" + std::string(4095, 'a') + " ");
-        CHECK(with_existing_space.state() == State::Queued && fake.acquisitions == 1);
+        CHECK(fake.events[2] == "text:" + std::string(4095, 'a') + " ");
+        CHECK(with_existing_space.state() == State::Queued && fake.acquisitions == 3);
     }
 }
 int main() {

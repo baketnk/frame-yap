@@ -42,8 +42,8 @@ enum class DeliveryResult {
     Ignored, TextQueued, EnterQueued, TextUncertain, EnterUncertain, TextQueuedEnterUnavailable
 };
 // Lease acquisition before consumption can throw while leaving review intact.
-// The suffix must fit inside the same 4096-byte validated text bound; overflow
-// throws before consumption rather than silently dropping transcript bytes.
+// A full 4096-byte transcript is sent intact without an additional space;
+// never truncate transcript bytes merely to make room for the suffix.
 DeliveryResult deliver_insert(Session& session, const DeliveryFactory& acquire);
 // Review: insert text plus a trailing space, then explicitly send Enter only
 // after successful text delivery. Ready/Queued: Enter alone.

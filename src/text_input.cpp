@@ -1,5 +1,6 @@
 #include "text_input.hpp"
 #include "core.hpp"
+#include "paced_delivery.hpp"
 #include "gamescope-input-method-client.h"
 #include <wayland-client.h>
 #include <chrono>
@@ -7,9 +8,11 @@
 #include <cerrno>
 #include <poll.h>
 #include <stdexcept>
+#include <thread>
 
 namespace frameyap {
 struct TextInput::Impl {
+    std::string socket;
     wl_display* display = nullptr;
     wl_registry* registry = nullptr;
     wl_seat* seat = nullptr;
@@ -17,7 +20,19 @@ struct TextInput::Impl {
     gamescope_input_method* ime = nullptr;
     uint32_t serial = 0;
     uint32_t seat_name = 0, manager_name = 0;
-    bool done = false, unavailable = false, used = false, ambiguous = false;
+    bool done = false, unavailable = false, ambiguous = false;
+    std::chrono::steady_clock::time_point retire_after{};
+    // The connection remains owned by retained() after an authorized send, not
+    // by a temporary delivery lease. Do not evict it on a compositor sync:
+    // Gamescope may still have keystrokes/keymap work queued for the target.
+    static std::shared_ptr<Impl>& retained() {
+        static std::shared_ptr<Impl> connection;
+        return connection;
+    }
+    static std::weak_ptr<Impl>& active() {
+        static std::weak_ptr<Impl> lease;
+        return lease;
+    }
     ~Impl() {
         // Local proxy destruction then socket close avoids a blocking flush on teardown.
         if (ime) wl_proxy_destroy(reinterpret_cast<wl_proxy*>(ime));
@@ -80,20 +95,43 @@ struct TextInput::Impl {
         wl_callback_destroy(callback);
         if (unavailable) throw std::runtime_error("Gamescope IME unavailable (Steam keyboard may own it)");
     }
-    void check_authorization() const {
+    void check_authorization(bool used) const {
         if (used || unavailable || !done) throw std::runtime_error("Input authorization is no longer valid");
     }
     void commit() {
-        check_authorization();
-        used = true;
+        // Also cover uncertain sends. Normal idle ticks already wait this long;
+        // shutdown needs the same bounded grace without sending anything else.
+        struct Cooldown {
+            Impl& self;
+            ~Cooldown() { self.retire_after = std::chrono::steady_clock::now() + PacedDelivery::gap; }
+        } cooldown{*this};
         gamescope_input_method_commit(ime, serial);
         // A roundtrip only acknowledges compositor processing, not target consumption.
         roundtrip();
     }
 };
-TextInput::TextInput(const std::string& socket) : impl_(std::make_unique<Impl>()) {
+TextInput::TextInput(const std::string& socket) {
     if (socket.empty()) throw std::runtime_error("Specify the Gamescope Wayland socket with --socket");
+    if (!Impl::active().expired()) throw std::runtime_error("Gamescope IME lease already active");
+    if (Impl::retained()) {
+        if (Impl::retained()->socket != socket)
+            throw std::runtime_error("Gamescope socket changed; release idle IME before retargeting");
+        impl_ = Impl::retained();
+        // A fresh compositor roundtrip observes unavailable/seat removal, not
+        // delivery to the destination application. Failed acquisition must not
+        // consume a review, nor automatically replay earlier uncertain input.
+        try { impl_->roundtrip(); }
+        catch (...) { Impl::retained().reset(); throw; }
+        if (!impl_->done || impl_->unavailable) {
+            Impl::retained().reset();
+            throw std::runtime_error("Gamescope IME no longer ready");
+        }
+        Impl::active() = impl_;
+        return;
+    }
+    impl_ = std::make_shared<Impl>();
     auto& p = *impl_;
+    p.socket = socket;
     p.display = wl_display_connect(socket.c_str());
     if (!p.display) throw std::runtime_error("Cannot connect to Gamescope socket; check --socket");
     p.registry = wl_display_get_registry(p.display);
@@ -109,17 +147,41 @@ TextInput::TextInput(const std::string& socket) : impl_(std::make_unique<Impl>()
     gamescope_input_method_add_listener(p.ime, &ime_listener, &p);
     p.roundtrip();
     if (!p.done) throw std::runtime_error("Gamescope IME not ready");
+    Impl::active() = impl_;
 }
-TextInput::~TextInput() = default;
+TextInput::~TextInput() {
+    if (Impl::active().lock() == impl_) Impl::active().reset();
+}
+void TextInput::release_idle() {
+    if (!Impl::active().expired()) throw std::runtime_error("Cannot release an active Gamescope IME lease");
+    if (Impl::retained()) std::this_thread::sleep_until(Impl::retained()->retire_after);
+    Impl::retained().reset();
+}
 void TextInput::text(const std::string& literal) {
     auto validated = literal_text(literal);
+    // A valid whole transcript can yield a batch containing only spaces. Keep
+    // those bytes; only whole ASR replies use the all-whitespace => empty policy.
+    if (validated.empty() && !literal.empty() && literal.find_first_not_of(' ') == std::string::npos)
+        validated = literal;
     if (validated.empty()) throw std::runtime_error("No text to insert");
-    impl_->check_authorization();
+    // Gamescope's temporary keymap has a finite rotating keycode table. A
+    // 4080-byte Wayland-valid payload can still corrupt its *front* before
+    // commit. The UI scheduler sends at most 24 Unicode codepoints per commit;
+    // reject accidental bypasses here, including the old synchronous path.
+    std::size_t codepoints = 0;
+    for (unsigned char byte : validated)
+        if ((byte & 0xc0) != 0x80) ++codepoints;
+    if (codepoints > 24) throw std::runtime_error("Input batch exceeds 24 codepoints");
+    impl_->check_authorization(used_);
+    used_ = true;
+    Impl::retained() = impl_; // Retain even if the roundtrip fails ambiguously.
     gamescope_input_method_set_string(impl_->ime, validated.c_str());
     impl_->commit();
 }
 void TextInput::enter() {
-    impl_->check_authorization();
+    impl_->check_authorization(used_);
+    used_ = true;
+    Impl::retained() = impl_;
     gamescope_input_method_set_action(impl_->ime, GAMESCOPE_INPUT_METHOD_ACTION_SUBMIT);
     impl_->commit();
 }
