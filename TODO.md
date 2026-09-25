@@ -131,7 +131,7 @@ fresh clean install on Frame (install → `--install-model` → `--install-runti
   explicit model installs use installed pinned manifests. Tested with local
   fixtures only, not a released archive or an installed Frame UI handoff.
 - [x] **D3. Publish a prebuilt ARM64 archive.** (M) `scripts/build-release.sh`
-  builds SDL3/OpenVR-pinned archives on Linux ARM64; v0.1.202609251506 is built
+  builds SDL3/OpenVR-pinned archives on Linux ARM64; v0.1.202609251524 is built
   on the Frame and published with its checksum and `install.sh`. The archive has
   no Kestrel/Torch/moondream/model; those are user-side downloads.
 - [x] **D4. Installer fetches the Python runtime with pip.** (M) Implemented

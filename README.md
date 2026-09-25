@@ -2,7 +2,7 @@
 
 Voice typing on Steam Frame, with recognition on the headset rather than a desktop or cloud server.
 Hold a controller button to record, review the transcript, then deliberately type it into the focused app.
-Standalone OpenVR overlay; no Steam store AppID or sudo. First release: v0.1.202609251506.
+Standalone OpenVR overlay; no Steam store AppID or sudo. First release: v0.1.202609251524.
 
 ## Requirements
 
@@ -18,7 +18,7 @@ On the Frame, open a terminal (desktop mode's Konsole, or SSH) and run:
 curl -fsSL https://github.com/baketnk/frame-yap/releases/latest/download/install.sh | sh
 ```
 
-You can download and read `install.sh` first; it is one self-contained file. The installer pins its own release (currently `v0.1.202609251506`) and verifies the archive's SHA-256. It asks three y/n questions: install FrameYap, download the Parakeet Redux speech model (about 180 MB, CC-BY-4.0), and pip-install the CPU Python runtime (moondream/Kestrel with CPU Torch; about 200 MB download, roughly 1–1.5 GB on disk). Everything goes under your home directory: no sudo, compiler or Steam store AppID. Afterwards, launch **FrameYap** from the desktop application menu.
+You can download and read `install.sh` first; it is one self-contained file. The installer pins its own release (currently `v0.1.202609251524`) and verifies the archive's SHA-256. It asks three y/n questions: install FrameYap, download the Parakeet Redux speech model (about 180 MB, CC-BY-4.0), and pip-install the CPU Python runtime (moondream/Kestrel with CPU Torch; about 200 MB download, roughly 1–1.5 GB on disk). Everything goes under your home directory: no sudo, compiler or Steam store AppID. Afterwards, launch **FrameYap** from the desktop application menu.
 
 The release archive contains FrameYap, SDL3 and the OpenVR client library only; Kestrel, Torch, moondream and the model weights are fetched on your machine from PyPI and Hugging Face. For automation, the same steps are `sh install.sh --yes`, `sh install.sh --install-model --backend redux --yes` and `sh install.sh --install-runtime --yes`; add `--print-plan --json` to preview any step. Maintainers build release archives on Linux ARM64 with `sh scripts/build-release.sh WORKDIR VERSION`. See [packaging](docs/packaging.md) and [install design](docs/install-design.md).
 
