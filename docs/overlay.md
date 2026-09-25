@@ -178,13 +178,24 @@ focus-out, root focus-property change (even if the same window returns), window
 destruction, held keyboard key, missing X display or any disagreement permanently
 disarms that clip. The transcript then remains for explicit review/Type.
 Native Wayland focus and child text-field focus cannot be safely inferred here;
-those cases fall back to review. No automatic Enter, speech commands or retry.
+those cases fall back to review. Manual Type now also requires a verifiable
+Xwayland target; it does not bypass an unavailable guard. No automatic Enter,
+speech commands or retry.
 The compositor can still change focus in the gap between the final check and
 global delivery, and IME commit is not an application receipt. This path has
 offline synthetic focus tests and a separate owned-target IME fixture; live
 speech-driven Auto insert, target coverage and headset acceptance remain
 unverified. The setting is preserved on upgrade
 and a failed preference write applies only to the current session.
+
+Delivery uses a responsive, tick-driven queue of at most 24 Unicode codepoints
+per commit, with at least 150 ms between commits and before explicit Enter.
+The full 4096-byte literal is preserved, including all-space batches. The same
+target is checked before every batch; input blocked before the first send keeps
+review, whereas partial/uncertain input is consumed and never retried. Cancel
+stops remaining text and Enter; it cannot undo bytes already queued. Record and
+new Type actions are disabled while pacing. The clipboard is never touched.
+This source-grounded Gamescope workaround still needs long-text live acceptance.
 
 `quick_inputs` is an editable list of 1–6 nonempty, printable ASCII strings,
 each at most 64 characters. Edit the JSON file and restart; there is no headset

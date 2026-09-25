@@ -12,9 +12,10 @@ implementation is present, **not** a shipped or headset-accepted release.
 ## Implemented locally; offline tested; installed/headset validation pending
 
 The current working tree includes the source changes for A3, A5–A7, B1–B4,
-C1–C3, D1–D2, E2–E3 and F1–F2. Offline checks passed 23/23 default,
-24/24 strict UI, and 28/28 on a private native ARM64 snapshot. Later review
-fixes require a fresh final native build before deployment.
+C1–C3, D1–D2, E2–E3 and F1–F2. Final offline checks passed 24/24 default,
+25/25 strict UI, and the fake Wayland input regression suite. An earlier private
+native ARM64 snapshot passed 28/28; the final source requires a fresh native
+build before deployment.
 These checkboxes close the *source tasks*, not their empirical acceptance gates.
 C1's second backend is a fake executable fixture, **not** a second shipped ASR
 engine. C2's two-click model consent, SHA-bound installer handoff, and D1/D2's
@@ -32,8 +33,11 @@ deployed to Frame; local code/tests cannot establish a fixed delivery regression
   literal transcript, and add repeated/long/Unicode delivery regression tests.
   Do not assume a larger buffer fixes it or retry uncertain delivery automatically.
   An old-code delivery fixture crashed the Gamescope session, **not** the OS;
-  this is not evidence of a fix. Real-target confirmation remains required after
-  a tested fix is deployed.
+  this is not evidence of a fix. Plain-ASCII prefix corruption was reproduced;
+  retained IME and immediate byte chunking did not fix it. A nonblocking,
+  focus-guarded 24-codepoint/150 ms delivery queue is implemented with offline
+  regressions, including full-length Unicode and all-space batches. Clipboard
+  remains untouched. Real-target confirmation is still required after deployment.
 
 ## A. First release (v0.1) blockers
 

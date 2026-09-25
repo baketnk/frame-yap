@@ -34,7 +34,7 @@ sh install.sh --mode binary --archive /path/to/frameyap-VERSION-linux-aarch64.ta
 | Overlay Type / Type + Enter | The same deliberate text / Enter actions. |
 | Overlay Hold Quit | Hold for 0.9 seconds, then release to quit (prevents accidental exit). |
 
-Controls are remappable in SteamVR. Grip gestures may be unavailable with the dashboard open; pointer controls are an alternative. At the 4096-byte transcript limit, Type preserves the full text without appending a space if none fits. No speech commands, automatic Enter or automatic submit. Review is the default; Settings → Auto insert is opt-in, normally text + space only under continuously observed Xwayland focus. Check the focused destination before Type or Type + Enter. Edit literal Quick phrases (`quick_inputs`) in `$XDG_CONFIG_HOME/frameyap/config.json`, then restart. See [overlay and settings](docs/overlay.md).
+Controls are remappable in SteamVR. Grip gestures may be unavailable with the dashboard open; pointer controls are an alternative. At the 4096-byte transcript limit, Type preserves the full text without appending a space if none fits. No speech commands, automatic Enter or automatic submit. Review is the default; Settings → Auto insert is opt-in, normally text + space only under continuously observed Xwayland focus. Type and Type + Enter now require a verified Xwayland target and use paced direct typing; Cancel stops remaining batches, never undoing prior input. The clipboard stays untouched. Check the destination before typing. Edit literal Quick phrases (`quick_inputs`) in `$XDG_CONFIG_HOME/frameyap/config.json`, then restart. See [overlay and settings](docs/overlay.md).
 
 ## Status / not yet validated
 

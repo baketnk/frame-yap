@@ -44,13 +44,19 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
   microphone device failure releases the stream for explicit retry. A cancelled
   in-flight request or broken worker protocol may require reloading. No
   cloud/desktop fallback.
-- Gamescope IME v2 generated bindings, per-action short-lived lease, unavailable
-  handling, UTF-8/control validation and explicit Type + Enter action.
-  Type ensures a trailing space without doubling an existing one. Type + Enter
-  first types pending review, releases the text lease, then acquires a fresh
-  lease for Enter. Failed/uncertain text never proceeds to Enter; failed
-  Enter acquisition never replays text. If a validated transcript fills the
-  4096-byte bound and lacks a trailing space, Type preserves all its bytes and
+- Gamescope IME v2 generated bindings and a tick-driven paced delivery queue:
+  at most 24 Unicode codepoints per commit, at least 150 ms between commits,
+  including separate actions and explicit Enter. This is a proposed workaround
+  for the finite temporary keymap, not a target-consumption acknowledgment. Clipboard is
+  untouched. The full literal is retained while pending; Cancel/Quit, focus loss
+  or model/debug changes discard unsent input without retry or Enter. Manual
+  Type captures a verified Xwayland target; Auto insert keeps its original guard.
+  The IME is retained only through the task and cooldown (shutdown can wait the
+  remaining <=150 ms). Pacing does not sleep in the UI loop, but an individual
+  Wayland roundtrip can still reach its bounded one-second timeout. Type adds
+  a trailing space if it fits, without doubling an existing one. If a validated
+  transcript fills the 4096-byte bound and lacks a trailing space, Type preserves
+  all its bytes and
   queues it **without** the usual space; it does not signal a separate error.
   Destination consumption and repeated-delivery behavior remain unaccepted.
 - User-local installer with checked binary-archive or explicitly provisioned

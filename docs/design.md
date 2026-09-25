@@ -194,11 +194,16 @@ Gamescope exposes focus-display/window root properties, but their encoding and
 relationship to seat focus need implementation-specific validation. Do not infer
 that X display `:0` is always the destination, or that an X focus observation
 identifies a native Wayland text field. For unobservable native Wayland focus,
-require explicit review/Type; do not advertise safe auto-targeting.
+keep the transcript in review; current paced manual Type also refuses an
+unverifiable target. Do not advertise native Wayland target support.
 
-If focus changes, keep the result in review. A fresh Type explicitly approves
-the current destination and creates a new delivery authorization. Recheck again
-at typing. This minimizes stale delivery but does **not** eliminate a race
+Before the first send, focus failure keeps the result in review. A fresh Type
+approves a currently verified Xwayland destination and creates a new delivery
+authorization. The paced queue rechecks that same target before each <=24-codepoint
+batch and explicit Enter, spacing commits by at least 150 ms. After a partial
+send, focus failure drops the remainder and Enter without replay; it cannot
+undo already queued input. The clipboard remains untouched. This minimizes stale
+delivery but does **not** eliminate a race
 between the final check and global input processing; do not claim otherwise.
 A Wayland roundtrip means compositor processing, not application consumption.
 Report `input queued`, never `message sent`.
