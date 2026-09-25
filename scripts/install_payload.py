@@ -23,6 +23,9 @@ from urllib.parse import quote
 import urllib.request
 
 KEY = "local.frameyap.overlay"
+# The pinned release this installer belongs to (set in the release commit that
+# is tagged vRELEASE_VERSION); empty in a development tree.
+RELEASE_VERSION = ""
 MARKER = "# FrameYap managed launcher v1\n"
 ARCHIVE_LIMIT = 12 * 1024**3
 MEMBER_LIMIT = 50000
@@ -960,6 +963,9 @@ def resolve_args(argv):
     if args.install_runtime and (args.version or args.without_model or args.autolaunch is not None or
                                  args.backend != "redux" or args.model_dir or args.expected_manifest_sha256):
         parser.error("--install-runtime is independent of release/model flags")
+    if not (args.rollback or args.uninstall or args.install_model or args.install_runtime or args.version) \
+            and RELEASE_VERSION and args.mode == "binary" and not args.archive:
+        args.version = RELEASE_VERSION  # this installer's own pinned release, not a moving tag
     if not (args.rollback or args.uninstall or args.install_model or args.install_runtime) and not args.version:
         parser.error("--version VERSION is required; no moving/latest release")
     if args.uninstall != args.unregistered:
@@ -1100,6 +1106,11 @@ def interactive_options():
 
     Returns one argv per step; each step is an ordinary flag-driven operation."""
     print("If you piped this script without reading it, you can press Ctrl+C now and read it first.")
+    if RELEASE_VERSION:
+        print(f"FrameYap installer for release v{RELEASE_VERSION} (github.com/baketnk/frame-yap).")
+        if not ask_yes_no(f"Download and install FrameYap v{RELEASE_VERSION} from GitHub (checksum verified)?"):
+            raise UsageError("download not approved; no installation started")
+        return optional_steps([["--mode", "binary", "--version", RELEASE_VERSION, "--yes"]])
     print("FrameYap installer: choose binary (verified archive) or source (local build).")
     mode = input("Mode [binary/source]: ").strip().lower()
     if mode not in ("binary", "source"):
@@ -1118,7 +1129,10 @@ def interactive_options():
     else:
         for flag in ("source", "openvr-root", "openvr-library", "openvr-license", "sdl-library", "sdl-license"):
             chosen += ["--" + flag, input(flag + " local path: ").strip()]
-    steps = [chosen]
+    return optional_steps([chosen])
+
+
+def optional_steps(steps):
     # Each download is described and separately approved; nothing is fetched on a default.
     if ask_yes_no("Download the Parakeet Redux speech model (about 180 MB, CC-BY-4.0) from Hugging Face?"):
         steps.append(["--install-model", "--backend", "redux", "--yes"])

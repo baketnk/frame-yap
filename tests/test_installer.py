@@ -800,12 +800,12 @@ class InstallTests(unittest.TestCase):
                         output.extend(os.read(master, 8192))
                     except OSError:
                         break
-                    if not wrote and b"Mode [binary/source]:" in output:
-                        os.write(master, b"not-a-mode\n")
+                    if not wrote and (b"Mode [binary/source]:" in output or b"[y/n]:" in output):
+                        os.write(master, b"not-a-mode\n" if b"Mode" in output else b"n\n")
                         wrote = True
                 self.assertEqual(child.wait(timeout=8), 2)
                 self.assertIn(b"read it first", output)
-                self.assertIn(b"choose binary or source", output)
+                self.assertTrue(b"choose binary or source" in output or b"download not approved" in output)
                 self.assertFalse((self.data / "frameyap").exists())
             finally:
                 if child.poll() is None:
@@ -816,7 +816,22 @@ class InstallTests(unittest.TestCase):
             if slave >= 0:
                 os.close(slave)
 
+    def test_release_installer_asks_only_yes_no_questions(self):
+        answers = iter(["y", "y", "y"])
+        with patch.object(installer, "RELEASE_VERSION", "0.1.202609251200"), \
+             patch("builtins.input", lambda prompt="": next(answers)), contextlib.redirect_stdout(io.StringIO()):
+            steps = installer.interactive_options()
+        self.assertEqual(steps, [["--mode", "binary", "--version", "0.1.202609251200", "--yes"],
+                                 ["--install-model", "--backend", "redux", "--yes"],
+                                 ["--install-runtime", "--yes"]])
+        with patch.object(installer, "RELEASE_VERSION", "0.1.202609251200"):
+            self.assertEqual(installer.resolve_args(["--yes"]).version, "0.1.202609251200")
+            self.assertIsNone(installer.resolve_args(["--install-runtime", "--yes"]).version)
+        with patch.object(installer, "RELEASE_VERSION", ""), self.assertRaises(installer.UsageError):
+            installer.resolve_args(["--yes"])
+
     def test_attended_steps_ask_for_model_and_runtime_separately(self):
+        self.enterContext(patch.object(installer, "RELEASE_VERSION", ""))
         answers = iter(["binary", "0.1.202609241530", "/tmp/a.tar.gz", "a" * 64, "maybe", "y", "n"])
         with patch("builtins.input", lambda prompt="": next(answers)), \
              contextlib.redirect_stdout(io.StringIO()) as shown:
@@ -854,7 +869,8 @@ class InstallTests(unittest.TestCase):
             slave = -1
             output = bytearray()
             try:
-                os.write(master, b"not-a-mode\n")
+                # A development tree asks for a mode; a release asks y/n first.
+                os.write(master, b"n\n" if installer.RELEASE_VERSION else b"not-a-mode\n")
                 while child.poll() is None:
                     ready, _, _ = select.select([master], [], [], 8)
                     self.assertTrue(ready, "installer did not return from terminal input")
@@ -863,8 +879,12 @@ class InstallTests(unittest.TestCase):
                     except OSError:
                         break
                 self.assertEqual(child.wait(timeout=8), 2)
-                self.assertIn(b"Mode [binary/source]:", output)
-                self.assertIn(b"choose binary or source", output)
+                if installer.RELEASE_VERSION:
+                    self.assertIn(b"[y/n]:", output)
+                    self.assertIn(b"download not approved", output)
+                else:
+                    self.assertIn(b"Mode [binary/source]:", output)
+                    self.assertIn(b"choose binary or source", output)
                 self.assertFalse((self.data / "frameyap").exists())
             finally:
                 if child.poll() is None:
