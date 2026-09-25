@@ -686,7 +686,7 @@ def install_model(args, root):
     if state["state"] != "installed_verified":
         fail(f"model did not verify: {state['reason']}")
     if not args.json:
-        print(f"Backend {backend.id} model verified at {dest}; license {backend.license_id}. Configure runtime/model paths explicitly for launch.")
+        print(f"Backend {backend.id} model verified at {dest}; license {backend.license_id}.")
 
 
 def runtime_step(args, name, command):
@@ -881,7 +881,8 @@ def do_install(args, root, launcher):
         select(root, "current", f"versions/{version}")
         print(f"FrameYap {version} installed. OpenVR registration is NOT automatic; see docs/packaging.md.")
         if json.loads((target / "release.json").read_text())["runtime"] == "external-authorized-python":
-            print("ASR runtime is NOT included. Run install.sh --install-runtime --yes to pip-install it, or supply one with FRAMEYAP_PYTHON/--python or paths.conf.")
+            print("The speech runtime (Python/moondream) is installed separately: the installer offers it next, "
+                  "or run install.sh --install-runtime --yes later.")
 
 
 def uninstall(root, launcher):
