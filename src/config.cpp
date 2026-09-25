@@ -196,12 +196,22 @@ Config load_config(const std::filesystem::path& path) {
         if (key == "font") {
             if (!value.is_string) throw std::runtime_error("Config font must be a path string");
             config.font = value.value;
+        } else if (key == "backend") {
+            if (!value.is_string || value.value.empty() || value.value.size() > 48 ||
+                value.value[0] < 'a' || value.value[0] > 'z' ||
+                !std::all_of(value.value.begin(), value.value.end(), [](unsigned char c) {
+                    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+                })) throw std::runtime_error("Config backend must be a manifest ID");
+            config.backend = value.value;
         } else if (key == "advanced_debug") {
             if (!value.is_bool) throw std::runtime_error("Config advanced_debug must be a boolean");
             config.advanced_debug = value.value == "true";
         } else if (key == "auto_insert") {
             if (!value.is_bool) throw std::runtime_error("Config auto_insert must be a boolean");
             config.auto_insert = value.value == "true";
+        } else if (key == "close_mic_when_idle") {
+            if (!value.is_bool) throw std::runtime_error("Config close_mic_when_idle must be a boolean");
+            config.close_mic_when_idle = value.value == "true";
         } else if (key == "lock_layout") {
             if (!value.is_bool) throw std::runtime_error("Config lock_layout must be a boolean");
             config.lock_layout = value.value == "true";
@@ -323,6 +333,9 @@ bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexce
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "auto_insert", enabled);
 }
+bool save_close_mic_when_idle(const std::filesystem::path& path, bool enabled) noexcept {
+    return save_bool_option(path, "close_mic_when_idle", enabled);
+}
 bool save_lock_layout(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "lock_layout", enabled);
 }
@@ -337,6 +350,13 @@ bool save_date_format(const std::filesystem::path& path, DateFormat format) noex
     case DateFormat::Iso: return save_option(path, "date_format", "iso", true);
     }
     return false;
+}
+bool save_backend(const std::filesystem::path& path, const std::string& id) noexcept {
+    if (id.empty() || id.size() > 48 || id[0] < 'a' || id[0] > 'z' ||
+        !std::all_of(id.begin(), id.end(), [](unsigned char c) {
+            return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
+        })) return false;
+    return save_option(path, "backend", id, true);
 }
 std::string resolve_font(const std::string& assets, const std::string& requested) {
     const auto bundled = std::filesystem::path(assets) / "fonts/Inconsolata-Regular.ttf";

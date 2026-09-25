@@ -3,6 +3,8 @@
   "input_priority": "normal",
   "advanced_debug": false,
   "auto_insert": false,
+  "close_mic_when_idle": false,
+  "backend": "redux",
   "lock_layout": false,
   "clock_24h": false,
   "date_format": "mdy",

@@ -40,9 +40,11 @@ int main(int argc, char** argv) {
     ::setenv("XDG_CONFIG_HOME", dir.c_str(), 1);
     assert(load_config(path).buttons.empty());
     assert((load_config(path).quick_inputs == std::vector<std::string>{"/new", "/questions", "/help"}));
+    assert(load_config(path).backend == "redux");
     assert(!load_config(path).experimental_input_priority);
     assert(!load_config(path).advanced_debug);
     assert(!load_config(path).auto_insert);
+    assert(!load_config(path).close_mic_when_idle);
     assert(!load_config(path).lock_layout);
     assert(!load_config(path).clock_24h);
     assert(load_config(path).date_format == DateFormat::MonthDayYear);
@@ -56,10 +58,14 @@ int main(int argc, char** argv) {
     assert(!example.experimental_input_priority);
     assert(!example.advanced_debug);
     assert(!example.auto_insert);
+    assert(!example.close_mic_when_idle);
     assert(!example.lock_layout);
     assert(!example.clock_24h && example.date_format == DateFormat::MonthDayYear);
     assert(example.wrist.y == .18f && example.wrist.z == .089f);
     std::filesystem::create_directories(path.parent_path());
+    assert(save_backend(path, "fixture_cpu"));
+    assert(load_config(path).backend == "fixture_cpu");
+    assert(!save_backend(path, "../escaped") && !save_backend(path, "UPPER"));
     assert(save_advanced_debug(path, true));
     assert(load_config(path).advanced_debug);
     assert(get(path).find("\"advanced_debug\":true") != std::string::npos);
@@ -69,6 +75,10 @@ int main(int argc, char** argv) {
     assert(load_config(path).auto_insert);
     assert(save_auto_insert(path, false));
     assert(!load_config(path).auto_insert);
+    assert(save_close_mic_when_idle(path, true));
+    assert(load_config(path).close_mic_when_idle);
+    assert(save_close_mic_when_idle(path, false));
+    assert(!load_config(path).close_mic_when_idle);
     assert(save_lock_layout(path, true));
     assert(load_config(path).lock_layout);
     assert(save_lock_layout(path, false));
@@ -95,6 +105,11 @@ int main(int argc, char** argv) {
     assert(!load_config(path).advanced_debug);
     auto before = get(path);
     assert(save_advanced_debug(path, false) && get(path) == before);
+    for (const auto* invalid : {R"({"backend":"../escape"})", R"({"backend":""})",
+                               R"({"backend":2})"}) {
+        put(path, invalid); fails([&] { load_config(path); });
+        assert(!save_backend(path, "redux"));
+    }
     put(path, R"({"advanced_debug":false, "font":"kept"})");
     assert(save_advanced_debug(path, true));
     assert(get(path) == R"({"advanced_debug":true, "font":"kept"})");
@@ -107,6 +122,7 @@ int main(int argc, char** argv) {
     std::filesystem::create_symlink(path, link);
     assert(!save_advanced_debug(link, false));
     assert(!save_auto_insert(link, true));
+    assert(!save_close_mic_when_idle(link, true));
     assert(!save_lock_layout(link, true));
     assert(get(path) == before);
     std::filesystem::remove(link);
@@ -128,6 +144,21 @@ int main(int argc, char** argv) {
     put(path, R"({"date_format":"off","font":"kept"})");
     assert(save_date_format(path, DateFormat::Iso));
     assert(get(path) == R"({"date_format":"iso","font":"kept"})");
+    for (const auto* invalid : {R"({"close_mic_when_idle":"true"})", R"({"close_mic_when_idle":1})",
+                               R"({"close_mic_when_idle":null})", R"({"close_mic_when_idle":[]})"}) {
+        put(path, invalid);
+        fails([&] { load_config(path); });
+        assert(!save_close_mic_when_idle(path, true));
+        assert(get(path) == invalid);
+    }
+    put(path, R"({"close_mic_when_idle":false,"font":"kept"})");
+    assert(save_close_mic_when_idle(path, true));
+    assert(load_config(path).close_mic_when_idle);
+    assert(get(path) == R"({"close_mic_when_idle":true,"font":"kept"})");
+    before = get(path);
+    assert(save_close_mic_when_idle(path, true) && get(path) == before);
+    assert(save_close_mic_when_idle(path, false));
+    assert(get(path) == R"({"close_mic_when_idle":false,"font":"kept"})");
     put(path, R"({"auto_insert":"on"})");
     fails([&] { load_config(path); });
     assert(!save_auto_insert(path, true));
