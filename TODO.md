@@ -26,7 +26,10 @@ accepted; local code/tests cannot establish a fixed delivery regression.
 
 ## Priority regression (reported during implementation)
 
-- [ ] **P1. Repeated delivery loses the beginning of later submissions.** After
+- [x] **P1. Repeated delivery loses the beginning of later submissions.**
+  **Closed 2026-09-25 by owner confirmation:** the owner has been dictating
+  into real apps with live voice typing on the paced build and sees no
+  front-prefix loss. History below is kept for context. After
   the first Type + Enter, later text reportedly loses a dozen to a few dozen leading
   bytes. Investigate preview versus destination loss, retain the full bounded
   literal transcript, and add repeated/long/Unicode delivery regression tests.
@@ -46,6 +49,16 @@ accepted; local code/tests cannot establish a fixed delivery regression.
   verified; this is not headset acceptance.
 
 ## A. First release (v0.1) blockers
+
+Remaining release gates (2026-09-25): implement D4 (pip runtime install), then a
+fresh clean install on Frame that also checks the missing-runtime panel message
+(H), then tag `v0.1.<timestamp>` and update the README install section.
+
+- [x] **A8. UI polish batch (local; deploy pending).** Removed the fixed
+  "Type adds a space" hint, grew the review card to six lines to close the empty
+  band, added L/HMD/R battery readouts and a Buttons ready/paused dashboard chip,
+  and made Type with nothing to review send Enter. Which batteries Frame reports
+  needs a headset check (`--check-controls` prints them).
 
 - [x] **A1. Remove the runtime-license blocker notes.** Upstream's Kestrel README
   states local inference is free; blocker text removed from README/docs/scripts and
@@ -173,8 +186,9 @@ this app is future design and out of scope for v0.1.
 - [ ] Verify the exact missing-runtime panel message and Steam's shortcut persistence
   across a normal restart (without restarting sessions just for the test). Confirm no
   runtime/model environment override before future live checks.
-- [ ] Live acceptance on Frame: microphone → reviewed text → real target delivery,
-  Auto insert with speech, physical resize and a verified deployed version.
+- [x] Live acceptance on Frame: microphone → reviewed text → real target delivery.
+  Confirmed by the owner's daily live voice typing (2026-09-25). Auto insert with
+  speech and physical resize were not separately reported.
 
 ---
 
