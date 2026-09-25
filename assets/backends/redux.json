@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "id": "redux",
+  "display_name": "Parakeet Redux (CPU)",
+  "launcher": {
+    "type": "python",
+    "path": "python/frameyap/worker.py",
+    "arguments": ["--model", "{model_dir}", "--threads", "{threads}", "--clip-dir", "{clip_dir}"],
+    "protocol": "frameyap-worker-v1"
+  },
+  "model": {
+    "source": "https://huggingface.co/moondream/parakeet-redux",
+    "revision": "fad622f25f303105c20d70e201bcc477c88b620c",
+    "files": [
+      {"path": "model.safetensors", "size": 177774490, "sha256": "78ec25733ee0d0c1586d1346fc86db9d0c2e436e3a8ab1d32a82d1bb8f848d21"},
+      {"path": "config.json", "size": 12988, "sha256": "503c653b2e3bb788adbcb04f5abdee532d958686564081baeed133ff10143f6e"},
+      {"path": "ternary.json", "size": 57970, "sha256": "1221c6d3ce901ffe09c089da758a8db8b76189f80cff41c5afc244fc61e2051d"},
+      {"path": "tokenizer.json", "size": 1159960, "sha256": "bd321b096832a3f270bd3b2a88823957920f1a5c5ada71114a26ea729d0cbe91"},
+      {"path": "README.md", "size": 8533, "sha256": "a8b327f983a8b8ff262ff7bead3a791fbed9350632002af8db85ab5cd84cdaa5"}
+    ]
+  },
+  "attribution": "Moondream/M87 Labs, Parakeet Redux, derived from NVIDIA Parakeet TDT 0.6B v3; original model card README.md retained with the files.",
+  "license": {
+    "id": "CC-BY-4.0",
+    "text": "Model weights and card: Creative Commons Attribution 4.0 International. Retain attribution and the pinned README.md; runtime licenses are separate."
+  },
+  "requirements": {
+    "cpu": "Local ARM64 CPU inference with Python, moondream 2.4.0 and compatible CPU Torch; 2 threads by default. Runtime not included.",
+    "gpu": "None required; Redux worker disables CUDA."
+  }
+}

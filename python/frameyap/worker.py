@@ -8,7 +8,6 @@ by default, or captured privately with explicit --advanced-debug. This module ne
 """
 
 import argparse
-import hashlib
 import os
 from pathlib import Path
 import stat
@@ -21,9 +20,9 @@ MAX_TEXT = 4096
 MIN_SAMPLES = 3200
 MAX_SAMPLES = 320000
 try:
-    from .model_files import REVISION, FILES
+    from .model_files import DEFAULT_MANIFEST_DIR, ManifestError, check_model, load_backends
 except ImportError:  # direct executable script
-    from model_files import REVISION, FILES
+    from model_files import DEFAULT_MANIFEST_DIR, ManifestError, check_model, load_backends
 
 
 class LocalModelError(ValueError):
@@ -73,25 +72,19 @@ def private_dir(path):
         raise ValueError("clip directory must be private and owned by current user")
 
 
-def local_model(path):
-    """Require a real local directory with weight file(s), never a hub identifier."""
-    root = Path(path)
-    if not root.is_absolute() or not root.is_dir() or root.is_symlink():
-        raise LocalModelError("absolute local model directory required")
-    for name, (size, expected) in FILES.items():
-        file = root / name
-        if not file.is_file() or file.is_symlink() or file.stat().st_size != size:
-            raise LocalModelError("pinned local Redux model weights missing or incomplete")
-        digest = hashlib.sha256()
-        with file.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-        if digest.hexdigest() != expected:
-            raise LocalModelError("local Redux model does not match pinned revision")
-    return str(root)
+def local_model(path, manifest_dir=DEFAULT_MANIFEST_DIR):
+    """Check Redux against its manifest before loading any inference libraries."""
+    try:
+        backend = load_backends(manifest_dir)["redux"]
+    except (ManifestError, KeyError) as error:
+        raise LocalModelError("pinned Redux manifest missing or invalid") from error
+    result = check_model(backend, path)
+    if result["state"] != "installed_verified":
+        raise LocalModelError("pinned local Redux model weights missing, unsafe or mismatched: " + result["reason"])
+    return str(Path(path))
 
 
-def load_model(path, threads):
+def load_model(path, threads, manifest_dir=DEFAULT_MANIFEST_DIR):
     # Set before importing moondream/torch/huggingface dependencies, even when
     # invoked directly without the native adapter.
     os.environ["HF_HUB_OFFLINE"] = "1"
@@ -101,7 +94,7 @@ def load_model(path, threads):
         os.environ[key] = str(threads)
     os.environ["CUDA_VISIBLE_DEVICES"] = ""
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    directory = local_model(path)
+    directory = local_model(path, manifest_dir)
     import torch
     torch.set_num_threads(threads)
     torch.set_num_interop_threads(1)
@@ -183,6 +176,7 @@ def run(model, directory, input_fd=0, output_fd=1, advanced_debug=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="FrameYap local offline Redux worker")
     parser.add_argument("--model", required=True)
+    parser.add_argument("--manifest-dir", type=Path, default=DEFAULT_MANIFEST_DIR)
     parser.add_argument("--threads", type=int, default=2)
     parser.add_argument("--clip-dir", required=True)
     parser.add_argument("--advanced-debug", action="store_true",
@@ -210,7 +204,7 @@ def main(argv=None):
             send_frame(protocol_fd, b"F", b"M")
             return 1
         try:
-            model = load_model(args.model, args.threads)
+            model = load_model(args.model, args.threads, args.manifest_dir)
         except LocalModelError:
             if args.advanced_debug: traceback.print_exc(file=sys.stderr)
             send_frame(protocol_fd, b"F", b"M")

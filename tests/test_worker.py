@@ -238,14 +238,18 @@ sys.exit(worker.main(sys.argv[1:]))
 
     def test_pinned_model_hashes_and_symlinks(self):
         import hashlib
+        from frameyap.model_files import Backend, ModelFile
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)
             (root / "model.safetensors").write_bytes(b"fixture")
             digest = hashlib.sha256(b"fixture").hexdigest()
-            with patch.object(worker, "FILES", {"model.safetensors": (7, digest)}):
+            backend = Backend("redux", "Redux", {}, "https://example.test", "pinned",
+                              (ModelFile("model.safetensors", 7, digest),), "source",
+                              "CC-BY-4.0", "license", "cpu", "none")
+            with patch.object(worker, "load_backends", return_value={"redux": backend}):
                 self.assertEqual(worker.local_model(path), path)
                 (root / "model.safetensors").write_bytes(b"changed")
-                with self.assertRaisesRegex(ValueError, "pinned revision"):
+                with self.assertRaisesRegex(ValueError, "hash_mismatch"):
                     worker.local_model(path)
                 (root / "model.safetensors").unlink()
                 (root / "other").write_bytes(b"fixture")
