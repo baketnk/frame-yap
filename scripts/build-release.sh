@@ -50,6 +50,7 @@ openvr=$work/src/openvr-$OPENVR_VERSION
 cmake -S "$work/src/SDL3-$SDL_VERSION" -B "$work/sdl-build" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="$work/sdl" -DCMAKE_INSTALL_LIBDIR=lib \
     -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF -DSDL_VIDEO=OFF \
+    -DSDL_UNIX_CONSOLE_BUILD=ON -DSDL_JOYSTICK=OFF -DSDL_HAPTIC=OFF -DSDL_CAMERA=OFF \
     -DSDL_AUDIO=ON -DSDL_PIPEWIRE=ON -DSDL_PULSEAUDIO=ON -DSDL_ALSA=ON
 cmake --build "$work/sdl-build" --parallel
 cmake --install "$work/sdl-build"
