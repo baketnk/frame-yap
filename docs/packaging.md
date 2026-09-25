@@ -33,11 +33,11 @@ For the current **external-runtime** package, `scripts/stage-native.py --help`
 documents explicit inputs. The old `scripts/stage-native-poc.py` is retained as
 a deprecated migration wrapper for that command, not the documented or shipped
 staging interface. The stage invokes `cmake --install` on an existing native
-build, copies SDL/OpenVR and an explicitly licensed font, and retains notices. It does
+build, copies SDL/OpenVR and a font. It does
 not build, download, run the app, or copy an ASR runtime. The native
 app relies on Frame's system Vulkan loader/driver, Wayland, libxcb, FreeType,
-libstdc++ and glibc. Audit the actual staged ARM64 binaries' `NEEDED`,
-`GLIBC_*`/`GLIBCXX_*` symbol versions, ELF interpreter and notices; then test
+libstdc++ and glibc. Check the actual staged ARM64 binaries' `NEEDED`,
+`GLIBC_*`/`GLIBCXX_*` symbol versions and ELF interpreter; then test
 on a clean target. No compatible libc floor is yet established.
 SDL/OpenVR resolve inside its own `lib/`, not a producer
 prefix. ARM64/glibc packaging is not a claim of compatibility with arbitrary Linux.

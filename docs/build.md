@@ -63,7 +63,7 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
   source-build mode, safe extraction, atomic current-version selection, retained
   rollback, runtime/install lock, foreign-file refusal and explicit
   unregister-before-uninstall acknowledgement. Source mode needs a local
-  compiler, SDK, libraries and license inputs; no runtime is pip-installed.
+  compiler, SDK and libraries; the installer does not yet pip-install a runtime.
 
 ## Deliberately not claimed
 
@@ -98,7 +98,7 @@ file sizes/hashes and attribution live in `assets/backends/redux.json`; offline
 `scripts/model-status.py`) verify without inference or downloads. Manifest
 schema/verification are in `python/frameyap/model_files.py`. The local generic
 dispatcher resolves a manifest's in-release Python/executable launcher and
-checks request/reply correlation; a new manifest still needs its own licensed,
+checks request/reply correlation; a new manifest still needs its own
 compatible offline runtime and independent tests. Native `--run` flags `--backend ID`, `--model-store /absolute/store` and
 `--manifest-dir /absolute/manifests` are wired through
 the installed launcher as an explicit override, not a provisioning command.
@@ -155,7 +155,7 @@ are edited and no runtime/session restart is performed.
 
 ## Deliberate launch
 
-Explicit setup downloads only the pinned, openly licensed model:
+Explicit setup downloads only the pinned model:
 
 ```sh
 python3 scripts/fetch-model.py --destination "$HOME/.local/share/frameyap-model"

@@ -22,9 +22,7 @@ as explicit fallbacks. No desktop ASR server, network hop, LLM cleanup, scene
 renderer, avatar, desktop capture or root service is needed in the primary path.
 
 A first-class product goal is a **one-command GitHub install without a Steam store
-AppID**. Package a prebuilt native executable; the current native-only archive requires a
-separately supplied, compatible CPU runtime (no automatic pip install). A future
-isolated runtime bundle requires its own license and compatibility audit. Use a normal
+AppID**. v0.1 is source-only; a prebuilt archive is deferred. Use a normal
 OpenVR application key for registration, not Steamworks. Installation must remain
 user-local with opt-in autolaunch. See [installation design](install-design.md).
 
@@ -114,9 +112,8 @@ not an application-rendered hand-pose animation loop. Do not promise a particula
 GPU cost until measured.
 
 A scene renderer's canvas/MSDF resources are not an OpenVR overlay backend and
-are not imported here. The bundled Inconsolata TTF is under its retained OFL; the panel renderer is
-original FrameYap code. Further source/asset reuse requires an explicit
-license-reviewed extraction, never a runtime path into another project's checkout.
+are not imported here. The panel renderer is original FrameYap code. Further source/asset reuse requires an
+explicit extraction, never a runtime path into another project's checkout.
 
 ### Controller bindings
 
@@ -283,7 +280,6 @@ processing timeout. No shell commands in IPC and no input authority in the worke
   no CUDA device/runtime assumption. Do not copy the desktop's x86 venv.
 - Weights are ~178 MB; Torch, kernels, temporary conversion and activations mean
   install size/RSS will be larger. Measure cold load, peak RSS and package size.
-  Keep runtime notices separate from model attribution.
 
 Microphone access does not mute VRChat or any other social-voice app. Shared
 PipeWire capture may let both hear the same utterance; the overlay must not claim
@@ -329,7 +325,7 @@ runs additional offline tests). `FRAMEYAP_NATIVE=ON` explicitly selects OpenVR,
 SDL3, FreeType and Wayland client/generated protocol bindings. A separately
 authorized Python Redux environment is explicitly supplied at launch; the
 native-only installer neither bundles it nor pip-installs one. Pin revisions
-and review licenses for each introduced dependency. No automatic fetch/install in configure or normal tests; no external checkout discovery.
+for each introduced dependency. No automatic fetch/install in configure or normal tests; no external checkout discovery.
 
 Hardware-free tests should cover state transitions, bounded PCM/transcripts,
 worker framing/timeout/cancellation, duplicate/stale replies and focus generations

@@ -2,11 +2,11 @@
 
 Voice typing on Steam Frame, with recognition on the headset rather than a desktop or cloud server.
 Hold a controller button to record, review the transcript, then deliberately type it into the focused app.
-Standalone MIT-licensed OpenVR overlay; no Steam store AppID or sudo. First v0.1 release is in progress.
+Standalone OpenVR overlay; no Steam store AppID or sudo. First v0.1 release is in progress.
 
 ## Requirements
 
-- Steam Frame with usable SteamVR/OpenVR and Gamescope for the **native** overlay and text delivery; Linux ARM64/glibc for the current installer payload format. Binary compatibility must be checked against each actual release artifact, not inferred from a developer build.
+- Steam Frame with usable SteamVR/OpenVR and Gamescope for the **native** overlay and text delivery; Linux ARM64/glibc for the current installer payload format.
 - For voice recognition, separately provision a compatible **CPU Python runtime** (moondream 2.4.0 / Kestrel 0.8.0 and dependencies) and the pinned local Parakeet Redux model. Neither is bundled or installed with pip by the current native-only installer. There is no fallback ASR service.
 - A local source build needs CMake 3.20+, C++20 and explicit native libraries/SDK; the default hardware-free build needs only CMake and C++20. See [build requirements](docs/build.md).
 

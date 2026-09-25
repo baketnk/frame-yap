@@ -7,7 +7,7 @@ The local installer has binary-archive and explicitly provisioned source-build
 modes, machine-readable plans/results and an attended TTY path. The current
 native-only artifact does not include or pip-install an ASR runtime; it is not
 a one-command voice-typing experience. See [packaging](packaging.md) for exact
-flags and [third-party inventory](third-party.md) for open license/ABI audits.
+flags and [third-party notes](third-party.md).
 
 `scripts/install-preflight.sh` is a read-only Linux ARM64/glibc/bootstrap check;
 `--source` adds toolchain/library checks. It does not download, install, register,
@@ -40,7 +40,7 @@ already be available for registration; never start/restart it for installation.
 - **Source mode**: requires explicit local source, SDK, SDL/OpenVR libraries and
   their notices, CMake/C++20, native build dependencies and a version. It builds,
   stages, packages and continues through local installation; it does **not**
-  provision ASR packages or bypass producer license obligations. See
+  provision ASR packages. See
   [packaging](packaging.md) for all flags.
 - **Model**: only an explicit `--install-model --backend redux --yes` fetches
   pinned public files for the *already installed* backend. Inspect the read-only
@@ -72,8 +72,8 @@ uninstalled backend does not authorize a download or supply its inference engine
 
 ## Gate before publishing the goal as fulfilled
 
-Vet the **exact** release closure/licenses, ARM64 symbol versions/loader,
-model attribution and compatible CPU Python environment; establish a tested
+Vet the exact release closure, ARM64 symbol versions/loader
+and a compatible CPU Python environment; establish a tested
 libc/runtime floor, then publish and authenticate a checksummed archive from a
 clean tag. On a clean supported Frame, install without a compiler/sudo/store ID,
 load Redux, type into a disposable owned target and validate rollback/uninstall,

@@ -14,8 +14,7 @@ delivery. Launching the runtime is explicit, never part of a normal build or tes
 Explicit development dependencies: Valve OpenVR SDK v2.15.6, Vulkan headers/loader
 and FreeType 2. The native runtime needs a compatible system Vulkan driver.
 Configure/build must not fetch them. The default font is the bundled Inconsolata
-Regular; its OFL and notices are included in
-[third-party notes](third-party.md). `--font FILE` overrides the JSON selection.
+Regular; see [third-party notes](third-party.md). `--font FILE` overrides the JSON selection.
 A missing selected font falls back to bundled Inconsolata, then a system DejaVu
 Sans face if present. Glyph coverage depends on the selected face; full CJK
 coverage is not claimed.

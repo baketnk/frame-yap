@@ -20,8 +20,7 @@ These checkboxes close the *source tasks*, not their empirical acceptance gates.
 C1's second backend is a fake executable fixture, **not** a second shipped ASR
 engine. C2's two-click model consent, SHA-bound installer handoff, and D1/D2's
 source/attended installer paths still need an audited native archive and an
-installed clean-account/Frame exercise. A4 (exact artifact ABI/license closure),
-D3 (publication and clean-account acceptance), P1 (real-target delivery), G1
+installed clean-account/Frame exercise. D3 (deferred binary archive), D4 (pip runtime), P1 (real-target delivery), G1
 (browser), and H (live headset acceptance) remain open. The 0.1.202609250333 build is installed on Frame but not launched or
 accepted; local code/tests cannot establish a fixed delivery regression.
 
@@ -57,11 +56,8 @@ accepted; local code/tests cannot establish a fixed delivery regression.
   case-insensitive grep for the former app name must remain empty.
 - [x] **A3. Commit the pending `AGENTS.md` rename** ("Frame Dictation" →
   "FrameYap"). (S) Done in baseline checkpoint `07c03ea`.
-- [ ] **A4. Inventory the remaining runtime dependencies' licenses.** (M)
-  Upstream inventory and the FreeType FTL choice are documented, but the exact
-  staged ARM64 native/runtime binaries, transitive wheel/library notices, symbol
-  versions, loader and libc floor still require artifact-specific review before
-  publishing any prebuilt archive.
+- [~] **A4. Runtime dependency pointers.** Repos and licenses are listed in
+  `docs/third-party.md`. No release audit is needed while v0.1 is source-only.
 - [x] **A5. Drop "POC" from the shipped surface.** (S) Public help, README,
   CMake and installer use the release name. `scripts/stage-native-poc.py` remains
   a deprecated compatibility wrapper for `scripts/stage-native.py`, not the
@@ -121,10 +117,12 @@ accepted; local code/tests cannot establish a fixed delivery regression.
   `--print-plan` and `--json` support offline plans and structured outcomes;
   explicit model installs use installed pinned manifests. Tested with local
   fixtures only, not a released archive or an installed Frame UI handoff.
-- [ ] **D3. Publish a first prebuilt ARM64 archive.** (M) Depends on A4. Follow the
-  release checklist in `docs/packaging.md`; do not advertise the one-command route
-  until the archive and its checksum are actually published and tested from a clean
-  account.
+- [ ] **D3. Publish a prebuilt ARM64 archive.** (M) **Deferred.** v0.1 is
+  source-only. Revisit after source-build acceptance.
+- [ ] **D4. Source install fetches the Python runtime with pip.** (M) Proposed, not
+  implemented: the installer creates a user-local venv and installs pinned
+  moondream/Kestrel with the CPU Torch wheel, on an explicit flag/confirmation.
+  The installer does not run pip today.
 
 ## E. Naming and versioning
 
@@ -197,5 +195,5 @@ this app is future design and out of scope for v0.1.
 
 ## Open questions
 
-Release artifact compatibility/license audit, publication, P1 real-target behavior
+Source-install runtime provisioning (D4), P1 real-target behavior
 and live headset validation are unresolved gates, not implied by checked source tasks.
