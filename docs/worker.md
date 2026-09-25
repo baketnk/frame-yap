@@ -80,8 +80,9 @@ flags do not prove every third-party internal is unable to access a network.
 Runtime/build/tests perform no downloads; the separate explicit setup utility
 `scripts/fetch-model.py` can provision the public pinned weights.
 
-Current native-only archives do not bundle or pip-install the runtime; see
-[third-party notes](third-party.md). No public runtime bundle has been released.
+Native-only archives do not bundle the runtime; the explicit
+`install.sh --install-runtime --yes` step pip-installs it into a user-local venv
+(see [packaging](packaging.md) and [third-party notes](third-party.md)). No public runtime bundle has been released.
 Limited ARM64 measurements were taken during development; they are not a claim
 of complete headset acceptance.
 

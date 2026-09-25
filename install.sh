@@ -70,6 +70,20 @@ CONFIG_DEFAULTS = {
                 "insert": "/user/hand/right/input/a", "enter": "",
                 "quick_chat": "/user/hand/right/input/y"},
 }
+# Explicit --install-runtime only. CPU Torch comes from PyTorch's CPU index first;
+# an unconstrained PyPI resolve selects CUDA/NVIDIA wheels. moondream 2.4.0 pins
+# kestrel 0.8.0, kestrel-native 0.1.8 and kestrel-kernels 0.7.0.
+RUNTIME_TORCH = "torch==2.8.0"
+RUNTIME_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
+RUNTIME_REQUIREMENT = "moondream==2.4.0"
+RUNTIME_DOWNLOAD = "about 200 MB of prebuilt wheels (CPU Torch is about 100 MB), roughly 1-1.5 GB on disk; no compilation"
+RUNTIME_PYTHON_RANGE = ((3, 10), (3, 14))  # moondream allows <3.15; CPU Torch 2.8.0 wheels stop at 3.13
+RUNTIME_NAME_RE = re.compile(r"cpu-[0-9]{14}\Z")
+RUNTIME_VERIFY = (
+    "import importlib.metadata as m, torch\n"
+    "assert torch.version.cuda is None, 'CUDA Torch was installed; CPU build required'\n"
+    "import moondream\n"
+    "print('moondream', m.version('moondream'), 'kestrel', m.version('kestrel'), 'torch', torch.__version__)\n")
 COLOR_RE = re.compile(r"#[0-9a-fA-F]{6}\Z")
 BUTTON_RE = re.compile(r"/user/hand/(left|right)/input/[A-Za-z0-9_]+\Z")
 BACKEND_RE = re.compile(r"[a-z][a-z0-9_-]{0,47}\Z", re.ASCII)
@@ -101,6 +115,26 @@ def config_path():
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = Path(xdg) if xdg and Path(xdg).is_absolute() else Path.home() / ".config"
     return base / "frameyap/config.json"
+
+
+def paths_config_path():
+    return config_path().parent / "paths.conf"
+
+
+def set_runtime_python(python):
+    """Point the managed launcher at `python`; other paths.conf lines are kept verbatim."""
+    path = paths_config_path()
+    if "\n" in str(python) or not python.is_absolute():
+        fail(f"unsafe runtime path: {python!r}")
+    owned_dir(path.parent)
+    if path.is_symlink():
+        fail(f"refusing symlink paths config: {path}")
+    lines = (path.read_text().splitlines() if path.exists() else
+             ["# FrameYap literal paths (python=/abs, model=/abs); never shell code"])
+    previous = [line[len("python="):] for line in lines if line.startswith("python=")]
+    kept = [line for line in lines if not line.startswith("python=")]
+    atomic_write(path, ("\n".join(kept + [f"python={python}"]) + "\n").encode())
+    return previous[-1] if previous else None
 
 
 def unique_pairs(pairs):
@@ -581,11 +615,11 @@ def model_target(args, root):
 
 
 @contextlib.contextmanager
-def model_download_cancellation():
+def model_download_cancellation(message="model installation cancelled"):
     # Install-model runs on the main thread. Raising unwinds the owned temp's
     # finally block; unlike SIGKILL this does not leave a partial download.
     def terminate(_signal, _frame):
-        raise ValueError("model installation cancelled")
+        raise ValueError(message)
 
     previous = signal.signal(signal.SIGTERM, terminate)
     try:
@@ -650,6 +684,52 @@ def install_model(args, root):
         fail(f"model did not verify: {state['reason']}")
     if not args.json:
         print(f"Backend {backend.id} model verified at {dest}; license {backend.license_id}. Configure runtime/model paths explicitly for launch.")
+
+
+def runtime_step(args, name, command):
+    if args.json:
+        print(json.dumps({"ok": True, "event": "runtime_step", "step": name}), flush=True)
+    else:
+        print(f"[runtime] {name}", flush=True)
+    # Tool output goes to stderr so --json stdout stays one event per line.
+    subprocess.run(command, check=True, stdout=sys.stderr, stdin=subprocess.DEVNULL)
+
+
+def install_runtime(args, root):
+    low, high = RUNTIME_PYTHON_RANGE
+    if not low <= sys.version_info[:2] < high:
+        fail("the runtime needs Python 3.10-3.13 (CPU Torch 2.8.0 wheels); found " + platform.python_version())
+    if importlib.util.find_spec("venv") is None or importlib.util.find_spec("ensurepip") is None:
+        fail("python3 cannot create a virtual environment (venv/ensurepip missing); no packages installed")
+    runtimes = root / "runtimes"
+    owned_dir(runtimes)
+    target = runtimes / datetime.now().strftime("cpu-%Y%m%d%H%M%S")
+    if target.exists() or target.is_symlink():
+        fail(f"runtime directory already exists: {target}")
+    python = target / "bin/python3"
+    # --isolated ignores user pip config/env indexes; binary-only avoids compilers.
+    pip = [str(python), "-m", "pip", "--isolated", "--disable-pip-version-check", "--no-input",
+           "install", "--only-binary=:all:"]
+    try:
+        with model_download_cancellation("runtime installation cancelled"):
+            runtime_step(args, "create virtual environment", [sys.executable, "-m", "venv", str(target)])
+            runtime_step(args, "install CPU Torch", pip + ["--index-url", RUNTIME_TORCH_INDEX, RUNTIME_TORCH])
+            constraints = target / "frameyap-constraints.txt"
+            constraints.write_text(RUNTIME_TORCH + "\n")
+            runtime_step(args, "install moondream/Kestrel", pip + ["--constraint", str(constraints), RUNTIME_REQUIREMENT])
+            runtime_step(args, "verify CPU runtime imports", [str(python), "-c", RUNTIME_VERIFY])
+    except BaseException:
+        shutil.rmtree(target, ignore_errors=True)
+        raise
+    previous = set_runtime_python(python)
+    # Superseded managed runtimes are removed; anything else is never touched.
+    for item in runtimes.iterdir():
+        if item != target and item.is_dir() and not item.is_symlink() and RUNTIME_NAME_RE.fullmatch(item.name):
+            shutil.rmtree(item)
+    if not args.json:
+        print(f"CPU Python runtime installed at {target}; {paths_config_path()} now has python={python}.")
+        if previous and not previous.startswith(str(runtimes) + "/"):
+            print(f"Previous python={previous} was replaced; restore it in paths.conf to switch back.")
 
 
 def source_preflight(args):
@@ -798,7 +878,7 @@ def do_install(args, root, launcher):
         select(root, "current", f"versions/{version}")
         print(f"FrameYap {version} installed. OpenVR registration is NOT automatic; see docs/packaging.md.")
         if json.loads((target / "release.json").read_text())["runtime"] == "external-authorized-python":
-            print("ASR runtime is NOT included. Supply an independently authorized environment with FRAMEYAP_PYTHON or --python; no packages are downloaded.")
+            print("ASR runtime is NOT included. Run install.sh --install-runtime --yes to pip-install it, or supply one with FRAMEYAP_PYTHON/--python or paths.conf.")
 
 
 def uninstall(root, launcher):
@@ -840,7 +920,8 @@ def uninstall(root, launcher):
         manifest.unlink()
     if desktop.exists():
         desktop.unlink()
-    print("FrameYap removed; config and saved models preserved. OpenVR unregister acknowledgement was required.")
+    print("FrameYap removed; config, saved models and any runtimes/ directory preserved. "
+          "OpenVR unregister acknowledgement was required.")
 
 
 class UsageError(ValueError):
@@ -859,6 +940,8 @@ def resolve_args(argv):
     action.add_argument("--rollback", action="store_true")
     action.add_argument("--uninstall", action="store_true")
     action.add_argument("--install-model", action="store_true", help="explicit model provisioning for installed backend")
+    action.add_argument("--install-runtime", action="store_true",
+                        help="explicit pip install of the pinned CPU Python runtime into a user-local venv")
     parser.add_argument("--mode", choices=("binary", "source"), default="binary")
     parser.add_argument("--source", help="explicit local FrameYap source tree (source mode only)")
     parser.add_argument("--openvr-root", help="local OpenVR SDK root (source mode)")
@@ -884,7 +967,7 @@ def resolve_args(argv):
     if args.mode == "source":
         if not args.source or any(not getattr(args, name) for name in source_inputs):
             parser.error("--mode source requires --source and explicit --openvr-root, --openvr-library, --openvr-license, --sdl-library, --sdl-license")
-        if args.archive or args.sha256 or args.rollback or args.uninstall or args.install_model:
+        if args.archive or args.sha256 or args.rollback or args.uninstall or args.install_model or args.install_runtime:
             parser.error("source mode cannot combine with binary archive or lifecycle operations")
     elif args.source or any(getattr(args, name) for name in source_inputs):
         parser.error("source inputs require --mode source")
@@ -894,7 +977,10 @@ def resolve_args(argv):
         parser.error("--sha256 must be a 64-character hex SHA-256")
     if not args.archive and args.sha256:
         parser.error("--sha256 only applies to --archive")
-    if not (args.rollback or args.uninstall or args.install_model) and not args.version:
+    if args.install_runtime and (args.version or args.without_model or args.autolaunch is not None or
+                                 args.backend != "redux" or args.model_dir or args.expected_manifest_sha256):
+        parser.error("--install-runtime is independent of release/model flags")
+    if not (args.rollback or args.uninstall or args.install_model or args.install_runtime) and not args.version:
         parser.error("--version VERSION is required; no moving/latest release")
     if args.uninstall != args.unregistered:
         parser.error("--uninstall requires --unregistered after explicit OpenVR unregister")
@@ -923,7 +1009,7 @@ def resolve_args(argv):
 
 def plan(args):
     operation = ("uninstall" if args.uninstall else "rollback" if args.rollback else
-                 "install-model" if args.install_model else "install")
+                 "install-model" if args.install_model else "install-runtime" if args.install_runtime else "install")
     return {"operation": operation, "mode": args.mode, "version": args.version,
             "tag": "v" + args.version if args.version else None,
             "archive": str(args.archive) if args.archive else None,
@@ -931,7 +1017,8 @@ def plan(args):
             "backend": args.backend, "model_dir": str(args.model_dir) if args.model_dir else None,
             "expected_manifest_sha256": (args.expected_manifest_sha256.lower() if args.expected_manifest_sha256 else None),
             "without_model": args.without_model, "autolaunch": args.autolaunch,
-            "network": bool(args.install_model or (operation == "install" and not args.archive and not args.source)),
+            "network": bool(args.install_model or args.install_runtime or
+                            (operation == "install" and not args.archive and not args.source)),
             "registration": ("explicit --register --autostart" if args.autolaunch is True else
                              "explicit --register (autostart off)" if args.autolaunch is False else "none")}
 
@@ -947,6 +1034,12 @@ def main(argv=None):
             check_expected_manifest(args, manifest_sha)
             result.update(model_dir=str(model_target(args, root)), model=backend.description(),
                           installed_manifest_sha256=manifest_sha)
+        if args.install_runtime:
+            data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share").expanduser().absolute()
+            result.update(runtime_dir=str(data / "frameyap/runtimes"), base_python=sys.executable,
+                          base_python_version=platform.python_version(),
+                          packages=[RUNTIME_TORCH + " from " + RUNTIME_TORCH_INDEX, RUNTIME_REQUIREMENT + " from PyPI"],
+                          download=RUNTIME_DOWNLOAD, paths_config=str(paths_config_path()))
         if args.json:
             print(json.dumps({"ok": True, "event": "plan", **result}, sort_keys=True))
         else:
@@ -996,6 +1089,8 @@ def main(argv=None):
                 print(f"Rolled back to {previous}")
             elif args.install_model:
                 install_model(args, root)
+            elif args.install_runtime:
+                install_runtime(args, root)
             else:
                 do_install(args, root, launcher)
     # The native registration helper takes this same install lock. Never run it
@@ -1065,7 +1160,7 @@ def cli(argv=None):
     try:
         if structured and "--print-plan" in argv:
             main(argv)  # already emits one JSON plan
-        elif structured and "--install-model" in argv:
+        elif structured and ("--install-model" in argv or "--install-runtime" in argv):
             main(argv)  # streaming per-file JSON events for a UI child
             print(json.dumps({"ok": True, "event": "complete"}))
         elif structured:

@@ -102,8 +102,21 @@ installed `redux.json` bytes: under the model lock a mismatch fails **before**
 a model directory is created or any network request. In the locally implemented
 Models UI, Install displays source, rounded size, license text, attribution and
 the fingerprint; only the second Confirm Install click passes that fingerprint
-through the backend helper to the installer. Installation alone does not
+through the backend helper to the installer. Model installation does not
 provision a CPU Python runtime; no in-panel flow has been accepted on Frame.
+
+`sh install.sh --install-runtime --yes` explicitly creates a user-local venv
+under `$XDG_DATA_HOME/frameyap/runtimes/` from the invoking `python3` (3.10–3.13),
+pip-installs `torch==2.8.0` from PyTorch's CPU index, then `moondream==2.4.0`
+(which pins kestrel 0.8.0, kestrel-native 0.1.8, kestrel-kernels 0.7.0) from PyPI
+with Torch constrained, binary wheels only and `pip --isolated`. It verifies the
+imports and that Torch has no CUDA, then sets `python=` in `paths.conf` (other
+lines kept) and removes superseded FrameYap-managed runtimes. A failure removes
+only the new venv and leaves `paths.conf` unchanged. `--print-plan --json` shows
+the packages, index and size (about 200 MB of wheels, roughly 1–1.5 GB on disk)
+without touching anything. The app must be closed (install lock). Transitive
+dependencies are not pinned. Validated end to end on x86-64 Python 3.12
+(2026-09-25); a clean Frame install is still pending.
 In the source tree, `python3 scripts/model-status.py --list-models` or
 `--check-model redux --model-dir /absolute/model` hash-checks local files;
 the native `frameyap --list-models` / `--check-model` entry points use the
@@ -151,7 +164,7 @@ model=/absolute/path/to/pinned/local/model
 The launcher reads these as **literal absolute paths**, not shell code, and does
 not follow a symlink to the config file. Environment variables override either
 setting for an explicit launch. This `paths.conf` survives upgrade/uninstall;
-the installer does not populate it or bundle an unauthorized runtime. No
+only `--install-runtime` writes its `python=` line, and no runtime is bundled. No
 pip/bootstrap/model download or fallback is invoked by the launcher. Without
 paths, the native-only artifact cannot perform voice inference; its default
 runtime and model locations do not exist. A new installer accepts only the exact

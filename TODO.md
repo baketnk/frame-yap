@@ -50,8 +50,8 @@ accepted; local code/tests cannot establish a fixed delivery regression.
 
 ## A. First release (v0.1) blockers
 
-Remaining release gates (2026-09-25): implement D4 (pip runtime install), then a
-fresh clean install on Frame that also checks the missing-runtime panel message
+Remaining release gates (2026-09-25): D4 is implemented; next a
+fresh clean install on Frame (install → `--install-model` → `--install-runtime`) that also checks the missing-runtime panel message
 (H), then tag `v0.1.<timestamp>` and update the README install section.
 
 - [x] **A8. UI polish batch (local; deploy pending).** Removed the fixed
@@ -132,10 +132,12 @@ fresh clean install on Frame that also checks the missing-runtime panel message
   fixtures only, not a released archive or an installed Frame UI handoff.
 - [ ] **D3. Publish a prebuilt ARM64 archive.** (M) **Deferred.** v0.1 is
   source-only. Revisit after source-build acceptance.
-- [ ] **D4. Source install fetches the Python runtime with pip.** (M) Proposed, not
-  implemented: the installer creates a user-local venv and installs pinned
-  moondream/Kestrel with the CPU Torch wheel, on an explicit flag/confirmation.
-  The installer does not run pip today.
+- [x] **D4. Installer fetches the Python runtime with pip.** (M) Implemented
+  2026-09-25 as explicit `install.sh --install-runtime --yes`: user-local venv,
+  CPU `torch==2.8.0` from PyTorch's CPU index, `moondream==2.4.0` from PyPI,
+  import/no-CUDA verification, then `python=` in `paths.conf`. Offline tests
+  mock pip; a real run passed on x86-64 Python 3.12. Needs the clean Frame
+  install to confirm on ARM64.
 
 ## E. Naming and versioning
 
@@ -209,5 +211,6 @@ this app is future design and out of scope for v0.1.
 
 ## Open questions
 
-Source-install runtime provisioning (D4), P1 real-target behavior
-and live headset validation are unresolved gates, not implied by checked source tasks.
+The clean-account Frame install (including D4's ARM64 pip run and the
+missing-runtime message) is the remaining unresolved gate; checked source tasks
+do not imply it.

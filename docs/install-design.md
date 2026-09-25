@@ -4,9 +4,10 @@ Goal: a one-command, pinned GitHub release install for Steam Frame without a Ste
 store AppID, sudo or end-user compiler. **No public archive or verified clean
 install is published. Do not advertise a `curl | sh` command as functional.**
 The local installer has binary-archive and explicitly provisioned source-build
-modes, machine-readable plans/results and an attended TTY path. The current
-native-only artifact does not include or pip-install an ASR runtime; it is not
-a one-command voice-typing experience. See [packaging](packaging.md) for exact
+modes, machine-readable plans/results and an attended TTY path. The native-only
+artifact does not include an ASR runtime; a separate explicit
+`--install-runtime --yes` step pip-installs the pinned CPU runtime into a
+user-local venv. Install, model and runtime are still three commands. See [packaging](packaging.md) for exact
 flags and [third-party notes](third-party.md).
 
 `scripts/install-preflight.sh` is a read-only Linux ARM64/glibc/bootstrap check;
@@ -52,7 +53,7 @@ already be available for registration; never start/restart it for installation.
   second **Confirm Install** click; the installed/native UI route still needs
   clean-target and headset acceptance. `--without-model` permits an
   archive install without bundled model files. Neither operation installs Torch,
-  moondream, Kestrel or an interpreter. Launch paths to an independently
+  moondream or Kestrel; only `--install-runtime --yes` does (see packaging). Launch paths to an independently
   authorized runtime/model can be set in `paths.conf`.
 - **Noninteractive**: supply flags and `--yes` for network/model consent.
   `--print-plan` is read-only; `--json` provides structured results/errors and
@@ -66,7 +67,7 @@ listing, unrelated application dependency, microphone recording, input injection
 or automatic update daemon. Hashes detect accidental/unauthorized alteration
 of a downloaded artifact but do not authenticate a compromised publisher;
 release metadata needs independent trust. No installer operation silently runs
-pip or launches inference. Native-only archives support overlay checks but need
+pip or launches inference; pip runs only under explicit `--install-runtime --yes`. Native-only archives support overlay checks but need
 an externally provisioned runtime/weights before voice typing. Selecting an
 uninstalled backend does not authorize a download or supply its inference engine.
 

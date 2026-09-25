@@ -7,7 +7,7 @@ Standalone OpenVR overlay; no Steam store AppID or sudo. First v0.1 release is i
 ## Requirements
 
 - Steam Frame with usable SteamVR/OpenVR and Gamescope for the **native** overlay and text delivery; Linux ARM64/glibc for the current installer payload format.
-- For voice recognition, separately provision a compatible **CPU Python runtime** (moondream 2.4.0 / Kestrel 0.8.0 and dependencies) and the pinned local Parakeet Redux model. Neither is bundled or installed with pip by the current native-only installer. There is no fallback ASR service.
+- For voice recognition, a **CPU Python runtime** (moondream 2.4.0 / Kestrel 0.8.0, CPU Torch 2.8.0) and the pinned local Parakeet Redux model. Neither is bundled; each has its own explicit install step: `sh install.sh --install-model --backend redux --yes` and `sh install.sh --install-runtime --yes` (needs Python 3.10–3.13 with venv; about 200 MB download). Use `--print-plan` first to see exactly what each fetches. There is no fallback ASR service.
 - A local source build needs CMake 3.20+, C++20 and explicit native libraries/SDK; the default hardware-free build needs only CMake and C++20. See [build requirements](docs/build.md).
 
 ## Install (local artifacts only)

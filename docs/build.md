@@ -63,7 +63,8 @@ initialize OpenVR, open a microphone, run ASR, download files or inject input.
   source-build mode, safe extraction, atomic current-version selection, retained
   rollback, runtime/install lock, foreign-file refusal and explicit
   unregister-before-uninstall acknowledgement. Source mode needs a local
-  compiler, SDK and libraries; the installer does not yet pip-install a runtime.
+  compiler, SDK and libraries. An explicit `--install-runtime --yes` step
+  pip-installs the pinned CPU Python runtime into a user-local venv.
 
 ## Deliberately not claimed
 
@@ -103,7 +104,8 @@ compatible offline runtime and independent tests. Native `--run` flags `--backen
 `--manifest-dir /absolute/manifests` are wired through
 the installed launcher as an explicit override, not a provisioning command.
 Inference uses the `moondream` Python package and Kestrel runtime, separately
-provisioned in your own environment; builds/tests/installer do not pip-install them. See
+provisioned in your own environment or by the explicit `install.sh --install-runtime --yes`;
+builds and tests never pip-install them. See
 [third-party notes](third-party.md).
 
 ## Developer native build

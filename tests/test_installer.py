@@ -1113,6 +1113,92 @@ with patch.object(module, "check_host"), patch.object(module.urllib.request, "ur
             self.assertIn("mismatched", json.loads(output.getvalue())["message"])
             fetch.assert_not_called()
 
+    def test_runtime_install_is_explicit_cpu_pinned_and_updates_only_python_path(self):
+        # subprocess is mocked: no venv, pip or network is touched.
+        root = self.data / "frameyap"
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(installer.cli(["--install-runtime", "--print-plan", "--json"]), 0)
+        plan = json.loads(output.getvalue())
+        self.assertEqual((plan["operation"], plan["network"]), ("install-runtime", True))
+        self.assertIn("torch==2.8.0 from https://download.pytorch.org/whl/cpu", plan["packages"])
+        self.assertFalse(root.exists())
+        for extra in (["--version", "0.1.202609241530"], ["--backend", "other"], ["--without-model"]):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(installer.cli(["--install-runtime", "--json"] + extra), 2)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), patch.object(installer.subprocess, "run") as run:
+            self.assertEqual(installer.cli(["--install-runtime", "--json"]), 1)
+            run.assert_not_called()
+        self.assertIn("--yes", json.loads(output.getvalue())["message"])
+        self.assertFalse((root / "runtimes").exists())
+
+        config = self.home / ".config/frameyap/paths.conf"
+        config.parent.mkdir(parents=True)
+        config.write_text("# mine\npython=/opt/old/bin/python3\nmodel=/opt/model\n")
+        old = root / "runtimes/cpu-20260101000000"
+        old.mkdir(parents=True)
+        foreign = root / "runtimes/keep-me"
+        foreign.mkdir()
+        commands = []
+
+        def fake(command, **kwargs):
+            commands.append(command)
+            if command[1:3] == ["-m", "venv"]:
+                python = Path(command[3]) / "bin/python3"
+                python.parent.mkdir(parents=True)
+                python.write_text("")
+            return SimpleNamespace(returncode=0)
+
+        with patch.object(installer, "RUNTIME_PYTHON_RANGE", ((3, 0), (3, 1))), \
+             patch.object(installer.subprocess, "run") as run:
+            with contextlib.redirect_stdout(io.StringIO()) as unsupported:
+                self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 1)
+            self.assertIn("Python 3.10-3.13", json.loads(unsupported.getvalue())["message"])
+            run.assert_not_called()
+        self.env_range = patch.object(installer, "RUNTIME_PYTHON_RANGE", ((3, 0), (4, 0)))
+        self.env_range.start()
+        self.addCleanup(self.env_range.stop)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), patch.object(installer.subprocess, "run", side_effect=fake):
+            self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 0)
+        events = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual([e.get("step") for e in events if e["event"] == "runtime_step"],
+                         ["create virtual environment", "install CPU Torch", "install moondream/Kestrel",
+                          "verify CPU runtime imports"])
+        self.assertEqual(events[-1]["event"], "complete")
+        torch, packages = commands[1], commands[2]
+        for command in (torch, packages):
+            self.assertIn("--isolated", command)
+            self.assertIn("--only-binary=:all:", command)
+        self.assertEqual(torch[-3:], ["--index-url", "https://download.pytorch.org/whl/cpu", "torch==2.8.0"])
+        self.assertEqual(packages[-1], "moondream==2.4.0")
+        self.assertIn("--constraint", packages)
+        runtimes = [item for item in (root / "runtimes").iterdir() if item.name.startswith("cpu-")]
+        self.assertEqual(len(runtimes), 1)
+        self.assertNotEqual(runtimes[0], old)
+        self.assertTrue(foreign.is_dir())
+        self.assertEqual(config.read_text(),
+                         f"# mine\nmodel=/opt/model\npython={runtimes[0]}/bin/python3\n")
+
+        # A failed pip step removes only its own new venv and leaves paths.conf alone.
+        before = config.read_text()
+
+        def failing(command, **kwargs):
+            if "moondream==2.4.0" in command:
+                raise subprocess.CalledProcessError(1, command)
+            return fake(command, **kwargs)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), patch.object(installer.subprocess, "run", side_effect=failing), \
+             patch.object(installer, "datetime") as clock:
+            clock.now.return_value.strftime.return_value = "cpu-20991231235959"
+            self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 1)
+        self.assertFalse((root / "runtimes/cpu-20991231235959").exists())
+        self.assertTrue(runtimes[0].is_dir())
+        self.assertEqual(config.read_text(), before)
+
 
 if __name__ == "__main__":
     unittest.main()
