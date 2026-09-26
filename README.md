@@ -2,9 +2,9 @@
 
 On-device voice typing for Steam Frame. Hold a button, speak, check the text, and type it into whatever app has focus. Speech recognition runs on the headset itself; nothing is sent to the cloud.
 
-![FrameYap’s review panel on Steam Frame, with recording controls, controller and headset battery levels, and Settings and Bindings tabs.](docs/images/frameyap-ui.png)
+[![FrameYap’s review panel on Steam Frame, with recording controls, controller and headset battery levels, and Settings and Bindings tabs.](docs/images/frameyap-ui.png)](https://youtu.be/9dg2KfojYTE)
 
-*In-headset UI, captured from the tutorial.*
+*In-headset UI, captured from the [video tutorial on YouTube](https://youtu.be/9dg2KfojYTE).*
 
 ## Install
 
