@@ -98,8 +98,18 @@ struct FocusGuard::Impl {
             if (bad) reason = "X error";
             if (type == XCB_PROPERTY_NOTIFY) {
                 const auto* e = reinterpret_cast<xcb_property_notify_event_t*>(event);
-                if (e->window == root && e->atom == active_atom) { bad = true; reason = "_NET_ACTIVE_WINDOW changed"; }
-                if (e->window == root && e->atom == gamescope_atom) { bad = true; reason = "GAMESCOPE_FOCUSED_WINDOW changed"; }
+                // Gamescope rewrites its focus properties with the same window
+                // after IME commits; only a different value is a focus change.
+                // A real X focus move still reports FocusOut on the target.
+                xcb_window_t value = XCB_WINDOW_NONE;
+                if (e->window == root && e->atom == active_atom &&
+                    (!property_window(active_atom, XCB_ATOM_WINDOW, value) || value != target)) {
+                    bad = true; reason = "_NET_ACTIVE_WINDOW changed";
+                }
+                if (e->window == root && e->atom == gamescope_atom &&
+                    (!property_window(gamescope_atom, XCB_ATOM_CARDINAL, value) || value != target)) {
+                    bad = true; reason = "GAMESCOPE_FOCUSED_WINDOW changed";
+                }
             } else if (type == XCB_FOCUS_OUT) {
                 const auto* e = reinterpret_cast<xcb_focus_out_event_t*>(event);
                 if (e->event == target) { bad = true; reason = "FocusOut on target"; }

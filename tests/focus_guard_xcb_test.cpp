@@ -50,6 +50,12 @@ int main() {
     assert(!stable.arm());
     FocusGuard new_capture;
     assert(new_capture.arm() && new_capture.valid());
+    // Gamescope rewrites both properties with the same window after IME commits.
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, root, active, XCB_ATOM_WINDOW, 32, 1, &a);
+    xcb_change_property(c, XCB_PROP_MODE_REPLACE, root, gamescope, XCB_ATOM_CARDINAL, 32, 1, &a);
+    auto sync = xcb_get_input_focus(c);
+    std::free(xcb_get_input_focus_reply(c, sync, nullptr));
+    assert(new_capture.valid()); // same-value rewrite is not a focus change
     xcb_change_property(c, XCB_PROP_MODE_REPLACE, root, active, XCB_ATOM_WINDOW, 32, 1, &b);
     auto cookie = xcb_get_input_focus(c);
     Reply<xcb_get_input_focus_reply_t> reply(xcb_get_input_focus_reply(c, cookie, nullptr));
