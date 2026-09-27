@@ -9,6 +9,9 @@ PacedDelivery::PacedDelivery(DeliveryFactory acquire, Clock clock,
     : acquire_(std::move(acquire)), clock_(std::move(clock)),
       release_idle_(std::move(release_idle)), permitted_(std::move(permitted)) {}
 
+void PacedDelivery::trace(const std::string& line) const {
+    if (trace_) { try { trace_(line); } catch (...) {} }
+}
 bool PacedDelivery::valid_guard() const {
     try { return (!permitted_ || permitted_()) && task_->guard && task_->guard(); }
     catch (...) { return false; }
@@ -32,15 +35,25 @@ void PacedDelivery::start(std::string text, bool enter, Guard guard,
         candidate->first_lease = acquire_();
         if (!candidate->first_lease || (permitted_ && !permitted_()) || !candidate->guard())
             throw std::runtime_error("Input focus changed during acquisition");
+    } catch (const std::exception& e) {
+        trace(std::string("start rejected: ") + e.what());
+        std::fill(candidate->text.begin(), candidate->text.end(), '\0');
+        throw;
     } catch (...) {
+        trace("start rejected: unknown");
         std::fill(candidate->text.begin(), candidate->text.end(), '\0');
         throw;
     }
+    trace("start bytes=" + std::to_string(candidate->text.size()) +
+          " enter=" + (candidate->enter ? "1" : "0"));
     retained_ = true;
     task_ = std::move(candidate);
 }
 PacedDelivery::Outcome PacedDelivery::finish(DeliveryResult result, bool focus_lost) {
     Outcome out{result, task_->began, focus_lost};
+    trace("finish result=" + std::to_string(static_cast<int>(result)) + " began=" +
+          (task_->began ? "1" : "0") + " focus_lost=" + (focus_lost ? "1" : "0") +
+          " offset=" + std::to_string(task_->offset) + "/" + std::to_string(task_->text.size()));
     std::fill(task_->text.begin(), task_->text.end(), '\0');
     task_.reset();
     return out;
@@ -59,15 +72,25 @@ std::optional<PacedDelivery::Outcome> PacedDelivery::tick() {
     auto& task = *task_;
     // A focus loss before ANY send leaves the review unconsumed. After the
     // first possible send, the remainder is discarded, not retargeted/retried.
-    if (!valid_guard()) return finish(task.began ? DeliveryResult::TextUncertain : DeliveryResult::Ignored, true);
+    if (!valid_guard()) {
+        trace("guard failed before acquire");
+        return finish(task.began ? DeliveryResult::TextUncertain : DeliveryResult::Ignored, true);
+    }
     std::unique_ptr<DeliveryLease> lease = std::move(task.first_lease);
     if (!lease) {
         try { lease = acquire_(); }
-        catch (...) { return finish(task.began ? (task.offset == task.text.size() ?
+        catch (const std::exception& e) {
+            trace(std::string("acquire failed: ") + e.what());
+            return finish(task.began ? (task.offset == task.text.size() ?
+            DeliveryResult::TextQueuedEnterUnavailable : DeliveryResult::TextUncertain) : DeliveryResult::Ignored); }
+        catch (...) { trace("acquire failed: unknown"); return finish(task.began ? (task.offset == task.text.size() ?
             DeliveryResult::TextQueuedEnterUnavailable : DeliveryResult::TextUncertain) : DeliveryResult::Ignored); }
         if (!lease) return finish(task.began ? DeliveryResult::TextUncertain : DeliveryResult::Ignored);
     }
-    if (!valid_guard()) return finish(task.began ? DeliveryResult::TextUncertain : DeliveryResult::Ignored, true);
+    if (!valid_guard()) {
+        trace("guard failed after acquire");
+        return finish(task.began ? DeliveryResult::TextUncertain : DeliveryResult::Ignored, true);
+    }
     if (!task.began) {
         // A callback consumes review immediately before a possibly ambiguous send.
         try { if (task.on_first_send) task.on_first_send(); }
@@ -87,17 +110,25 @@ std::optional<PacedDelivery::Outcome> PacedDelivery::tick() {
         try {
             chunk = task.text.substr(task.offset, end - task.offset);
             lease->text(chunk);
+        } catch (const std::exception& e) {
+            trace("text send failed at offset=" + std::to_string(task.offset) + ": " + e.what());
+            last_commit_ = clock_();
+            std::fill(chunk.begin(), chunk.end(), '\0');
+            return finish(DeliveryResult::TextUncertain);
         } catch (...) {
+            trace("text send failed at offset=" + std::to_string(task.offset) + ": unknown");
             last_commit_ = clock_();
             std::fill(chunk.begin(), chunk.end(), '\0');
             return finish(DeliveryResult::TextUncertain);
         }
         last_commit_ = clock_();
+        trace("sent offset=" + std::to_string(task.offset) + " bytes=" + std::to_string(end - task.offset));
         std::fill(chunk.begin(), chunk.end(), '\0');
         task.offset = end;
         if (end == task.text.size() && !task.enter) return finish(DeliveryResult::TextQueued);
     } else {
-        try { lease->enter(); }
+        try { lease->enter(); trace("sent enter"); }
+        catch (const std::exception& e) { trace(std::string("enter failed: ") + e.what()); last_commit_ = clock_(); return finish(DeliveryResult::EnterUncertain); }
         catch (...) { last_commit_ = clock_(); return finish(DeliveryResult::EnterUncertain); }
         last_commit_ = clock_();
         return finish(DeliveryResult::EnterQueued);

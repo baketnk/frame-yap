@@ -112,6 +112,12 @@ is required to avoid competing rotation by multiple workers. Debug output never
 shares the framed protocol stdout. Direct worker CLI use with `--advanced-debug`
 writes to its caller's stderr; the native adapter supplies the private bounded sink.
 
+The same opt-in also writes `delivery-debug.log` (rotated to
+`delivery-debug.previous.log` when debugging is enabled, capped near 1 MiB) in
+that directory: paced-delivery metadata only — start/sent byte counts and
+offsets, lease/send errors, finish results and which focus-guard check failed.
+It never contains transcript text.
+
 Hardware-free tests run through CTest, including fake-child cancellation, short
 injected warmup/request deadlines, duplicate/stale replies, malformed frames,
 missing/hash-mismatched model files and symlink refusal. Default production

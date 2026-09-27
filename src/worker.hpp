@@ -15,6 +15,10 @@ struct WorkerReply {
     std::string error;
 };
 
+// Opens (rotating `previous`) an owner-private 0600 file in the FrameYap state
+// directory, or throws. Used only for opt-in advanced debugging.
+int open_private_debug_log(const char* name, const char* previous);
+
 class Worker {
 public:
     explicit Worker(std::chrono::milliseconds warmup_timeout = std::chrono::seconds(120),

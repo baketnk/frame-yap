@@ -138,21 +138,6 @@ void check_log_target(int dir, const char* name) {
     ::close(fd);
     if (!valid) throw std::runtime_error("unsafe existing worker debug log");
 }
-int create_debug_log() {
-    int dir = state_directory();
-    try {
-        check_log_target(dir, "worker-debug.log");
-        check_log_target(dir, "worker-debug.previous.log");
-        if (::unlinkat(dir, "worker-debug.previous.log", 0) && errno != ENOENT)
-            throw std::runtime_error("cannot rotate worker debug log");
-        if (::renameat(dir, "worker-debug.log", dir, "worker-debug.previous.log") && errno != ENOENT)
-            throw std::runtime_error("cannot rotate worker debug log");
-        int fd = ::openat(dir, "worker-debug.log", O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
-        if (fd < 0) throw std::runtime_error("cannot create private worker debug log");
-        ::close(dir);
-        return fd;
-    } catch (...) { ::close(dir); throw; }
-}
 void log_bytes(int fd, const unsigned char* data, size_t size) {
     while (size) {
         ssize_t n = ::write(fd, data, size);
@@ -193,6 +178,22 @@ void write_all(int fd, const unsigned char* data, size_t size) {
     }
 }
 } // namespace
+
+int open_private_debug_log(const char* name, const char* previous) {
+    int dir = state_directory();
+    try {
+        check_log_target(dir, name);
+        check_log_target(dir, previous);
+        if (::unlinkat(dir, previous, 0) && errno != ENOENT)
+            throw std::runtime_error("cannot rotate debug log");
+        if (::renameat(dir, name, dir, previous) && errno != ENOENT)
+            throw std::runtime_error("cannot rotate debug log");
+        int fd = ::openat(dir, name, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd < 0) throw std::runtime_error("cannot create private debug log");
+        ::close(dir);
+        return fd;
+    } catch (...) { ::close(dir); throw; }
+}
 
 struct Worker::State {
     pid_t pid = -1;
@@ -293,7 +294,7 @@ void Worker::start(const std::string& python, const std::string& script,
         if (!::mkdtemp(tmp.data())) throw std::runtime_error("cannot create private clip directory");
         state_->dir = tmp.data();
         ::chmod(state_->dir.c_str(), 0700);
-        if (advanced_debug) state_->debug_file = create_debug_log();
+        if (advanced_debug) state_->debug_file = open_private_debug_log("worker-debug.log", "worker-debug.previous.log");
         int in[2]{-1,-1}, out[2]{-1,-1}, debug[2]{-1,-1};
         if (::pipe2(in, O_CLOEXEC) || ::pipe2(out, O_CLOEXEC) ||
             (advanced_debug && ::pipe2(debug, O_CLOEXEC))) {

@@ -21,6 +21,7 @@ struct FocusGuard::Impl {
     bool attempted = false;
     bool armed = false;
     bool dead = false;
+    const char* reason = "none";
 
     ~Impl() { if (connection) xcb_disconnect(connection); }
 
@@ -80,10 +81,12 @@ struct FocusGuard::Impl {
 
     bool snapshot(xcb_window_t& current) {
         xcb_window_t active = XCB_WINDOW_NONE, gamescope = XCB_WINDOW_NONE, actual = XCB_WINDOW_NONE;
-        if (!property_window(active_atom, XCB_ATOM_WINDOW, active) ||
-            !property_window(gamescope_atom, XCB_ATOM_CARDINAL, gamescope) ||
-            !focus(actual) || active != gamescope || active != actual || !keys_up())
-            return false;
+        if (!property_window(active_atom, XCB_ATOM_WINDOW, active)) { reason = "no _NET_ACTIVE_WINDOW"; return false; }
+        if (!property_window(gamescope_atom, XCB_ATOM_CARDINAL, gamescope)) { reason = "no GAMESCOPE_FOCUSED_WINDOW"; return false; }
+        if (!focus(actual)) { reason = "no X input focus"; return false; }
+        if (active != gamescope) { reason = "active != gamescope focus"; return false; }
+        if (active != actual) { reason = "active != X input focus"; return false; }
+        if (!keys_up()) { reason = "key held"; return false; }
         current = active;
         return true;
     }
@@ -92,15 +95,17 @@ struct FocusGuard::Impl {
         while (xcb_generic_event_t* event = xcb_poll_for_event(connection)) {
             const uint8_t type = event->response_type & 0x7f;
             bool bad = type == 0; // asynchronous X error
+            if (bad) reason = "X error";
             if (type == XCB_PROPERTY_NOTIFY) {
                 const auto* e = reinterpret_cast<xcb_property_notify_event_t*>(event);
-                if (e->window == root && (e->atom == active_atom || e->atom == gamescope_atom)) bad = true;
+                if (e->window == root && e->atom == active_atom) { bad = true; reason = "_NET_ACTIVE_WINDOW changed"; }
+                if (e->window == root && e->atom == gamescope_atom) { bad = true; reason = "GAMESCOPE_FOCUSED_WINDOW changed"; }
             } else if (type == XCB_FOCUS_OUT) {
                 const auto* e = reinterpret_cast<xcb_focus_out_event_t*>(event);
-                if (e->event == target) bad = true;
+                if (e->event == target) { bad = true; reason = "FocusOut on target"; }
             } else if (type == XCB_DESTROY_NOTIFY) {
                 const auto* e = reinterpret_cast<xcb_destroy_notify_event_t*>(event);
-                if (e->window == target) bad = true;
+                if (e->window == target) { bad = true; reason = "target destroyed"; }
             } else if (type == XCB_CREATE_NOTIFY || type == XCB_UNMAP_NOTIFY ||
                        type == XCB_MAP_NOTIFY || type == XCB_MAP_REQUEST ||
                        type == XCB_REPARENT_NOTIFY || type == XCB_CONFIGURE_NOTIFY ||
@@ -122,18 +127,22 @@ struct FocusGuard::Impl {
                 case XCB_CIRCULATE_NOTIFY: window = reinterpret_cast<xcb_circulate_notify_event_t*>(event)->window; break;
                 case XCB_CIRCULATE_REQUEST: window = reinterpret_cast<xcb_circulate_request_event_t*>(event)->window; break;
                 }
-                if (window == target) bad = true;
+                if (window == target) { bad = true; reason = "structure event on target"; }
             }
             std::free(event);
             if (bad) return false;
         }
-        return !failed();
+        if (failed()) { reason = "X connection failed"; return false; }
+        return true;
     }
 
     bool check() {
-        if (!armed || failed() || !drain_events()) { dead = true; return false; }
+        if (!armed || dead) { reason = armed ? reason : "not armed"; dead = true; return false; }
+        if (failed() || !drain_events()) { dead = true; return false; }
         xcb_window_t current = XCB_WINDOW_NONE;
-        if (!snapshot(current) || current != target || !drain_events()) {
+        if (!snapshot(current)) { dead = true; return false; }
+        if (current != target) { reason = "focus moved to another window"; dead = true; return false; }
+        if (!drain_events()) {
             dead = true;
             return false;
         }
@@ -178,6 +187,7 @@ bool FocusGuard::arm() {
 }
 
 bool FocusGuard::valid() { return impl_->check(); }
+const char* FocusGuard::failure() const { return impl_->reason; }
 void FocusGuard::invalidate() { impl_->dead = true; impl_->armed = false; }
 
 } // namespace frameyap

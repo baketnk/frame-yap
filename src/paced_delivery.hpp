@@ -13,6 +13,8 @@ class PacedDelivery {
 public:
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
     using Guard = std::function<bool()>;
+    // Opt-in diagnostics: metadata only (sizes, offsets, reasons), never text.
+    using Trace = std::function<void(const std::string&)>;
     struct Outcome {
         DeliveryResult result;
         bool began;       // first send may have reached the compositor
@@ -32,6 +34,7 @@ public:
     bool active() const { return bool(task_); }
     bool began() const { return task_ && task_->began; }
     void cancel(); // drops and scrubs the remaining literal; never sends Enter
+    void set_trace(Trace trace) { trace_ = std::move(trace); }
 private:
     struct Task {
         std::string text;
@@ -44,10 +47,12 @@ private:
     bool valid_guard() const;
     Outcome finish(DeliveryResult result, bool focus_lost = false);
     void release_if_idle();
+    void trace(const std::string& line) const;
     DeliveryFactory acquire_;
     Clock clock_;
     std::function<void()> release_idle_;
     Guard permitted_;
+    Trace trace_;
     std::unique_ptr<Task> task_;
     std::optional<std::chrono::steady_clock::time_point> last_commit_;
     bool retained_ = false;

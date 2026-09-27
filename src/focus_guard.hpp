@@ -18,6 +18,8 @@ public:
     bool arm();
     bool valid();
     void invalidate();
+    // Static label of the most recent failed check, for opt-in diagnostics.
+    const char* failure() const;
 
 private:
     struct Impl;

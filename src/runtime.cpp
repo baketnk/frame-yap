@@ -17,6 +17,7 @@
 #include <memory>
 #include <stdexcept>
 #include <thread>
+#include <unistd.h>
 
 namespace frameyap {
 namespace {
@@ -64,12 +65,50 @@ private:
     Worker worker_;
     std::string backend_, model_, manifest_, root_;
 };
+// Opt-in (Advanced debug) native delivery diagnostics. Metadata only: never
+// transcript text. Owner-private file next to worker-debug.log.
+class DeliveryTrace {
+public:
+    ~DeliveryTrace() { set_enabled(false); }
+    void set_enabled(bool enabled) {
+        if (enabled == enabled_) return;
+        enabled_ = enabled;
+        if (fd_ >= 0) { ::close(fd_); fd_ = -1; }
+        if (enabled_) {
+            try { fd_ = open_private_debug_log("delivery-debug.log", "delivery-debug.previous.log"); }
+            catch (...) { fd_ = -1; }
+            written_ = 0;
+        }
+    }
+    void operator()(const std::string& line) {
+        if (fd_ < 0 || written_ > 1024 * 1024) return;
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_).count();
+        const auto out = std::to_string(ms) + "ms " + line + "\n";
+        if (::write(fd_, out.data(), out.size()) > 0) written_ += out.size();
+    }
+private:
+    bool enabled_ = false;
+    int fd_ = -1;
+    size_t written_ = 0;
+    std::chrono::steady_clock::time_point start_ = std::chrono::steady_clock::now();
+};
 class NativeFocus final : public ControllerFocus {
 public:
-    bool arm() override { return guard_.arm(); }
-    bool valid() override { return guard_.valid(); }
+    explicit NativeFocus(DeliveryTrace& trace) : trace_(trace) {}
+    bool arm() override {
+        if (guard_.arm()) { trace_("focus armed"); return true; }
+        trace_(std::string("focus arm failed: ") + guard_.failure());
+        return false;
+    }
+    bool valid() override {
+        if (guard_.valid()) return true;
+        trace_(std::string("focus invalid: ") + guard_.failure());
+        return false;
+    }
 private:
     FocusGuard guard_;
+    DeliveryTrace& trace_;
 };
 } // namespace
 int run(const Options& options) {
@@ -85,6 +124,8 @@ int run(const Options& options) {
     auto old_term = std::signal(SIGTERM, signal_stop);
     struct Restore { decltype(old_int) a, b; ~Restore() { std::signal(SIGINT, a); std::signal(SIGTERM, b); } } restore{old_int, old_term};
     Overlay overlay(options.assets, options.font, options.mount);
+    DeliveryTrace trace;
+    trace.set_enabled(overlay.advanced_debug());
     NativeWorker worker(options);
     NativeAudio audio;
     const DeliveryFactory acquire = [&]() -> std::unique_ptr<DeliveryLease> {
@@ -94,7 +135,8 @@ int run(const Options& options) {
     };
     PacedDelivery paced(acquire, std::chrono::steady_clock::now,
                         [] { TextInput::release_idle(); }, [] { return !interrupted; });
-    Controller controller(audio, worker, acquire, [] { return std::make_unique<NativeFocus>(); },
+    paced.set_trace([&trace](const std::string& line) { trace(line); });
+    Controller controller(audio, worker, acquire, [&trace] { return std::make_unique<NativeFocus>(trace); },
                           overlay.quick_inputs(), overlay.auto_insert(), overlay.advanced_debug(),
                           overlay.close_mic_when_idle(), &paced);
     namespace fs = std::filesystem;
@@ -190,6 +232,7 @@ int run(const Options& options) {
                 "Selected model unavailable or being checked. Recording disabled until offline verification.");
         }
         bool debug_changed = overlay.advanced_debug() != previous_debug;
+        trace.set_enabled(overlay.advanced_debug());
         controller.settings(overlay.auto_insert(), overlay.advanced_debug(), overlay.close_mic_when_idle());
         // Debug consent and model actions cancel work before any stale input.
         if (debug_changed || !model_actions.empty()) {
