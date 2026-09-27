@@ -76,6 +76,12 @@ not every frame. Settings toggles 12/24-hour time and cycles date Off →
 MM/DD/YYYY → DD/MM/YYYY → YYYY-MM-DD → Off. These only affect display;
 mount choices remain in Settings.
 
+Settings → **About** replaces the settings area with static information: the
+build version (plus git commit when built from an untagged or modified tree),
+source URL, MIT license, the selected model's name and license from its manifest,
+the bundled font's license, and a pointer to `docs/third-party.md`. It performs
+no checks and no network access; Settings returns. Recording controls stay live.
+
 The complete transcript preview is paginated by glyph width and six-line
 height; Previous and Next navigate it without changing the source transcript.
 Status fits on the single status line; the old bottom detail label is gone.

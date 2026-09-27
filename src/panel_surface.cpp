@@ -31,10 +31,10 @@ struct Rect {
 enum class Control { Review, Settings, Bindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
                      Clock24h, Date, LockLayout, CloseMicWhenIdle, Models, ModelRow,
-                     ModelInstall, ModelPrev, ModelNext };
-enum class Tab { Review, Settings, Models };
+                     ModelInstall, ModelPrev, ModelNext, About };
+enum class Tab { Review, Settings, Models, About };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 32> buttons{{
+constexpr std::array<Button, 33> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
@@ -67,6 +67,7 @@ constexpr std::array<Button, 32> buttons{{
     {{514, 530, 454, 36}, Control::ModelInstall, "Install"},
     {{32, 530, 214, 36}, Control::ModelPrev, "Previous"},
     {{260, 530, 214, 36}, Control::ModelNext, "Next"},
+    {{346, 378, 154, 44}, Control::About, "About"},
 }};
 std::optional<UiAction> action(Control c) {
     switch (c) {
@@ -126,7 +127,7 @@ struct PanelSurface::Impl {
     DateFormat date_format = DateFormat::MonthDayYear;
     std::time_t clock_time = std::time(nullptr);
     ClockLabel displayed_clock;
-    std::string placement_note, binding_note;
+    std::string placement_note, binding_note, version;
     StatusIndicators indicators;
     std::array<int, 2> pressed{{-1, -1}};
     std::array<PanelSurface::Clock::time_point, 2> press_time{};
@@ -354,7 +355,7 @@ struct PanelSurface::Impl {
     }
     bool visible(Control c) const {
         if (panel.quick_open && c != Control::Cancel && c != Control::Enter && c != Control::Quit) return false;
-        if (c == Control::Models) return tab == Tab::Settings;
+        if (c == Control::Models || c == Control::About) return tab == Tab::Settings;
         if (c == Control::ModelRow) return tab == Tab::Models && !install_confirm;
         if (c == Control::ModelPrev || c == Control::ModelNext) return tab == Tab::Models;
         if (c == Control::ModelInstall) return tab == Tab::Models;
@@ -394,6 +395,27 @@ struct PanelSurface::Impl {
     void reset() {
         pressed.fill(-1);
         drag_cursor = -1;
+    }
+    // Static facts only: nothing here is a live check of the model or device.
+    void about() {
+        rounded({32, 204, 936, 334}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
+        text("FrameYap", 48, 244, 30, ink, 952);
+        text("Version " + (version.empty() ? std::string("unknown") : version), 48, 276, 22, cyan, 952);
+        text("On-device voice typing for Steam Frame. Nothing is sent to the cloud.", 48, 306, 19, muted, 952);
+        const auto it = std::find_if(panel.models.begin(), panel.models.end(), [&](const auto& m) { return m.id == panel.selected_backend; });
+        const std::array<std::pair<const char*, std::string>, 5> rows{{
+            {"Source", "github.com/baketnk/frame-yap"},
+            {"License", "MIT (FrameYap contributors)"},
+            {"Model", it == panel.models.end() ? "none selected" :
+                      it->license.empty() ? it->name : it->name + " (" + it->license + ")"},
+            {"Font", "Inconsolata (SIL OFL 1.1)"},
+            {"Notices", "docs/third-party.md in the source"}}};
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const int y = 352 + int(i) * 36;
+            text(rows[i].first, 48, y, 22, cyan, 190);
+            text(rows[i].second, 200, y, 22, ink, 952);
+        }
+        text("Press Settings to go back.", 48, 524, 17, muted, 952);
     }
     bool render(const Panel& p, Clock::time_point now, bool animate) {
         if (!animation_start) animation_start = now;
@@ -502,6 +524,8 @@ struct PanelSurface::Impl {
                     text("Select Install to review full source, size and license before download.", 32, 225, 18, cyan, 968);
                 }
             } else text("No model selected.", 32, 225, 18, pink, 968);
+        } else if (tab == Tab::About) {
+            about();
         } else {
             text("Hold Quit: hold 0.9s then release. Lasers anytime: system-wide; may affect games.",
                  32, 204, 18, pink, 968);
@@ -647,6 +671,7 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
         impl_->tab = Tab::Models; impl_->model_page = 0;
         impl_->install_confirm = false; impl_->consent_snapshot.reset(); impl_->reset(); impl_->dirty = true;
     }
+    else if (c == Control::About) { impl_->tab = Tab::About; impl_->reset(); impl_->dirty = true; }
     else if (c == Control::ModelRow) {
         const auto& model = impl_->panel.models[impl_->model_page * 6 + index - 23];
         result.model_action = ModelAction{model.id, false, {}};
@@ -699,6 +724,9 @@ void PanelSurface::set_layout_locked(bool locked) {
     if (impl_->layout_locked != locked) {
         impl_->layout_locked = locked; impl_->reset(); impl_->dirty = true;
     }
+}
+void PanelSurface::set_version(std::string version) {
+    if (impl_->version != version) { impl_->version = std::move(version); impl_->dirty = true; }
 }
 void PanelSurface::set_placement_note(std::string note) {
     if (impl_->placement_note != note) { impl_->placement_note = std::move(note); impl_->dirty = true; }

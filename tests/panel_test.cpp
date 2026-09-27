@@ -518,5 +518,24 @@ int main(int argc, char** argv) {
     model_panel.model_busy = true;
     chooser.render(model_panel);
     no_action(chooser.pointer_up(0, 700, 546)); // change invalidates approval
+    // About: reached only from Settings; display-only, recording stays usable.
+    PanelSurface about(argv[1], Mount::World, {}, {.enabled = false});
+    Panel about_panel{"Ready", "", "", true, false};
+    about.render(about_panel);
+    no_action(click(about, 420, 400)); // hidden on Review
+    assert(!about.render(about_panel));
+    no_action(click(about, 290, 160)); about.render(about_panel); // Settings
+    const auto settings_pixels = about.pixels();
+    no_action(click(about, 420, 400)); // About
+    assert(about.render(about_panel));
+    const auto about_pixels = about.pixels();
+    assert(about_pixels != settings_pixels);
+    no_action(click(about, 100, 250)); // Settings' World-space button is not live under About
+    no_action(click(about, 700, 400)); // nor Lasers anytime
+    about.set_version("0.1.202609261200");
+    assert(about.render(about_panel) && about.pixels() != about_pixels);
+    assert(click(about, 100, 610).action == UiAction::BeginRecord);
+    no_action(click(about, 290, 160)); about.render(about_panel); // Settings returns
+    assert(about.pixels() == settings_pixels);
     std::cout << "panel checks passed (no OpenVR, microphone or input injection)\n";
 }

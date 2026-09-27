@@ -189,6 +189,8 @@ struct Overlay::Impl {
             surface.set_layout_locked(config.lock_layout);
             surface.set_clock_24h(config.clock_24h);
             surface.set_date_format(config.date_format);
+            surface.set_version(std::string(FRAMEYAP_VERSION) +
+                                (std::string(FRAMEYAP_GIT_INFO).empty() ? "" : " " FRAMEYAP_GIT_INFO));
             overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_VisibleInDashboard, true), overlay, "VisibleInDashboard");
             vr::HmdVector2_t mouse_scale{{float(W), float(H)}};
             overlay_check(overlay->SetOverlayMouseScale(handle, &mouse_scale), overlay, "SetOverlayMouseScale");

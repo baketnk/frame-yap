@@ -59,6 +59,8 @@ public:
     void set_layout_locked(bool locked);
     void reset_pointers();
     void set_placement_note(std::string note);
+    // Shown on Settings -> About; empty shows "version unknown".
+    void set_version(std::string version);
     void set_lasers_anytime(bool enabled);
     void set_advanced_debug(bool enabled);
     void set_auto_insert(bool enabled);
