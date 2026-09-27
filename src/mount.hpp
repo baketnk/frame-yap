@@ -11,6 +11,8 @@ enum class Mount { World, LeftWrist, RightWrist, Head };
 
 std::string_view mount_name(Mount mount);
 std::optional<Mount> parse_mount(std::string_view name);
+// No mount means hide the panel until the selected wrist is tracked again.
+std::optional<Mount> effective_mount(Mount selected, bool wrist_tracked, bool wrist_world_fallback);
 
 // Row-major 3x4 affine transform (OpenVR axes: +Y up, -Z forward).
 using Matrix34 = std::array<std::array<float, 4>, 3>;

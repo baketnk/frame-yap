@@ -58,6 +58,15 @@ int main() {
     }
     CHECK(!parse_mount("World")); CHECK(!parse_mount("head\n")); CHECK(!parse_mount("left_wrist"));
     CHECK(!parse_mount("")); CHECK(!parse_mount("world extra"));
+    for (auto wrist : {Mount::LeftWrist, Mount::RightWrist}) {
+        CHECK(effective_mount(wrist, true, true) == wrist);
+        CHECK(effective_mount(wrist, true, false) == wrist);
+        CHECK(effective_mount(wrist, false, true) == Mount::World);
+        CHECK(!effective_mount(wrist, false, false));
+        CHECK(effective_mount(wrist, true, false) == wrist); // restored tracking
+    }
+    CHECK(effective_mount(Mount::World, false, false) == Mount::World);
+    CHECK(effective_mount(Mount::Head, false, false) == Mount::Head);
 
     CHECK(near(mount_width(Mount::World), .85f)); CHECK(near(mount_width(Mount::Head), .85f));
     CHECK(near(mount_width(Mount::LeftWrist), .30f)); CHECK(near(mount_width(Mount::RightWrist), .30f));

@@ -59,6 +59,7 @@ CONFIG_DEFAULTS = {
     "close_mic_when_idle": False,
     "backend": "redux",
     "lock_layout": False,
+    "wrist_world_fallback": True,
     "clock_24h": False,
     "date_format": "mdy",
     "quick_inputs": ["/new", "/questions", "/help"],
@@ -167,6 +168,8 @@ def normalized_config(data):
     fixed["backend"] = backend if isinstance(backend, str) and BACKEND_RE.fullmatch(backend) else "redux"
     layout = data.get("lock_layout", False)
     fixed["lock_layout"] = layout if type(layout) is bool else False
+    fallback = data.get("wrist_world_fallback", True)
+    fixed["wrist_world_fallback"] = fallback if type(fallback) is bool else True
     clock = data.get("clock_24h", False)
     fixed["clock_24h"] = clock if type(clock) is bool else False
     date = data.get("date_format", "mdy")

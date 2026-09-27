@@ -89,6 +89,7 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(json.loads(config.read_text())["gradient"],
                          {"enabled": True, "period_seconds": 30, "strength": 0.12})
         self.assertIs(json.loads(config.read_text())["lock_layout"], False)
+        self.assertIs(json.loads(config.read_text())["wrist_world_fallback"], True)
         self.assertEqual(list(config.parent.glob("config.json.backup-*")), [])
         self.assertIn("PYTHONDONTWRITEBYTECODE=1", launcher.read_text())
         self.assertTrue(os.access(root / "versions/0.1.202609241530/runtime/bin/helper", os.X_OK))
@@ -186,6 +187,7 @@ class InstallTests(unittest.TestCase):
         fixed["close_mic_when_idle"] = True
         fixed["backend"] = "custom_v2-1"
         fixed["lock_layout"] = True
+        fixed["wrist_world_fallback"] = False
         fixed["clock_24h"] = True
         fixed["date_format"] = "iso"
         fixed["buttons"]["enter"] = ""  # intentional disabling survives upgrades
@@ -200,6 +202,7 @@ class InstallTests(unittest.TestCase):
         self.assertIs(json.loads(config.read_text())["close_mic_when_idle"], True)
         self.assertEqual(json.loads(config.read_text())["backend"], "custom_v2-1")
         self.assertIs(json.loads(config.read_text())["lock_layout"], True)
+        self.assertIs(json.loads(config.read_text())["wrist_world_fallback"], False)
         self.assertIs(json.loads(config.read_text())["clock_24h"], True)
         self.assertEqual(json.loads(config.read_text())["date_format"], "iso")
         self.assertEqual(len(list(config.parent.glob("config.json.backup-*"))), 1)
@@ -221,6 +224,7 @@ class InstallTests(unittest.TestCase):
         self.assertIs(fixed["advanced_debug"], False)
         self.assertIs(fixed["auto_insert"], False)
         self.assertIs(fixed["lock_layout"], False)
+        self.assertIs(fixed["wrist_world_fallback"], True)
         self.assertEqual(fixed["wrist"]["x"], 0.04)
         self.assertEqual(fixed["wrist"]["y"], 0.18)
         self.assertEqual(fixed["wrist"]["width"], 0.30)
@@ -349,6 +353,12 @@ class InstallTests(unittest.TestCase):
             self.assertIs(fixed["lock_layout"], False)
             self.assertEqual(fixed["font"], "/custom/font.ttf")
             self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+
+    def test_wrist_world_fallback_normalization(self):
+        self.assertIs(installer.normalized_config({})["wrist_world_fallback"], True)
+        self.assertIs(installer.normalized_config({"wrist_world_fallback": False})["wrist_world_fallback"], False)
+        for invalid in ("false", 0, None, [], {}):
+            self.assertIs(installer.normalized_config({"wrist_world_fallback": invalid})["wrist_world_fallback"], True)
 
     def test_new_config_fields_repair_only_invalid_values(self):
         archive, digest = self.package("0.1.202609241530")

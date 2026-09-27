@@ -74,7 +74,12 @@ release) and Lasers anytime (system-wide lasers may affect games). The header
 updates when the displayed minute, date, battery or dashboard state changes,
 not every frame. Settings toggles 12/24-hour time and cycles date Off →
 MM/DD/YYYY → DD/MM/YYYY → YYYY-MM-DD → Off. These only affect display;
-mount choices remain in Settings.
+mount choices remain in Settings. The Settings controls form one vertically
+scrollable list: hover the laser over the list and use the right stick to scroll.
+The tabs, status and action footer remain fixed. Scrolling cancels a pending
+pointer press rather than activating a different control. There are no Settings
+pages. OpenVR's discrete/smooth laser scroll events are requested; right-stick
+behavior with SteamVR's keyboard open still needs a live Frame check.
 
 Settings → **About** replaces the settings area with static information: the
 build version (plus git commit when built from an untagged or modified tree),
@@ -142,6 +147,7 @@ installer creates one with defaults on first install. Copy the shipped
   "close_mic_when_idle": false,
   "backend": "redux",
   "lock_layout": false,
+  "wrist_world_fallback": true,
   "clock_24h": false,
   "date_format": "mdy",
   "quick_inputs": ["/new", "/questions", "/help"],
@@ -390,7 +396,7 @@ fade from 60° to 75°, then hidden (including laser interaction). Pitch, yaw an
 roll contribute together; turning the wrist away or moving the head around it
 changes the angle. OpenVR's overlay alpha changes without rerendering the panel.
 World and head mounts do not fade. Missing headset tracking hides a wrist panel;
-a lost wrist still uses the existing world-space fallback. Headset readability,
+by default a lost wrist uses a world-space fallback. Headset readability,
 fade feel and interaction at the threshold still need live acceptance.
 
 To tune the selected wrist, set `wrist` in `config.json` as in the example above:
@@ -401,7 +407,13 @@ are read at startup, and do not alter world/head placement. Invalid values
 fail direct native startup; the installer backs up and repairs invalid entries.
 A missing/untracked selected wrist temporarily falls back to world space,
 with a visible explanation in Settings, then reattaches when tracking returns.
-The saved preference is not replaced by the fallback. These offsets and sizes are
+Use Settings → **Wrist world fallback** to switch between the default
+front-of-you fallback (ON) and hiding the panel when wrist tracking is lost
+(OFF). It reappears on the selected wrist when tracking returns. The toggle is
+saved to `"wrist_world_fallback"` in `config.json`; manual edits take effect on
+restart. This option affects wrist mounts only, not World or Head. While hidden,
+pointer controls cannot be used.
+The saved mount preference is not replaced by the fallback. These offsets and sizes are
 initial choices, **not headset-comfort acceptance**.
 
 A selection saves only the mount token to `$XDG_CONFIG_HOME/frameyap/mount`

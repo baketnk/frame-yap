@@ -6,6 +6,7 @@
   "close_mic_when_idle": false,
   "backend": "redux",
   "lock_layout": false,
+  "wrist_world_fallback": true,
   "clock_24h": false,
   "date_format": "mdy",
   "quick_inputs": ["/new", "/questions", "/help"],

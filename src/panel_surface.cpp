@@ -31,10 +31,10 @@ struct Rect {
 enum class Control { Review, Settings, Bindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
                      Clock24h, Date, LockLayout, CloseMicWhenIdle, Models, ModelRow,
-                     ModelInstall, ModelPrev, ModelNext, About };
+                     ModelInstall, ModelPrev, ModelNext, About, WristWorldFallback };
 enum class Tab { Review, Settings, Models, About };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 33> buttons{{
+constexpr std::array<Button, 34> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
@@ -68,7 +68,10 @@ constexpr std::array<Button, 33> buttons{{
     {{32, 530, 214, 36}, Control::ModelPrev, "Previous"},
     {{260, 530, 214, 36}, Control::ModelNext, "Next"},
     {{346, 378, 154, 44}, Control::About, "About"},
+    {{32, 584, 936, 50}, Control::WristWorldFallback, "Wrist world fallback"},
 }};
+constexpr Rect settings_view{32, 232, 936, 316};
+constexpr int settings_max_scroll = 634 - (settings_view.y + settings_view.h);
 std::optional<UiAction> action(Control c) {
     switch (c) {
     case Control::Record: return UiAction::Record;
@@ -87,6 +90,12 @@ std::optional<Mount> mounting(Control c) {
     case Control::Head: return Mount::Head;
     default: return {};
     }
+}
+bool settings_control(Control c) {
+    return c == Control::Models || c == Control::About || mounting(c) ||
+           c == Control::Recenter || c == Control::LasersAnytime || c == Control::AdvancedDebug ||
+           c == Control::AutoInsert || c == Control::Clock24h || c == Control::Date ||
+           c == Control::CloseMicWhenIdle || c == Control::WristWorldFallback;
 }
 // Invalid bytes become visible replacement glyphs, never control commands.
 uint32_t next_codepoint(std::string_view s, size_t& i) {
@@ -122,8 +131,10 @@ struct PanelSurface::Impl {
     Color background, card, ink, muted, cyan, pink;
     Tab tab = Tab::Review;
     bool dirty = true, lasers_anytime = false, advanced_debug = false, auto_insert = false;
-    bool close_mic_when_idle = false;
+    bool close_mic_when_idle = false, wrist_world_fallback = true;
     bool clock_24h = false, layout_locked = false;
+    float settings_scroll = 0.f;
+    bool clip_settings = false;
     DateFormat date_format = DateFormat::MonthDayYear;
     std::time_t clock_time = std::time(nullptr);
     ClockLabel displayed_clock;
@@ -192,11 +203,15 @@ struct PanelSurface::Impl {
         return result;
     }
     void rect(Rect r, Color c) {
-        for (int y = std::max(r.y, 0); y < std::min(H, r.y + r.h); ++y)
-            for (int x = std::max(r.x, 0); x < std::min(W, r.x + r.w); ++x)
+        for (int y = std::max(r.y, clip_settings ? settings_view.y : 0);
+             y < std::min(clip_settings ? settings_view.y + settings_view.h : H, r.y + r.h); ++y)
+            for (int x = std::max(r.x, clip_settings ? settings_view.x : 0);
+                 x < std::min(clip_settings ? settings_view.x + settings_view.w : W, r.x + r.w); ++x)
                 std::copy(c.begin(), c.end(), pixels.begin() + (size_t(y) * W + x) * 4);
     }
     void blend(int x, int y, Color color, float amount) {
+        if (clip_settings && (x < settings_view.x || x >= settings_view.x + settings_view.w ||
+                              y < settings_view.y || y >= settings_view.y + settings_view.h)) return;
         auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
         // Straight-alpha source-over, including strokes in the transparent margin.
         const float alpha = amount * color[3] / 255.f;
@@ -334,7 +349,9 @@ struct PanelSurface::Impl {
             for (unsigned row = 0; row < b.rows; ++row)
                 for (unsigned col = 0; col < b.width; ++col) {
                     int xx = x + glyph->bitmap_left + int(col), yy = baseline - glyph->bitmap_top + int(row);
-                    if (xx < 0 || xx >= right || xx >= W || yy < 0 || yy >= H) continue;
+                    if (xx < 0 || xx >= right || xx >= W || yy < 0 || yy >= H ||
+                        (clip_settings && (xx < settings_view.x || xx >= settings_view.x + settings_view.w ||
+                                           yy < settings_view.y || yy >= settings_view.y + settings_view.h))) continue;
                     unsigned char alpha = b.buffer[int(row) * b.pitch + int(col)];
                     auto* dst = pixels.data() + (size_t(yy) * W + xx) * 4;
                     for (int k = 0; k < 3; ++k)
@@ -355,7 +372,7 @@ struct PanelSurface::Impl {
     }
     bool visible(Control c) const {
         if (panel.quick_open && c != Control::Cancel && c != Control::Enter && c != Control::Quit) return false;
-        if (c == Control::Models || c == Control::About) return tab == Tab::Settings;
+        if (c == Control::Models || c == Control::About || c == Control::WristWorldFallback) return tab == Tab::Settings;
         if (c == Control::ModelRow) return tab == Tab::Models && !install_confirm;
         if (c == Control::ModelPrev || c == Control::ModelNext) return tab == Tab::Models;
         if (c == Control::ModelInstall) return tab == Tab::Models;
@@ -385,10 +402,16 @@ struct PanelSurface::Impl {
                                                       (model_page + 1) * 6 < panel.models.size();
         return true;
     }
+    Rect button_rect(const Button& b) const {
+        auto r = b.r;
+        if (settings_control(b.id)) r.y -= int(std::lround(settings_scroll));
+        return r;
+    }
     int hit(float x, float y) const {
         for (size_t i = 0; i < buttons.size(); ++i) {
             if (buttons[i].id == Control::ModelRow && model_page * 6 + (i - 23) >= panel.models.size()) continue;
-            if (visible(buttons[i].id) && enabled(buttons[i].id) && buttons[i].r.contains(x, y)) return int(i);
+            if (settings_control(buttons[i].id) && !settings_view.contains(x, y)) continue;
+            if (visible(buttons[i].id) && enabled(buttons[i].id) && button_rect(buttons[i]).contains(x, y)) return int(i);
         }
         return -1;
     }
@@ -536,8 +559,10 @@ struct PanelSurface::Impl {
         for (size_t i = 0; i < buttons.size(); ++i) {
             const auto& b = buttons[i];
             if (!visible(b.id)) continue;
-            bool on = enabled(b.id);
             if (b.id == Control::ModelRow && model_page * 6 + (i - 23) >= panel.models.size()) continue;
+            const Rect r = button_rect(b);
+            clip_settings = settings_control(b.id);
+            bool on = enabled(b.id);
             bool selected = (b.id == Control::Review && tab == Tab::Review) ||
                             (b.id == Control::Settings && tab == Tab::Settings) ||
                             (mounting(b.id) && *mounting(b.id) == mount) ||
@@ -551,14 +576,14 @@ struct PanelSurface::Impl {
             const Color accent = b.id == Control::Record && panel.recording ? pink : cyan;
             const bool highlighted = on && (selected || b.id == Control::Record ||
                                              (b.id == Control::Insert && panel.transcript.size()));
-            rounded(b.r, std::min(16, b.r.h / 3), fill,
+            rounded(r, std::min(16, r.h / 3), fill,
                     !on ? mix(card, muted, .13f) : highlighted ? accent : mix(card, muted, .38f),
                     highlighted ? .23f : 0.f, highlighted ? 2 : 1);
             if (b.id == Control::Quit && (pressed[0] == int(i) || pressed[1] == int(i))) {
                 const int cursor = pressed[0] == int(i) ? 0 : 1;
                 const float fraction = std::clamp(float(std::chrono::duration_cast<std::chrono::milliseconds>(
                     PanelSurface::Clock::now() - press_time[cursor]).count()) / PanelSurface::quit_hold.count(), 0.f, 1.f);
-                rect({b.r.x + 7, b.r.y + b.r.h - 9, int((b.r.w - 14) * fraction), 3}, pink);
+                rect({r.x + 7, r.y + r.h - 9, int((r.w - 14) * fraction), 3}, pink);
             }
             const std::string label = b.id == Control::ModelRow ? [&]() {
                     const auto& m = panel.models[model_page * 6 + i - 23];
@@ -571,23 +596,31 @@ struct PanelSurface::Impl {
                 b.id == Control::Date ? (date_format == DateFormat::Off ? "Date: Off" :
                     date_format == DateFormat::MonthDayYear ? "Date: MM/DD/YYYY" :
                     date_format == DateFormat::DayMonthYear ? "Date: DD/MM/YYYY" : "Date: YYYY-MM-DD") : b.label;
-            text(label, b.r.x + 16, b.r.y + b.r.h / 2 + 9,
+            text(label, r.x + 16, r.y + r.h / 2 + 9,
                  b.id == Control::Date ? 23 : b.id == Control::CloseMicWhenIdle ? 22 :
                  b.id == Control::Enter ? 20 : 27,
-                 on ? ink : mix(background, muted, .48f), b.r.x + b.r.w - 8);
-            if (mounting(b.id) && selected) text("ON", b.r.x + b.r.w - 56, b.r.y + 38, 23, cyan, b.r.x + b.r.w - 12);
+                 on ? ink : mix(background, muted, .48f), r.x + r.w - 8);
+            if (mounting(b.id) && selected) text("ON", r.x + r.w - 56, r.y + 38, 23, cyan, r.x + r.w - 12);
             if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug || b.id == Control::AutoInsert ||
-                b.id == Control::LockLayout || b.id == Control::CloseMicWhenIdle) {
+                b.id == Control::LockLayout || b.id == Control::CloseMicWhenIdle || b.id == Control::WristWorldFallback) {
                 bool active = b.id == Control::LasersAnytime ? lasers_anytime :
                               b.id == Control::AutoInsert ? auto_insert :
                               b.id == Control::LockLayout ? layout_locked :
-                              b.id == Control::CloseMicWhenIdle ? close_mic_when_idle : advanced_debug;
-                text(active ? "ON" : "OFF", b.r.x + b.r.w - 66, b.r.y + b.r.h / 2 + 9, 22,
-                     active ? cyan : muted, b.r.x + b.r.w - 12);
+                              b.id == Control::CloseMicWhenIdle ? close_mic_when_idle :
+                              b.id == Control::WristWorldFallback ? wrist_world_fallback : advanced_debug;
+                text(active ? "ON" : "OFF", r.x + r.w - 66, r.y + r.h / 2 + 9, 22,
+                     active ? cyan : muted, r.x + r.w - 12);
             }
+            clip_settings = false;
         }
-        if (tab == Tab::Settings)
+        if (tab == Tab::Settings) {
+            rect({976, settings_view.y, 3, settings_view.h}, mix(card, muted, .24f));
+            const int thumb = settings_view.h * settings_view.h / (settings_view.h + settings_max_scroll);
+            rect({975, settings_view.y + int(settings_scroll * (settings_view.h - thumb) / settings_max_scroll),
+                  5, thumb}, cyan);
+            text("Right stick: scroll", 32, 565, 16, muted, 320);
             text("OFF: discard idle audio; ON: spike / start latency.", 390, 565, 16, muted, 887);
+        }
         if (tab == Tab::Models && !panel.model_note.empty()) {
             // The install/navigation controls occupy y=530..566; the status
             // belongs BELOW the shared footer (574..642), not under buttons.
@@ -664,6 +697,7 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
     else if (c == Control::AutoInsert) result.auto_insert = !impl_->auto_insert;
     else if (c == Control::CloseMicWhenIdle) result.close_mic_when_idle = !impl_->close_mic_when_idle;
     else if (c == Control::LockLayout) result.lock_layout = !impl_->layout_locked;
+    else if (c == Control::WristWorldFallback) result.wrist_world_fallback = !impl_->wrist_world_fallback;
     else if (c == Control::Clock24h) result.clock_24h = !impl_->clock_24h;
     else if (c == Control::Date) result.date_format = static_cast<DateFormat>((static_cast<int>(impl_->date_format) + 1) % 4);
     else if (c == Control::Bindings) { result.open_bindings = true; impl_->reset(); }
@@ -708,6 +742,17 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
     else if (c == Control::Next) { ++impl_->page; impl_->dirty = true; }
     return result;
 }
+bool PanelSurface::scroll_settings(float x, float y, float vertical_delta) {
+    if (impl_->tab != Tab::Settings || impl_->drag_cursor >= 0 ||
+        !settings_view.contains(x, y) || !std::isfinite(vertical_delta)) return false;
+    const float next = std::clamp(impl_->settings_scroll - std::clamp(vertical_delta, -4.f, 4.f) * 48.f,
+                                  0.f, float(settings_max_scroll));
+    if (next == impl_->settings_scroll) return false;
+    impl_->settings_scroll = next;
+    impl_->reset(); // a press must not turn into a click on a different setting
+    impl_->dirty = true;
+    return true;
+}
 void PanelSurface::set_indicators(const StatusIndicators& indicators) {
     if (impl_->indicators != indicators) { impl_->indicators = indicators; impl_->dirty = true; }
 }
@@ -719,6 +764,11 @@ std::vector<PanelSurface::Bounds> PanelSurface::input_regions() const {
     std::vector<Bounds> result{{10, 10, CW - 20, CH - 20}};
     if (!impl_->layout_locked) { result.push_back(grab); result.push_back(scale); }
     return result;
+}
+void PanelSurface::set_wrist_world_fallback(bool enabled) {
+    if (impl_->wrist_world_fallback != enabled) {
+        impl_->wrist_world_fallback = enabled; impl_->reset(); impl_->dirty = true;
+    }
 }
 void PanelSurface::set_layout_locked(bool locked) {
     if (impl_->layout_locked != locked) {

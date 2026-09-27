@@ -38,6 +38,13 @@ std::optional<Mount> parse_mount(std::string_view name) {
     return std::nullopt;
 }
 
+std::optional<Mount> effective_mount(Mount selected, bool wrist_tracked, bool wrist_world_fallback) {
+    if (selected != Mount::LeftWrist && selected != Mount::RightWrist) return selected;
+    if (wrist_tracked) return selected;
+    if (wrist_world_fallback) return Mount::World;
+    return std::nullopt;
+}
+
 std::optional<Matrix34> world_mount_pose(const Matrix34& hmd) {
     for (const auto& row : hmd)
         for (float value : row)

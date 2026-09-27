@@ -215,6 +215,9 @@ Config load_config(const std::filesystem::path& path) {
         } else if (key == "lock_layout") {
             if (!value.is_bool) throw std::runtime_error("Config lock_layout must be a boolean");
             config.lock_layout = value.value == "true";
+        } else if (key == "wrist_world_fallback") {
+            if (!value.is_bool) throw std::runtime_error("Config wrist_world_fallback must be a boolean");
+            config.wrist_world_fallback = value.value == "true";
         } else if (key == "clock_24h") {
             if (!value.is_bool) throw std::runtime_error("Config clock_24h must be a boolean");
             config.clock_24h = value.value == "true";
@@ -350,6 +353,9 @@ bool save_close_mic_when_idle(const std::filesystem::path& path, bool enabled) n
 }
 bool save_lock_layout(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "lock_layout", enabled);
+}
+bool save_wrist_world_fallback(const std::filesystem::path& path, bool enabled) noexcept {
+    return save_bool_option(path, "wrist_world_fallback", enabled);
 }
 bool save_clock_24h(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "clock_24h", enabled);

@@ -31,6 +31,7 @@ struct Config {
     bool auto_insert = false; // opt-in; runtime also requires uninterrupted verified Xwayland focus
     bool close_mic_when_idle = false; // default keeps the device open, discarding idle audio
     bool lock_layout = false; // hide the grab and scale handles when enabled
+    bool wrist_world_fallback = true; // show a world-space panel if a selected wrist loses tracking
     bool clock_24h = false;
     DateFormat date_format = DateFormat::MonthDayYear;
     WristPlacement wrist;
@@ -46,6 +47,7 @@ bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexce
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_close_mic_when_idle(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_lock_layout(const std::filesystem::path& path, bool enabled) noexcept;
+bool save_wrist_world_fallback(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_clock_24h(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_date_format(const std::filesystem::path& path, DateFormat format) noexcept;
 bool save_backend(const std::filesystem::path& path, const std::string& id) noexcept;

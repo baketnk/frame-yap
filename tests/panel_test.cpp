@@ -14,7 +14,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
 }
 void no_action(const SurfaceEvent& event) {
     assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
-           !event.close_mic_when_idle && !event.lock_layout && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action);
+           !event.close_mic_when_idle && !event.lock_layout && !event.wrist_world_fallback && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -327,6 +327,30 @@ int main(int argc, char** argv) {
     surface.set_close_mic_when_idle(true); assert(surface.render(p));
     assert(click(surface, 200, 532).close_mic_when_idle == false);
     surface.set_close_mic_when_idle(false); assert(surface.render(p));
+    // The Settings viewport scrolls continuously under the laser; it never pages.
+    assert(!surface.scroll_settings(290, 160, -1.f)); // tab/header, not settings content
+    assert(!surface.scroll_settings(200, 400, std::numeric_limits<float>::quiet_NaN()));
+    surface.pointer_down(0, 200, 532); // pending mic press must not activate after movement
+    assert(surface.scroll_settings(200, 400, -.5f));
+    no_action(surface.pointer_up(0, 200, 532));
+    assert(surface.render(p));
+    assert(!surface.scroll_settings(200, 610, -1.f)); // fixed footer
+    assert(surface.scroll_settings(200, 400, -2.f));
+    assert(surface.render(p));
+    assert(!surface.scroll_settings(200, 400, -1.f)); // bottom clamp
+    no_action(click(surface, 180, 231)); // scrolled settings cannot be clicked above the viewport
+    auto fallback = click(surface, 200, 520);
+    assert(fallback.wrist_world_fallback == false && !fallback.action);
+    assert(!surface.render(p));
+    surface.set_wrist_world_fallback(false); assert(surface.render(p));
+    fallback = click(surface, 200, 520);
+    assert(fallback.wrist_world_fallback == true);
+    surface.set_wrist_world_fallback(true); assert(surface.render(p));
+    assert(click(surface, 280, 610).action == UiAction::Cancel); // footer stays fixed
+    assert(surface.scroll_settings(200, 400, 4.f));
+    assert(surface.render(p));
+    assert(!surface.scroll_settings(200, 400, 1.f)); // top clamp
+    assert(click(surface, 180, 260).mount == Mount::World);
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     surface.set_placement_note("Wrist not tracked - using world space until it returns.");
     assert(surface.render(p)); assert(!surface.render(p));
@@ -344,6 +368,7 @@ int main(int argc, char** argv) {
     no_action(click(surface, 200, 492)); // clock/date controls only exist on Settings
     no_action(click(surface, 680, 492));
     no_action(click(surface, 200, 532)); // mic preference only exists on Settings
+    assert(!surface.scroll_settings(200, 400, -1.f)); // Review has no Settings scroll
 
     // Bindings opens SteamVR directly, from either tab, without replacing review.
     surface.pointer_down(1, 480, 610);

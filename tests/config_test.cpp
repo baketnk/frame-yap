@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
     assert(!load_config(path).auto_insert);
     assert(!load_config(path).close_mic_when_idle);
     assert(!load_config(path).lock_layout);
+    assert(load_config(path).wrist_world_fallback);
     assert(!load_config(path).clock_24h);
     assert(load_config(path).date_format == DateFormat::MonthDayYear);
     assert(load_config(path).wrist.width == .30f);
@@ -63,6 +64,7 @@ int main(int argc, char** argv) {
     assert(!example.auto_insert);
     assert(!example.close_mic_when_idle);
     assert(!example.lock_layout);
+    assert(example.wrist_world_fallback);
     assert(!example.clock_24h && example.date_format == DateFormat::MonthDayYear);
     assert(example.wrist.y == .18f && example.wrist.z == .089f);
     assert(example.gradient.enabled && example.gradient.period_seconds == 30.f && example.gradient.strength == .12f);
@@ -190,6 +192,20 @@ int main(int argc, char** argv) {
     assert(save_lock_layout(path, true));
     assert(get(path) == R"({"font":"escaped \u0061","theme":{"ink":"#123ABC"},"auto_insert":true,"lock_layout":true})");
     assert(load_config(path).lock_layout && load_config(path).auto_insert);
+    put(path, R"({"wrist_world_fallback":false})");
+    assert(!load_config(path).wrist_world_fallback);
+    assert(save_wrist_world_fallback(path, true));
+    assert(load_config(path).wrist_world_fallback);
+    assert(save_wrist_world_fallback(path, false));
+    assert(!load_config(path).wrist_world_fallback);
+    put(path, R"({"wrist_world_fallback":true})");
+    assert(load_config(path).wrist_world_fallback);
+    for (const auto* invalid : {R"({"wrist_world_fallback":0})", R"({"wrist_world_fallback":"false"})",
+                               R"({"wrist_world_fallback":null})"}) {
+        put(path, invalid); fails([&] { load_config(path); });
+        assert(!save_wrist_world_fallback(path, false));
+        assert(get(path) == invalid);
+    }
     put(path, R"({"input_priority":"normal"})");
     assert(!load_config(path).experimental_input_priority);
     for (const auto* invalid : {R"({"input_priority":true})", R"({"input_priority":16777216})",

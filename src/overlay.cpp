@@ -19,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 #include <unistd.h>
 
@@ -118,6 +119,7 @@ struct Overlay::Impl {
     std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> poses{};
     bool grip_capture = false, ptt_capture = false;
     bool focus = true;
+    std::array<std::optional<std::pair<float, float>>, 2> cursor_positions{};
     struct Diagnostics {
         vr::EVRInputError action_update_error = vr::VRInputError_None;
         unsigned pointer_downs = 0, pointer_ups = 0, pointer_actions = 0, pointer_resets = 0;
@@ -182,7 +184,12 @@ struct Overlay::Impl {
                 lasers_anytime = false;
                 persistence.laser_change_failed = true;
             }
+            overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true), overlay, "Laser scroll");
+            // Smooth events are optional on some runtimes; discrete wheel events
+            // keep Settings usable if the compositor declines the smooth mode.
+            overlay->SetOverlayFlag(handle, vr::VROverlayFlags_SendVRSmoothScrollEvents, true);
             surface.set_lasers_anytime(lasers_anytime);
+            surface.set_wrist_world_fallback(config.wrist_world_fallback);
             surface.set_advanced_debug(config.advanced_debug);
             surface.set_auto_insert(config.auto_insert);
             surface.set_close_mic_when_idle(config.close_mic_when_idle);
@@ -248,14 +255,22 @@ struct Overlay::Impl {
         shown = wanted;
     }
     void place() {
-        Mount effective = mount;
         vr::TrackedDeviceIndex_t target = vr::k_unTrackedDeviceIndex_Hmd;
         if (mount == Mount::LeftWrist || mount == Mount::RightWrist) {
             target = system->GetTrackedDeviceIndexForControllerRole(mount == Mount::LeftWrist
                 ? vr::TrackedControllerRole_LeftHand : vr::TrackedControllerRole_RightHand);
-            if (target >= poses.size() || !poses[target].bPoseIsValid || !system->IsTrackedDeviceConnected(target))
-                effective = Mount::World;
         }
+        const bool wrist_tracked = target < poses.size() && poses[target].bPoseIsValid &&
+            system->IsTrackedDeviceConnected(target);
+        const auto selected = effective_mount(mount, wrist_tracked, config.wrist_world_fallback);
+        if (!selected) {
+            if (placed) { surface.reset_pointers(); dragging.panel.reset(); }
+            placed = false;
+            applied_mount.reset();
+            visibility();
+            return;
+        }
+        const Mount effective = *selected;
         if (effective == Mount::World && applied_mount && *applied_mount != Mount::World)
             world_ready = false; // a fresh world fallback near the wearer, not an old room location
         std::string note = persistence.mic_save_failed ? "Mic preference not saved; using it only for this session." :
@@ -488,7 +503,7 @@ struct Overlay::Impl {
                 result.push_back(UiAction::Quit); break;
             case vr::VREvent_OverlayHidden:
                 ++diagnostics.overlay_hidden_events;
-                focus = false; reset_input(result);
+                focus = false; cursor_positions.fill(std::nullopt); reset_input(result);
                 if (panel.recording) result.push_back(UiAction::Cancel);
                 break;
             case vr::VREvent_OverlayShown:
@@ -497,6 +512,7 @@ struct Overlay::Impl {
             case vr::VREvent_ImageLoaded: ++diagnostics.image_loaded_events; break;
             case vr::VREvent_ImageFailed: ++diagnostics.image_failed_events; break;
             case vr::VREvent_OverlayGamepadFocusLost:
+                cursor_positions.fill(std::nullopt);
                 surface.reset_pointers(); ++diagnostics.pointer_resets;
                 diagnostics.last_pointer_event = "gamepad focus lost"; break;
             case vr::VREvent_OverlayFocusChanged:
@@ -506,10 +522,21 @@ struct Overlay::Impl {
                 // a release must still hit the same enabled control.
                 diagnostics.last_pointer_event = "overlay focus changed"; break;
             case vr::VREvent_MouseMove:
-                // Manipulation uses the captured controller ray, not coordinates
-                // fed back from a changing overlay or a batch of stale mouse hits.
+                // Hover is for scrolling only. Manipulation still uses the captured
+                // controller ray, never mouse coordinates from a changing overlay.
+                if (event.data.mouse.cursorIndex < cursor_positions.size())
+                    cursor_positions[event.data.mouse.cursorIndex] = {event.data.mouse.x, H - event.data.mouse.y};
+                break;
+            case vr::VREvent_ScrollDiscrete: case vr::VREvent_ScrollSmooth:
+                if (event.data.scroll.cursorIndex < cursor_positions.size() &&
+                    cursor_positions[event.data.scroll.cursorIndex]) {
+                    const auto [x, y] = *cursor_positions[event.data.scroll.cursorIndex];
+                    surface.scroll_settings(x, y, event.data.scroll.ydelta);
+                }
                 break;
             case vr::VREvent_MouseButtonDown:
+                if (event.data.mouse.cursorIndex < cursor_positions.size())
+                    cursor_positions[event.data.mouse.cursorIndex] = {event.data.mouse.x, H - event.data.mouse.y};
                 ++diagnostics.pointer_downs;
                 diagnostics.last_pointer_event = "down button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left)
@@ -517,11 +544,13 @@ struct Overlay::Impl {
                         begin_drag(*kind, event);
                 break;
             case vr::VREvent_MouseButtonUp:
+                if (event.data.mouse.cursorIndex < cursor_positions.size())
+                    cursor_positions[event.data.mouse.cursorIndex] = {event.data.mouse.x, H - event.data.mouse.y};
                 ++diagnostics.pointer_ups;
                 diagnostics.last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.advanced_debug || event_result.auto_insert || event_result.close_mic_when_idle || event_result.lock_layout || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.advanced_debug || event_result.auto_insert || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
                     if (event_result.model_action) {
                         model_actions.push_back(*event_result.model_action);
@@ -548,6 +577,15 @@ struct Overlay::Impl {
                         update_intersection_mask();
                         persistence.layout_save_failed = persistence.persist_mount && !save_lock_layout(default_config_path(), config.lock_layout);
                         reset_input(result); dragging.panel.reset();
+                        return result;
+                    }
+                    if (event_result.wrist_world_fallback) {
+                        config.wrist_world_fallback = *event_result.wrist_world_fallback;
+                        persistence.save_failed = persistence.persist_mount &&
+                            !save_wrist_world_fallback(default_config_path(), config.wrist_world_fallback);
+                        surface.set_wrist_world_fallback(config.wrist_world_fallback);
+                        reset_input(result);
+                        place(); // hide or show immediately if the wrist is currently untracked
                         return result;
                     }
                     if (event_result.close_mic_when_idle) {

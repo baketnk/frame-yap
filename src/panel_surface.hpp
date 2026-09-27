@@ -19,6 +19,7 @@ struct SurfaceEvent {
     std::optional<bool> auto_insert;
     std::optional<bool> close_mic_when_idle;
     std::optional<bool> lock_layout;
+    std::optional<bool> wrist_world_fallback;
     std::optional<bool> clock_24h;
     std::optional<DateFormat> date_format;
     bool recenter = false;
@@ -53,10 +54,13 @@ public:
     static constexpr auto quit_hold = std::chrono::milliseconds(900);
     std::optional<PanelDragKind> pointer_down(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
     SurfaceEvent pointer_up(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
+    // OpenVR laser wheel input at the last hovered panel coordinate; no paging.
+    bool scroll_settings(float x, float y, float vertical_delta);
     bool dragging(unsigned cursor) const;
     // OpenVR intersection masks use top-left coordinates, unlike mouse events.
     std::vector<Bounds> input_regions() const;
     void set_layout_locked(bool locked);
+    void set_wrist_world_fallback(bool enabled);
     void reset_pointers();
     void set_placement_note(std::string note);
     // Shown on Settings -> About; empty shows "version unknown".
