@@ -3,6 +3,7 @@
 #include "angle_fade.hpp"
 #include "gestures.hpp"
 #include "laser_setting.hpp"
+#include "placement.hpp"
 #include "panel_surface.hpp"
 
 #include <openvr.h>
@@ -85,6 +86,7 @@ struct Overlay::Impl {
         std::filesystem::path settings_path, laser_settings_path;
         bool save_failed = false, debug_save_failed = false, auto_save_failed = false;
         bool layout_save_failed = false, mic_save_failed = false, laser_change_failed = false;
+        bool placement_save_failed = false;
         bool persist_mount = true;
     } persistence;
     Mount mount;
@@ -100,6 +102,7 @@ struct Overlay::Impl {
     float size_scale = 1.f;
     bool placement_dirty = false;
     Matrix34 canvas_pose{};
+    std::array<std::optional<RelativePlacement>, 4> saved_placements{};
     struct DragState {
         Matrix34 canvas{};
         PanelDrag panel;
@@ -136,6 +139,9 @@ struct Overlay::Impl {
           config(load_config(default_config_path())),
           surface(resolve_font(assets, font.empty() ? config.font : font), mount, config.theme, config.gradient) {
         persistence.persist_mount = persist;
+        for (auto selected : {Mount::LeftWrist, Mount::RightWrist, Mount::Head})
+            saved_placements[static_cast<size_t>(selected)] =
+                load_relative_placement(default_placement_path(selected), selected);
         const auto action_path = absolute_file(action_manifest(assets, config));
         absolute_file(std::filesystem::path(assets) / "bindings_knuckles.json");
         try {
@@ -273,7 +279,8 @@ struct Overlay::Impl {
         const Mount effective = *selected;
         if (effective == Mount::World && applied_mount && *applied_mount != Mount::World)
             world_ready = false; // a fresh world fallback near the wearer, not an old room location
-        std::string note = persistence.mic_save_failed ? "Mic preference not saved; using it only for this session." :
+        std::string note = persistence.placement_save_failed ? "Placement not saved; using it only for this session." :
+                           persistence.mic_save_failed ? "Mic preference not saved; using it only for this session." :
                            persistence.layout_save_failed ? "Layout lock not saved; using it only for this session." :
                            persistence.auto_save_failed ? "Auto insert preference not saved; using it only for this session." :
                            persistence.debug_save_failed ? "Debug preference not saved; using it only for this session." :
@@ -302,14 +309,22 @@ struct Overlay::Impl {
             const float base_width = mount_width(effective, config.wrist);
             if (relocated) {
                 surface.reset_pointers(); dragging.panel.reset();
-                auto pose = effective == Mount::World ? matrix(world_transform) : relative_mount_pose(effective, config.wrist);
-                pose = resized_mount_pose(pose, base_width, size_scale, float(CH) / CW);
-                // Preserve main-panel dimensions when adding transparent margins.
-                const float meters_per_pixel = base_width * size_scale / CW;
-                const float dx = (W - CW) * .5f * meters_per_pixel;
-                const float dy = -(H - CH) * .5f * meters_per_pixel;
-                for (int r = 0; r < 3; ++r) pose[r][3] += pose[r][0] * dx + pose[r][1] * dy;
-                canvas_pose = pose;
+                const auto& remembered = saved_placements[static_cast<size_t>(effective)];
+                if (effective != Mount::World && remembered) {
+                    // Saved canvas coordinates already include transparent margins.
+                    size_scale = remembered->scale;
+                    canvas_pose = remembered->canvas_pose;
+                } else {
+                    if (effective != Mount::World) size_scale = 1.f;
+                    auto pose = effective == Mount::World ? matrix(world_transform) : relative_mount_pose(effective, config.wrist);
+                    pose = resized_mount_pose(pose, base_width, size_scale, float(CH) / CW);
+                    // Preserve main-panel dimensions when adding transparent margins.
+                    const float meters_per_pixel = base_width * size_scale / CW;
+                    const float dx = (W - CW) * .5f * meters_per_pixel;
+                    const float dy = -(H - CH) * .5f * meters_per_pixel;
+                    for (int r = 0; r < 3; ++r) pose[r][3] += pose[r][0] * dx + pose[r][1] * dy;
+                    canvas_pose = pose;
+                }
             }
             // After a grab, keep the full released pose. Never rebuild it from
             // a planar offset or configured orientation on the next poll.
@@ -369,6 +384,18 @@ struct Overlay::Impl {
         diagnostics.last_pointer_event = std::string(kind == PanelDragKind::Grab ? "grab" : "scale") +
             " device=" + std::to_string(dragging.device) + " trigger-watch=" + (dragging.trigger_observed ? "Y" : "N");
     }
+    void finish_drag(bool released) {
+        if (released && applied_mount && *applied_mount == mount && mount != Mount::World &&
+            (size_scale != dragging.scale || canvas_pose != dragging.canvas)) {
+            const RelativePlacement current{canvas_pose, size_scale};
+            if (valid_relative_placement(current)) {
+                saved_placements[static_cast<size_t>(mount)] = current;
+                persistence.placement_save_failed = persistence.persist_mount &&
+                    !save_relative_placement(default_placement_path(mount), mount, current);
+            } else persistence.placement_save_failed = true;
+        }
+        surface.reset_pointers(); dragging.panel.reset();
+    }
     void update_drag() {
         if (!dragging.panel.active()) return;
         const auto source = drag_source();
@@ -379,12 +406,14 @@ struct Overlay::Impl {
         // Without a readable release watchdog, never keep manipulating after
         // the pointer leaves our hit region: an outside MouseUp is not assured.
         const bool lost_unwatched_pointer = !dragging.trigger_observed && !overlay->IsHoverTargetOverlay(handle);
-        if (!surface.dragging(dragging.cursor) || !shown || !focus || !source || trigger_released || lost_unwatched_pointer ||
-            std::chrono::steady_clock::now() - dragging.started > std::chrono::seconds(15)) {
-            surface.reset_pointers(); dragging.panel.reset(); return;
+        const bool timed_out = std::chrono::steady_clock::now() - dragging.started > std::chrono::seconds(15);
+        if (!surface.dragging(dragging.cursor) || !shown || !focus || !source || trigger_released || lost_unwatched_pointer || timed_out) {
+            finish_drag((!surface.dragging(dragging.cursor) || trigger_released) &&
+                        shown && focus && bool(source) && !lost_unwatched_pointer && !timed_out);
+            return;
         }
         const auto change = dragging.panel.update(*source);
-        if (!change) { surface.reset_pointers(); dragging.panel.reset(); return; }
+        if (!change) { finish_drag(false); return; }
         const float scale = dragging.kind == PanelDragKind::Scale ? std::clamp(dragging.scale * change->factor, .5f, 2.f) : size_scale;
         const auto pose = dragging.kind == PanelDragKind::Grab ? change->pose :
             resized_mount_pose(dragging.canvas, mount_width(*applied_mount, config.wrist) * dragging.scale * W / CW,

@@ -359,8 +359,12 @@ panel with the controller, including depth, pitch, yaw and roll. Grab captures
 `inverse(controller_down) * panel_down` and applies that unchanged relative pose
 to each controller pose, so grabbing does not snap or reset the panel orientation.
 Release leaves the last pose in the chosen mount frame; head/wrist mounts continue
-following that anchor afterward. Mount changes/recenter reset the pose, while
-retaining the size factor. Restart restores configured position/size defaults.
+following that anchor afterward. A completed grab or scale on Head, Left wrist or
+Right wrist saves the full device-relative canvas position, rotation and scale
+separately for that mount. Mount changes restore each saved relative placement;
+restarting does too. A cancelled drag does not update the saved placement.
+World-space placement is resampled on startup/recenter rather than restored
+against a possibly different tracking origin.
 
 Drag the corner bracket to scale between half and twice the configured width.
 Scaling freezes its initial plane and calibrates a ray from the source controller
@@ -402,9 +406,10 @@ fade feel and interaction at the threshold still need live acceptance.
 To tune the selected wrist, set `wrist` in `config.json` as in the example above:
 `x`, `y`, `z` are controller-local meters (each -0.3 to 0.3), `width` is panel
 width in meters (0.15 to 0.6), and `roll_degrees` rotates about controller -Z
-(-180 to 180) before applying the offset. These settings apply to both wrists,
-are read at startup, and do not alter world/head placement. Invalid values
-fail direct native startup; the installer backs up and repairs invalid entries.
+(-180 to 180) before applying the offset. These settings are initial defaults
+for both wrists; a saved per-wrist pose takes precedence. They are read at
+startup and do not alter world/head placement. Invalid values fail direct native
+startup; the installer backs up and repairs invalid entries.
 A missing/untracked selected wrist temporarily falls back to world space,
 with a visible explanation in Settings, then reattaches when tracking returns.
 Use Settings → **Wrist world fallback** to switch between the default
@@ -416,10 +421,14 @@ pointer controls cannot be used.
 The saved mount preference is not replaced by the fallback. These offsets and sizes are
 initial choices, **not headset-comfort acceptance**.
 
-A selection saves only the mount token to `$XDG_CONFIG_HOME/frameyap/mount`
-(or `$HOME/.config/frameyap/mount`), using an atomic replacement. No pose, audio
-or transcript is saved. Missing/invalid settings default to world; write failure
-keeps the selection for the session and displays a warning. `--mount
+A selection saves the mount token to `$XDG_CONFIG_HOME/frameyap/mount`
+(or `$HOME/.config/frameyap/mount`). Completed relative adjustments save to
+`placement-left-wrist`, `placement-right-wrist`, or `placement-head` beside that
+file. Remove one placement file while FrameYap is closed to restore that mount's
+default. These are bounded, versioned device-relative transforms with owner-only
+atomic writes; invalid files are ignored. World-space poses, audio and transcripts
+are not saved. Missing/invalid mount settings default to World; write failure
+keeps the placement for the session and displays a warning. `--mount
 world|left-wrist|right-wrist|head` overrides the saved choice for one launch without
 writing it; `--head` remains an alias for `--mount head`.
 
