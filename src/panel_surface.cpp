@@ -28,7 +28,7 @@ struct Rect {
                rounded_distance(px, py, x, y, w, h, std::min(16, h / 3)) <= 0.f;
     }
 };
-enum class Control { Review, Settings, Bindings, Prev, Next, Record, Cancel, Insert, Enter, Quit,
+enum class Control { Review, Settings, Bindings, Plan, Keyboard, Record, Cancel, Insert, Enter, Quit,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
                      Clock24h, Date, LockLayout, CloseMicWhenIdle, Models, ModelRow,
                      ModelInstall, ModelPrev, ModelNext, About, WristWorldFallback };
@@ -39,8 +39,8 @@ constexpr std::array<Button, 34> buttons{{
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
     {{620, 138, 348, 46}, Control::LockLayout, "Lock grab/scale"},
-    {{32, 496, 154, 44}, Control::Prev, "Previous"},
-    {{838, 496, 130, 44}, Control::Next, "Next"},
+    {{32, 496, 454, 44}, Control::Plan, "Open Plan"},
+    {{514, 496, 454, 44}, Control::Keyboard, "Open Keyboard"},
     {{32, 574, 176, 68}, Control::Record, "Record"},
     {{222, 574, 176, 68}, Control::Cancel, "Cancel"},
     {{412, 574, 176, 68}, Control::Insert, "Type"},
@@ -71,6 +71,8 @@ constexpr std::array<Button, 34> buttons{{
     {{32, 584, 936, 50}, Control::WristWorldFallback, "Wrist world fallback"},
 }};
 constexpr Rect settings_view{32, 232, 936, 316};
+constexpr Rect review_view{48, 212, 904, 260};
+constexpr int review_line_height = 42;
 constexpr int settings_max_scroll = 634 - (settings_view.y + settings_view.h);
 std::optional<UiAction> action(Control c) {
     switch (c) {
@@ -134,7 +136,9 @@ struct PanelSurface::Impl {
     bool close_mic_when_idle = false, wrist_world_fallback = true;
     bool clock_24h = false, layout_locked = false;
     float settings_scroll = 0.f;
-    bool clip_settings = false;
+    std::optional<Rect> clip_view;
+    bool plan_present = false, keyboard_present = false;
+    float review_scroll = 0.f;
     DateFormat date_format = DateFormat::MonthDayYear;
     std::time_t clock_time = std::time(nullptr);
     ClockLabel displayed_clock;
@@ -145,14 +149,12 @@ struct PanelSurface::Impl {
     int hold_progress = 0;
     int drag_cursor = -1;
     std::vector<std::string> lines;
-    size_t page = 0;
     size_t model_page = 0;
     size_t consent_page = 0;
     size_t consent_rendered_page = size_t(-1);
     bool install_confirm = false;
     std::optional<ModelOption> consent_snapshot;
     std::vector<std::string> consent_lines;
-    static constexpr size_t lines_per_page = 6;
     static constexpr size_t consent_lines_per_page = 6;
     size_t consent_pages() const {
         return std::max(size_t(1), (consent_lines.size() + consent_lines_per_page - 1) / consent_lines_per_page);
@@ -203,15 +205,15 @@ struct PanelSurface::Impl {
         return result;
     }
     void rect(Rect r, Color c) {
-        for (int y = std::max(r.y, clip_settings ? settings_view.y : 0);
-             y < std::min(clip_settings ? settings_view.y + settings_view.h : H, r.y + r.h); ++y)
-            for (int x = std::max(r.x, clip_settings ? settings_view.x : 0);
-                 x < std::min(clip_settings ? settings_view.x + settings_view.w : W, r.x + r.w); ++x)
+        for (int y = std::max(r.y, clip_view ? clip_view->y : 0);
+             y < std::min(clip_view ? clip_view->y + clip_view->h : H, r.y + r.h); ++y)
+            for (int x = std::max(r.x, clip_view ? clip_view->x : 0);
+                 x < std::min(clip_view ? clip_view->x + clip_view->w : W, r.x + r.w); ++x)
                 std::copy(c.begin(), c.end(), pixels.begin() + (size_t(y) * W + x) * 4);
     }
     void blend(int x, int y, Color color, float amount) {
-        if (clip_settings && (x < settings_view.x || x >= settings_view.x + settings_view.w ||
-                              y < settings_view.y || y >= settings_view.y + settings_view.h)) return;
+        if (clip_view && (x < clip_view->x || x >= clip_view->x + clip_view->w ||
+                          y < clip_view->y || y >= clip_view->y + clip_view->h)) return;
         auto* dst = pixels.data() + (size_t(y) * W + x) * 4;
         // Straight-alpha source-over, including strokes in the transparent margin.
         const float alpha = amount * color[3] / 255.f;
@@ -350,8 +352,8 @@ struct PanelSurface::Impl {
                 for (unsigned col = 0; col < b.width; ++col) {
                     int xx = x + glyph->bitmap_left + int(col), yy = baseline - glyph->bitmap_top + int(row);
                     if (xx < 0 || xx >= right || xx >= W || yy < 0 || yy >= H ||
-                        (clip_settings && (xx < settings_view.x || xx >= settings_view.x + settings_view.w ||
-                                           yy < settings_view.y || yy >= settings_view.y + settings_view.h))) continue;
+                        (clip_view && (xx < clip_view->x || xx >= clip_view->x + clip_view->w ||
+                                       yy < clip_view->y || yy >= clip_view->y + clip_view->h))) continue;
                     unsigned char alpha = b.buffer[int(row) * b.pitch + int(col)];
                     auto* dst = pixels.data() + (size_t(yy) * W + xx) * 4;
                     for (int k = 0; k < 3; ++k)
@@ -360,7 +362,9 @@ struct PanelSurface::Impl {
             x += a;
         }
     }
-    size_t page_count() const { return std::max(size_t(1), (lines.size() + lines_per_page - 1) / lines_per_page); }
+    float max_review_scroll() const {
+        return float(lines.size() > 6 ? (lines.size() - 6) * review_line_height : 0);
+    }
     bool available(UiAction a) const {
         if (a == UiAction::Record) return tab != Tab::Models && !panel.quick_open && (panel.recording || panel.record_available);
         // With nothing to review, Type is an explicit Enter.
@@ -376,7 +380,8 @@ struct PanelSurface::Impl {
         if (c == Control::ModelRow) return tab == Tab::Models && !install_confirm;
         if (c == Control::ModelPrev || c == Control::ModelNext) return tab == Tab::Models;
         if (c == Control::ModelInstall) return tab == Tab::Models;
-        if (c == Control::Prev || c == Control::Next) return tab == Tab::Review && !panel.quick_open;
+        if (c == Control::Plan) return tab == Tab::Review && plan_present;
+        if (c == Control::Keyboard) return tab == Tab::Review && keyboard_present;
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
             c == Control::AdvancedDebug || c == Control::AutoInsert ||
             c == Control::Clock24h || c == Control::Date || c == Control::LockLayout ||
@@ -385,8 +390,6 @@ struct PanelSurface::Impl {
     }
     bool enabled(Control c) const {
         if (auto a = action(c)) return available(*a);
-        if (c == Control::Prev) return page > 0;
-        if (c == Control::Next) return page + 1 < page_count();
         if (c == Control::Recenter) return mount == Mount::World;
         if (c == Control::ModelRow) return !panel.model_busy;
         if (c == Control::ModelInstall) {
@@ -451,7 +454,7 @@ struct PanelSurface::Impl {
         }
         if (p.transcript != panel.transcript || lines.empty()) {
             lines = wrap(p.transcript.empty() ? "Your words will appear here.\nReview them, then choose Type." : p.transcript, 32, 904);
-            page = 0; dirty = true;
+            review_scroll = 0.f; dirty = true;
         }
         if (p.status != panel.status || p.enabled != panel.enabled || p.recording != panel.recording ||
             p.quick_open != panel.quick_open || p.quick_selected != panel.quick_selected || p.quick_inputs != panel.quick_inputs ||
@@ -523,12 +526,19 @@ struct PanelSurface::Impl {
             }
         } else if (tab == Tab::Review) {
             rounded({32, 204, 936, 278}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
-            for (size_t i = 0; i < lines_per_page && page * lines_per_page + i < lines.size(); ++i)
-                text(lines[page * lines_per_page + i], 48, 240 + int(i) * 42, 32,
+            clip_view = review_view;
+            const size_t first = size_t(review_scroll / review_line_height);
+            for (size_t i = first; i < lines.size() && i <= first + 7; ++i)
+                text(lines[i], 48, 240 + int(i * review_line_height - review_scroll), 32,
                      panel.transcript.empty() ? muted : ink, 952);
-            // A Bindings failure is the only note here; it replaces the page count.
-            if (!binding_note.empty()) text(binding_note, 200, 526, 18, pink, 824);
-            else text("PAGE " + std::to_string(page + 1) + " / " + std::to_string(page_count()), 416, 526, 23, muted, 790);
+            clip_view.reset();
+            if (max_review_scroll() > 0) {
+                rect({956, review_view.y, 3, review_view.h}, mix(card, muted, .24f));
+                const int thumb = std::max(24, int(review_view.h * review_view.h /
+                    (review_view.h + max_review_scroll())));
+                rect({955, review_view.y + int(review_scroll * (review_view.h - thumb) / max_review_scroll()),
+                      5, thumb}, cyan);
+            }
         } else if (tab == Tab::Models) {
             text("Models: select to restart. Install always needs explicit confirmation.", 32, 202, 19, muted, 968);
             const auto it = std::find_if(panel.models.begin(), panel.models.end(), [&](const auto& m) { return m.id == panel.selected_backend; });
@@ -556,12 +566,14 @@ struct PanelSurface::Impl {
                  32, 225, 17, muted, 968);
         }
         rect({32, 550, 936, 1}, mix(card, cyan, .17f));
+        if (tab == Tab::Review && !panel.quick_open && max_review_scroll() > 0)
+            text("Right stick: scroll review", 32, 568, 16, muted, 400);
         for (size_t i = 0; i < buttons.size(); ++i) {
             const auto& b = buttons[i];
             if (!visible(b.id)) continue;
             if (b.id == Control::ModelRow && model_page * 6 + (i - 23) >= panel.models.size()) continue;
             const Rect r = button_rect(b);
-            clip_settings = settings_control(b.id);
+            if (settings_control(b.id)) clip_view = settings_view;
             bool on = enabled(b.id);
             bool selected = (b.id == Control::Review && tab == Tab::Review) ||
                             (b.id == Control::Settings && tab == Tab::Settings) ||
@@ -611,7 +623,7 @@ struct PanelSurface::Impl {
                 text(active ? "ON" : "OFF", r.x + r.w - 66, r.y + r.h / 2 + 9, 22,
                      active ? cyan : muted, r.x + r.w - 12);
             }
-            clip_settings = false;
+            clip_view.reset();
         }
         if (tab == Tab::Settings) {
             rect({976, settings_view.y, 3, settings_view.h}, mix(card, muted, .24f));
@@ -621,6 +633,8 @@ struct PanelSurface::Impl {
             text("Right stick: scroll", 32, 565, 16, muted, 320);
             text("OFF: discard idle audio; ON: spike / start latency.", 390, 565, 16, muted, 887);
         }
+        if (tab == Tab::Review && !binding_note.empty())
+            text(binding_note, 32, 665, 18, pink, 968);
         if (tab == Tab::Models && !panel.model_note.empty()) {
             // The install/navigation controls occupy y=530..566; the status
             // belongs BELOW the shared footer (574..642), not under buttons.
@@ -738,13 +752,23 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
         impl_->tab = c == Control::Review ? Tab::Review : Tab::Settings;
         impl_->install_confirm = false; impl_->consent_snapshot.reset(); impl_->reset(); impl_->dirty = true;
     }
-    else if (c == Control::Prev) { --impl_->page; impl_->dirty = true; }
-    else if (c == Control::Next) { ++impl_->page; impl_->dirty = true; }
+    else if (c == Control::Plan || c == Control::Keyboard) {
+        result.launch_companion = c == Control::Plan ? SurfaceEvent::Companion::Plan : SurfaceEvent::Companion::Keyboard;
+        impl_->reset();
+    }
     return result;
 }
-bool PanelSurface::scroll_settings(float x, float y, float vertical_delta) {
-    if (impl_->tab != Tab::Settings || impl_->drag_cursor >= 0 ||
-        !settings_view.contains(x, y) || !std::isfinite(vertical_delta)) return false;
+bool PanelSurface::scroll(float x, float y, float vertical_delta) {
+    if (impl_->drag_cursor >= 0 || !std::isfinite(vertical_delta)) return false;
+    if (impl_->tab == Tab::Review && !impl_->panel.quick_open && review_view.contains(x, y)) {
+        const float next = std::clamp(impl_->review_scroll - std::clamp(vertical_delta, -4.f, 4.f) * 48.f,
+                                      0.f, impl_->max_review_scroll());
+        if (next == impl_->review_scroll) return false;
+        impl_->review_scroll = next;
+        impl_->reset(); impl_->dirty = true;
+        return true;
+    }
+    if (impl_->tab != Tab::Settings || !settings_view.contains(x, y)) return false;
     const float next = std::clamp(impl_->settings_scroll - std::clamp(vertical_delta, -4.f, 4.f) * 48.f,
                                   0.f, float(settings_max_scroll));
     if (next == impl_->settings_scroll) return false;
@@ -752,6 +776,12 @@ bool PanelSurface::scroll_settings(float x, float y, float vertical_delta) {
     impl_->reset(); // a press must not turn into a click on a different setting
     impl_->dirty = true;
     return true;
+}
+void PanelSurface::set_companions(bool plan, bool keyboard) {
+    if (impl_->plan_present != plan || impl_->keyboard_present != keyboard) {
+        impl_->plan_present = plan; impl_->keyboard_present = keyboard;
+        impl_->reset(); impl_->dirty = true;
+    }
 }
 void PanelSurface::set_indicators(const StatusIndicators& indicators) {
     if (impl_->indicators != indicators) { impl_->indicators = indicators; impl_->dirty = true; }

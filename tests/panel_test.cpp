@@ -14,7 +14,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
 }
 void no_action(const SurfaceEvent& event) {
     assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
-           !event.close_mic_when_idle && !event.lock_layout && !event.wrist_world_fallback && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action);
+           !event.close_mic_when_idle && !event.lock_layout && !event.wrist_world_fallback && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action && !event.launch_companion);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -328,16 +328,16 @@ int main(int argc, char** argv) {
     assert(click(surface, 200, 532).close_mic_when_idle == false);
     surface.set_close_mic_when_idle(false); assert(surface.render(p));
     // The Settings viewport scrolls continuously under the laser; it never pages.
-    assert(!surface.scroll_settings(290, 160, -1.f)); // tab/header, not settings content
-    assert(!surface.scroll_settings(200, 400, std::numeric_limits<float>::quiet_NaN()));
+    assert(!surface.scroll(290, 160, -1.f)); // tab/header, not settings content
+    assert(!surface.scroll(200, 400, std::numeric_limits<float>::quiet_NaN()));
     surface.pointer_down(0, 200, 532); // pending mic press must not activate after movement
-    assert(surface.scroll_settings(200, 400, -.5f));
+    assert(surface.scroll(200, 400, -.5f));
     no_action(surface.pointer_up(0, 200, 532));
     assert(surface.render(p));
-    assert(!surface.scroll_settings(200, 610, -1.f)); // fixed footer
-    assert(surface.scroll_settings(200, 400, -2.f));
+    assert(!surface.scroll(200, 610, -1.f)); // fixed footer
+    assert(surface.scroll(200, 400, -2.f));
     assert(surface.render(p));
-    assert(!surface.scroll_settings(200, 400, -1.f)); // bottom clamp
+    assert(!surface.scroll(200, 400, -1.f)); // bottom clamp
     no_action(click(surface, 180, 231)); // scrolled settings cannot be clicked above the viewport
     auto fallback = click(surface, 200, 520);
     assert(fallback.wrist_world_fallback == false && !fallback.action);
@@ -347,9 +347,9 @@ int main(int argc, char** argv) {
     assert(fallback.wrist_world_fallback == true);
     surface.set_wrist_world_fallback(true); assert(surface.render(p));
     assert(click(surface, 280, 610).action == UiAction::Cancel); // footer stays fixed
-    assert(surface.scroll_settings(200, 400, 4.f));
+    assert(surface.scroll(200, 400, 4.f));
     assert(surface.render(p));
-    assert(!surface.scroll_settings(200, 400, 1.f)); // top clamp
+    assert(!surface.scroll(200, 400, 1.f)); // top clamp
     assert(click(surface, 180, 260).mount == Mount::World);
     assert(click(surface, 280, 610).action == UiAction::Cancel);
     surface.set_placement_note("Wrist not tracked - using world space until it returns.");
@@ -368,7 +368,7 @@ int main(int argc, char** argv) {
     no_action(click(surface, 200, 492)); // clock/date controls only exist on Settings
     no_action(click(surface, 680, 492));
     no_action(click(surface, 200, 532)); // mic preference only exists on Settings
-    assert(!surface.scroll_settings(200, 400, -1.f)); // Review has no Settings scroll
+    assert(!surface.scroll(200, 400, -1.f)); // short Review needs no scrolling
 
     // Bindings opens SteamVR directly, from either tab, without replacing review.
     surface.pointer_down(1, 480, 610);
@@ -391,29 +391,44 @@ int main(int argc, char** argv) {
     assert(click(surface, 680, 260).mount == Mount::Head); // still in Settings
     no_action(click(surface, 100, 160));
 
-    // Long UTF-8, newlines and malformed bytes are bounded, paginated and navigable.
+    // Installed companions alone get launch controls in the old paging row.
+    no_action(click(surface, 90, 518)); no_action(click(surface, 900, 518));
+    surface.set_companions(true, false); assert(surface.render(p));
+    assert(click(surface, 90, 518).launch_companion == SurfaceEvent::Companion::Plan);
+    no_action(click(surface, 900, 518));
+    surface.set_companions(false, true); assert(surface.render(p));
+    no_action(click(surface, 90, 518));
+    assert(click(surface, 900, 518).launch_companion == SurfaceEvent::Companion::Keyboard);
+    surface.set_companions(true, true); assert(surface.render(p));
+    assert(click(surface, 90, 518).launch_companion == SurfaceEvent::Companion::Plan);
+    assert(click(surface, 900, 518).launch_companion == SurfaceEvent::Companion::Keyboard);
+    p.quick_open = true; assert(surface.render(p));
+    no_action(click(surface, 90, 518)); no_action(click(surface, 900, 518));
+    assert(!surface.scroll(200, 400, -1.f));
+    p.quick_open = false; assert(surface.render(p));
+    surface.set_companions(false, false); assert(surface.render(p));
+    // Long UTF-8, newlines and malformed bytes scroll within the preview.
     p.transcript.clear();
     for (int i = 0; i < 60; ++i) p.transcript += "Line " + std::to_string(i) + ": café / 日本語 / naïve / Ω\n";
     p.transcript += std::string("invalid: \xff\xc0\xe0\x80", 13);
     surface.render(p);
-    surface.reset_pointers(); surface.render(p);
     const auto first = surface.pixels();
-    no_action(click(surface, 900, 518));
-    surface.reset_pointers(); assert(surface.render(p));
-    assert(surface.pixels() != first);
-    no_action(click(surface, 90, 518));
-    surface.reset_pointers(); surface.render(p);
-    assert(surface.pixels() == first);
-    for (int i = 0; i < 200; ++i) { no_action(click(surface, 900, 518)); surface.render(p); }
-    for (int i = 0; i < 200; ++i) { no_action(click(surface, 90, 518)); surface.render(p); }
-    surface.reset_pointers(); surface.render(p);
-    assert(surface.pixels() == first);
+    assert(!surface.scroll(200, 610, -1.f)); // fixed footer cannot scroll
+    assert(!surface.scroll(200, 400, std::numeric_limits<float>::quiet_NaN()));
+    surface.pointer_down(0, 100, 160);
+    assert(surface.scroll(200, 400, -.5f)); // partial line and stale press
+    no_action(surface.pointer_up(0, 100, 160));
+    assert(surface.render(p) && surface.pixels() != first);
+    assert(surface.scroll(200, 400, .5f));
+    assert(surface.render(p) && surface.pixels() == first);
+    assert(!surface.scroll(200, 400, 1.f)); // top clamp
+    for (int i = 0; i < 200; ++i) { surface.scroll(200, 400, -4.f); surface.render(p); }
+    assert(!surface.scroll(200, 400, -1.f)); // bottom clamp
+    assert(surface.scroll(200, 400, 4.f));
     p.transcript = "New result";
-    assert(surface.render(p));
-    surface.reset_pointers(); surface.render(p);
-    auto replaced = surface.pixels();
-    no_action(click(surface, 900, 518));
-    surface.reset_pointers(); surface.render(p);
+    assert(surface.render(p)); // new text resets scroll
+    const auto replaced = surface.pixels();
+    assert(!surface.scroll(200, 400, -1.f));
     assert(surface.pixels() == replaced);
     p.status = std::string(4096, 's'); p.detail = std::string(4096, 'd');
     assert(surface.render(p)); assert(!surface.render(p));

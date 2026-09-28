@@ -5,6 +5,7 @@
 #include "laser_setting.hpp"
 #include "placement.hpp"
 #include "panel_surface.hpp"
+#include "companion_apps.hpp"
 
 #include <openvr.h>
 
@@ -93,6 +94,7 @@ struct Overlay::Impl {
     bool lasers_anytime = false;
     Config config;
     PanelSurface surface;
+    std::optional<std::filesystem::path> plan_launcher, keyboard_launcher;
     Panel panel;
     std::vector<ModelAction> model_actions;
     StatusIndicators indicators;
@@ -139,6 +141,9 @@ struct Overlay::Impl {
           config(load_config(default_config_path())),
           surface(resolve_font(assets, font.empty() ? config.font : font), mount, config.theme, config.gradient) {
         persistence.persist_mount = persist;
+        plan_launcher = find_companion("tnkplan");
+        keyboard_launcher = find_companion("tnkboard");
+        surface.set_companions(plan_launcher.has_value(), keyboard_launcher.has_value());
         for (auto selected : {Mount::LeftWrist, Mount::RightWrist, Mount::Head})
             saved_placements[static_cast<size_t>(selected)] =
                 load_relative_placement(default_placement_path(selected), selected);
@@ -560,7 +565,7 @@ struct Overlay::Impl {
                 if (event.data.scroll.cursorIndex < cursor_positions.size() &&
                     cursor_positions[event.data.scroll.cursorIndex]) {
                     const auto [x, y] = *cursor_positions[event.data.scroll.cursorIndex];
-                    surface.scroll_settings(x, y, event.data.scroll.ydelta);
+                    surface.scroll(x, y, event.data.scroll.ydelta);
                 }
                 break;
             case vr::VREvent_MouseButtonDown:
@@ -579,8 +584,15 @@ struct Overlay::Impl {
                 diagnostics.last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.advanced_debug || event_result.auto_insert || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.launch_companion || event_result.advanced_debug || event_result.auto_insert || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
+                    if (event_result.launch_companion) {
+                        const auto& launcher = *event_result.launch_companion == SurfaceEvent::Companion::Plan ?
+                            plan_launcher : keyboard_launcher;
+                        if (launcher && !launch_companion(*launcher))
+                            surface.set_binding_note("Could not open companion app.");
+                        else surface.set_binding_note("");
+                    }
                     if (event_result.model_action) {
                         model_actions.push_back(*event_result.model_action);
                         reset_input(result); // revoke held PTT, delivery and stale pointer approval

@@ -33,7 +33,7 @@ preview, status and control surfaces use independently rasterized antialiased ed
 and restrained baked neon halos rather than GPU bloom. The recording indicator and
 selected controls remain distinguishable by their labels, not color alone. Rounded
 control hit areas exclude their clipped corners.
-Rendering/uploads occur for changed content, page or settings, and, when the
+Rendering/uploads occur for changed content, scroll position or settings, and, when the
 animated gradient is enabled and visible, at most every 100 ms (10 fps) on a
 monotonic clock. There is no animation redraw while hidden. Laser hover and
 button down/up are hit-tested without an upload; static frames are reused when
@@ -87,8 +87,13 @@ source URL, MIT license, the selected model's name and license from its manifest
 the bundled font's license, and a pointer to `docs/third-party.md`. It performs
 no checks and no network access; Settings returns. Recording controls stay live.
 
-The complete transcript preview is paginated by glyph width and six-line
-height; Previous and Next navigate it without changing the source transcript.
+The transcript wraps by glyph width and scrolls in its review viewport with
+the right-stick laser wheel; a new transcript resets the scroll position.
+The former paging row is retained for **Open Plan** and **Open Keyboard** when
+the installed `tnkplan` or `tnkboard` executable is found at startup in
+`~/.local/bin` or an absolute PATH directory. Missing apps have no button.
+Clicking launches the installed wrapper without a shell; those apps' normal
+second-launch behavior toggles their existing panels.
 Status fits on the single status line; the old bottom detail label is gone.
 The footer remains available on all tabs: Record (labelled Stop while recording),
 Cancel, Type (labelled Enter when nothing is pending review), Type + Enter, Hold Quit. Hold Quit needs a 900 ms press and release on

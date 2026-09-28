@@ -12,6 +12,8 @@
 
 namespace frameyap {
 struct SurfaceEvent {
+    enum class Companion { Plan, Keyboard };
+    std::optional<Companion> launch_companion;
     std::optional<UiAction> action;
     std::optional<Mount> mount;
     std::optional<bool> lasers_anytime;
@@ -54,8 +56,9 @@ public:
     static constexpr auto quit_hold = std::chrono::milliseconds(900);
     std::optional<PanelDragKind> pointer_down(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
     SurfaceEvent pointer_up(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
-    // OpenVR laser wheel input at the last hovered panel coordinate; no paging.
-    bool scroll_settings(float x, float y, float vertical_delta);
+    // OpenVR laser wheel input at the last hovered panel coordinate.
+    bool scroll(float x, float y, float vertical_delta);
+    void set_companions(bool plan, bool keyboard);
     bool dragging(unsigned cursor) const;
     // OpenVR intersection masks use top-left coordinates, unlike mouse events.
     std::vector<Bounds> input_regions() const;
