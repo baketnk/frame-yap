@@ -26,6 +26,8 @@ struct SurfaceEvent {
     std::optional<DateFormat> date_format;
     bool recenter = false;
     bool open_bindings = false;
+    bool check_updates = false;
+    bool install_update = false;
     std::optional<ModelAction> model_action;
 };
 // Header indicators. Absent values are hidden, never shown as zero or as a guess.
@@ -34,6 +36,7 @@ struct StatusIndicators {
     std::optional<BatteryLevel> left, head, right;
     bool operator==(const StatusIndicators&) const = default;
 };
+enum class UpdateStatus { Idle, Checking, Current, Available, Failed, TerminalFailed };
 // One CPU RGBA canvas, independent of OpenVR. Settings replace the review area;
 // status and safety controls remain on the same surface.
 class PanelSurface {
@@ -59,6 +62,7 @@ public:
     // OpenVR laser wheel input at the last hovered panel coordinate.
     bool scroll(float x, float y, float vertical_delta);
     void set_companions(bool plan, bool keyboard);
+    void set_update_status(UpdateStatus status, std::string version = {});
     bool dragging(unsigned cursor) const;
     // OpenVR intersection masks use top-left coordinates, unlike mouse events.
     std::vector<Bounds> input_regions() const;

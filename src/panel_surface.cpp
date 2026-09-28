@@ -31,10 +31,10 @@ struct Rect {
 enum class Control { Review, Settings, Bindings, Plan, Keyboard, Record, Cancel, Insert, Enter, Quit,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
                      Clock24h, Date, LockLayout, CloseMicWhenIdle, Models, ModelRow,
-                     ModelInstall, ModelPrev, ModelNext, About, WristWorldFallback };
+                     ModelInstall, ModelPrev, ModelNext, About, WristWorldFallback, UpdateCheck, UpdateInstall };
 enum class Tab { Review, Settings, Models, About };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 34> buttons{{
+constexpr std::array<Button, 36> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
@@ -69,11 +69,14 @@ constexpr std::array<Button, 34> buttons{{
     {{260, 530, 214, 36}, Control::ModelNext, "Next"},
     {{346, 378, 154, 44}, Control::About, "About"},
     {{32, 584, 936, 50}, Control::WristWorldFallback, "Wrist world fallback"},
+    {{32, 640, 454, 42}, Control::UpdateCheck, "Check for updates"},
+    {{514, 640, 454, 42}, Control::UpdateInstall, "Install update..."},
 }};
 constexpr Rect settings_view{32, 232, 936, 316};
 constexpr Rect review_view{48, 212, 904, 260};
 constexpr int review_line_height = 42;
-constexpr int settings_max_scroll = 634 - (settings_view.y + settings_view.h);
+// Leave a status row after the optional update controls, within the viewport.
+constexpr int settings_max_scroll = 722 - (settings_view.y + settings_view.h);
 std::optional<UiAction> action(Control c) {
     switch (c) {
     case Control::Record: return UiAction::Record;
@@ -97,7 +100,8 @@ bool settings_control(Control c) {
     return c == Control::Models || c == Control::About || mounting(c) ||
            c == Control::Recenter || c == Control::LasersAnytime || c == Control::AdvancedDebug ||
            c == Control::AutoInsert || c == Control::Clock24h || c == Control::Date ||
-           c == Control::CloseMicWhenIdle || c == Control::WristWorldFallback;
+           c == Control::CloseMicWhenIdle || c == Control::WristWorldFallback ||
+           c == Control::UpdateCheck || c == Control::UpdateInstall;
 }
 // Invalid bytes become visible replacement glyphs, never control commands.
 uint32_t next_codepoint(std::string_view s, size_t& i) {
@@ -138,6 +142,8 @@ struct PanelSurface::Impl {
     float settings_scroll = 0.f;
     std::optional<Rect> clip_view;
     bool plan_present = false, keyboard_present = false;
+    UpdateStatus update_status = UpdateStatus::Idle;
+    std::string update_version;
     float review_scroll = 0.f;
     DateFormat date_format = DateFormat::MonthDayYear;
     std::time_t clock_time = std::time(nullptr);
@@ -376,7 +382,9 @@ struct PanelSurface::Impl {
     }
     bool visible(Control c) const {
         if (panel.quick_open && c != Control::Cancel && c != Control::Enter && c != Control::Quit) return false;
-        if (c == Control::Models || c == Control::About || c == Control::WristWorldFallback) return tab == Tab::Settings;
+        if (c == Control::Models || c == Control::About || c == Control::WristWorldFallback ||
+            c == Control::UpdateCheck) return tab == Tab::Settings;
+        if (c == Control::UpdateInstall) return tab == Tab::Settings && update_status == UpdateStatus::Available;
         if (c == Control::ModelRow) return tab == Tab::Models && !install_confirm;
         if (c == Control::ModelPrev || c == Control::ModelNext) return tab == Tab::Models;
         if (c == Control::ModelInstall) return tab == Tab::Models;
@@ -390,6 +398,7 @@ struct PanelSurface::Impl {
     }
     bool enabled(Control c) const {
         if (auto a = action(c)) return available(*a);
+        if (c == Control::UpdateCheck) return update_status != UpdateStatus::Checking;
         if (c == Control::Recenter) return mount == Mount::World;
         if (c == Control::ModelRow) return !panel.model_busy;
         if (c == Control::ModelInstall) {
@@ -632,6 +641,18 @@ struct PanelSurface::Impl {
                   5, thumb}, cyan);
             text("Right stick: scroll", 32, 565, 16, muted, 320);
             text("OFF: discard idle audio; ON: spike / start latency.", 390, 565, 16, muted, 887);
+            const std::string update_note = update_status == UpdateStatus::Idle ? "" :
+                update_status == UpdateStatus::Checking ? "Checking for updates..." :
+                update_status == UpdateStatus::Current ? "FrameYap is up to date." :
+                update_status == UpdateStatus::Available ? "Update available: " + update_version :
+                update_status == UpdateStatus::TerminalFailed ? "Could not open update terminal." :
+                "Could not check for updates.";
+            if (!update_note.empty()) {
+                clip_view = settings_view;
+                text(update_note, 32, 716 - int(std::lround(settings_scroll)), 18,
+                     (update_status == UpdateStatus::Failed || update_status == UpdateStatus::TerminalFailed) ? pink : cyan, 968);
+                clip_view.reset();
+            }
         }
         if (tab == Tab::Review && !binding_note.empty())
             text(binding_note, 32, 665, 18, pink, 968);
@@ -715,6 +736,8 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
     else if (c == Control::Clock24h) result.clock_24h = !impl_->clock_24h;
     else if (c == Control::Date) result.date_format = static_cast<DateFormat>((static_cast<int>(impl_->date_format) + 1) % 4);
     else if (c == Control::Bindings) { result.open_bindings = true; impl_->reset(); }
+    else if (c == Control::UpdateCheck) { result.check_updates = true; impl_->reset(); }
+    else if (c == Control::UpdateInstall) { result.install_update = true; impl_->reset(); }
     else if (c == Control::Models) {
         impl_->tab = Tab::Models; impl_->model_page = 0;
         impl_->install_confirm = false; impl_->consent_snapshot.reset(); impl_->reset(); impl_->dirty = true;
@@ -780,6 +803,12 @@ bool PanelSurface::scroll(float x, float y, float vertical_delta) {
 void PanelSurface::set_companions(bool plan, bool keyboard) {
     if (impl_->plan_present != plan || impl_->keyboard_present != keyboard) {
         impl_->plan_present = plan; impl_->keyboard_present = keyboard;
+        impl_->reset(); impl_->dirty = true;
+    }
+}
+void PanelSurface::set_update_status(UpdateStatus status, std::string version) {
+    if (impl_->update_status != status || impl_->update_version != version) {
+        impl_->update_status = status; impl_->update_version = std::move(version);
         impl_->reset(); impl_->dirty = true;
     }
 }

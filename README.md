@@ -60,6 +60,7 @@ Recognition runs locally with the Parakeet Redux model. The installer downloads 
 ## Update and uninstall
 
 - **Update:** run the install command again and answer **y** to FrameYap. Answer **n** to the model and runtime questions unless the release notes say they changed.
+- **Check for updates:** Settings → scroll to **Check for updates**. FrameYap contacts GitHub only when you press it. If a newer published release is available, **Install update...** opens a desktop terminal; quit FrameYap and press Enter there to install. Nothing is downloaded by the check itself.
 - **Settings:** `~/.config/frameyap/config.json` (Quick phrases, theme, placement). Restart FrameYap after editing.
 - **Uninstall:** `sh ~/.local/share/frameyap/current/bin/install.sh --uninstall --unregistered`. Your settings and downloaded model are kept. Delete `~/.local/share/frameyap` and `~/.config/frameyap` to remove everything.
 

@@ -6,6 +6,7 @@
 #include "placement.hpp"
 #include "panel_surface.hpp"
 #include "companion_apps.hpp"
+#include "update_check.hpp"
 
 #include <openvr.h>
 
@@ -95,6 +96,9 @@ struct Overlay::Impl {
     Config config;
     PanelSurface surface;
     std::optional<std::filesystem::path> plan_launcher, keyboard_launcher;
+    UpdateCheck updates;
+    std::filesystem::path install_update_script;
+    std::string update_version;
     Panel panel;
     std::vector<ModelAction> model_actions;
     StatusIndicators indicators;
@@ -139,7 +143,9 @@ struct Overlay::Impl {
           mount(requested ? *requested : load_mount(persistence.settings_path)),
           lasers_anytime(load_lasers_anytime(persistence.laser_settings_path)),
           config(load_config(default_config_path())),
-          surface(resolve_font(assets, font.empty() ? config.font : font), mount, config.theme, config.gradient) {
+          surface(resolve_font(assets, font.empty() ? config.font : font), mount, config.theme, config.gradient),
+          updates((std::filesystem::absolute(assets) / "../scripts/check-update.py").lexically_normal(), FRAMEYAP_VERSION),
+          install_update_script((std::filesystem::absolute(assets) / "../scripts/install-update.py").lexically_normal()) {
         persistence.persist_mount = persist;
         plan_launcher = find_companion("tnkplan");
         keyboard_launcher = find_companion("tnkboard");
@@ -518,6 +524,12 @@ struct Overlay::Impl {
     }
     std::vector<UiAction> poll() {
         std::vector<UiAction> result;
+        if (auto update = updates.poll()) {
+            update_version = std::move(update->version);
+            surface.set_update_status(update->state == UpdateResult::State::Available ? UpdateStatus::Available :
+                update->state == UpdateResult::State::Current ? UpdateStatus::Current : UpdateStatus::Failed,
+                update_version);
+        }
         system->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses.data(), uint32_t(poses.size()));
         place();
         vr::VREvent_t event{};
@@ -584,8 +596,15 @@ struct Overlay::Impl {
                 diagnostics.last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.launch_companion || event_result.advanced_debug || event_result.auto_insert || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.launch_companion || event_result.check_updates || event_result.install_update || event_result.advanced_debug || event_result.auto_insert || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
+                    if (event_result.check_updates) {
+                        update_version.clear();
+                        surface.set_update_status(updates.start() ? UpdateStatus::Checking : UpdateStatus::Failed);
+                    }
+                    if (event_result.install_update && !update_version.empty() &&
+                        !open_update_terminal(install_update_script, update_version))
+                        surface.set_update_status(UpdateStatus::TerminalFailed);
                     if (event_result.launch_companion) {
                         const auto& launcher = *event_result.launch_companion == SurfaceEvent::Companion::Plan ?
                             plan_launcher : keyboard_launcher;

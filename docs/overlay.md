@@ -87,6 +87,18 @@ source URL, MIT license, the selected model's name and license from its manifest
 the bundled font's license, and a pointer to `docs/third-party.md`. It performs
 no checks and no network access; Settings returns. Recording controls stay live.
 
+At the bottom of Settings, **Check for updates** performs an explicit, asynchronous
+request to GitHub's latest published release metadata. It never runs at launch,
+while idle or as part of offline tests. The bounded, timeout-limited helper
+compares the release's numeric tag with this build's version; repository commits
+and prereleases are not update candidates. No archive or installer is downloaded
+by a check. If a newer release is found, **Install update...** opens Konsole
+with the installed handoff script. The terminal waits for the wearer to close
+FrameYap and press Enter before the existing installer downloads a pinned
+version and checksum and installs it. Until that confirmation, the terminal
+does not fetch anything. An unavailable check or terminal reports an error in
+Settings; no fallback auto-install is attempted.
+
 The transcript wraps by glyph width and scrolls in its review viewport with
 the right-stick laser wheel; a new transcript resets the scroll position.
 The former paging row is retained for **Open Plan** and **Open Keyboard** when

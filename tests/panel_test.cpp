@@ -14,7 +14,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
 }
 void no_action(const SurfaceEvent& event) {
     assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
-           !event.close_mic_when_idle && !event.lock_layout && !event.wrist_world_fallback && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action && !event.launch_companion);
+           !event.close_mic_when_idle && !event.lock_layout && !event.wrist_world_fallback && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action && !event.launch_companion && !event.check_updates && !event.install_update);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -337,15 +337,29 @@ int main(int argc, char** argv) {
     assert(!surface.scroll(200, 610, -1.f)); // fixed footer
     assert(surface.scroll(200, 400, -2.f));
     assert(surface.render(p));
-    assert(!surface.scroll(200, 400, -1.f)); // bottom clamp
     no_action(click(surface, 180, 231)); // scrolled settings cannot be clicked above the viewport
-    auto fallback = click(surface, 200, 520);
+    auto fallback = click(surface, 200, 485);
     assert(fallback.wrist_world_fallback == false && !fallback.action);
     assert(!surface.render(p));
     surface.set_wrist_world_fallback(false); assert(surface.render(p));
-    fallback = click(surface, 200, 520);
+    fallback = click(surface, 200, 485);
     assert(fallback.wrist_world_fallback == true);
     surface.set_wrist_world_fallback(true); assert(surface.render(p));
+    assert(surface.scroll(200, 400, -2.f)); // reveal bottom update row and status
+    assert(surface.render(p));
+    assert(!surface.scroll(200, 400, -1.f)); // bottom clamp
+    no_action(click(surface, 700, 486)); // no install button until a newer release is checked
+    assert(click(surface, 180, 486).check_updates);
+    surface.set_update_status(UpdateStatus::Checking); assert(surface.render(p));
+    no_action(click(surface, 180, 486)); no_action(click(surface, 700, 486));
+    surface.set_update_status(UpdateStatus::Available, "0.1.202609292232"); assert(surface.render(p));
+    if (argc >= 3) snapshot(surface, std::string(argv[2]) + "-updates.ppm");
+    assert(click(surface, 700, 486).install_update);
+    surface.set_update_status(UpdateStatus::Current); assert(surface.render(p));
+    no_action(click(surface, 700, 486));
+    assert(click(surface, 180, 486).check_updates);
+    surface.set_update_status(UpdateStatus::Failed); assert(surface.render(p));
+    no_action(click(surface, 700, 486));
     assert(click(surface, 280, 610).action == UiAction::Cancel); // footer stays fixed
     assert(surface.scroll(200, 400, 4.f));
     assert(surface.render(p));
