@@ -45,7 +45,7 @@ prefix. ARM64/glibc packaging is not a claim of compatibility with arbitrary Lin
 ```sh
 python3 scripts/package-release.py --stage /path/to/stage --output /existing/output \
   --version 0.1.202609241627 --arch linux-aarch64 \
-  --model-revision fad622f25f303105c20d70e201bcc477c88b620c --external-runtime
+  --model-revision 2bf128600aac4b16946f7ed8372e56117fe5e23b --external-runtime
 ```
 
 Use the actual binary's numeric `MAJOR.MINOR.YYYYMMDDHHMM` UTC version
