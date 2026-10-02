@@ -226,9 +226,12 @@ may deliver at most once; cancellation invalidates it before any later reply.
 ## On-device Redux
 
 Use the **same** `moondream/parakeet-redux` revision from the benchmark:
-`fad622f25f303105c20d70e201bcc477c88b620c` (177,774,490-byte weight file), initially
+`2bf128600aac4b16946f7ed8372e56117fe5e23b` (177,774,490-byte weight file), initially
 moondream 2.4.0 / kestrel 0.8.0. Do not substitute dense Ultra or silently fall
-back to desktop/cloud inference.
+back to desktop/cloud inference. The benchmark ran on revision
+`fad622f25f303105c20d70e201bcc477c88b620c`, which no longer resolves after the
+upstream history was rewritten; the weights, config, ternary map and tokenizer at
+`2bf1286` are byte-identical to it (same SHA-256), only the model card README differs.
 
 The earlier benchmark used this local API (its source belongs to the originating
 repository, not this project):

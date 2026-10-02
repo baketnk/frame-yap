@@ -27,7 +27,7 @@ source-only, and Python packages are fetched from PyPI on the user's machine.
 
 | Component | Where | License |
 | --- | --- | --- |
-| Parakeet Redux weights, revision `fad622f25f303105c20d70e201bcc477c88b620c`, derived from NVIDIA Parakeet TDT 0.6B v3 by Moondream/M87 Labs; pinned sizes and hashes in `assets/backends/redux.json` | <https://huggingface.co/moondream/parakeet-redux> | CC-BY-4.0 |
+| Parakeet Redux weights, revision `2bf128600aac4b16946f7ed8372e56117fe5e23b`, derived from NVIDIA Parakeet TDT 0.6B v3 by Moondream/M87 Labs; pinned sizes and hashes in `assets/backends/redux.json` | <https://huggingface.co/moondream/parakeet-redux> | CC-BY-4.0 |
 | Kestrel, `kestrel-kernels` | <https://github.com/m87-labs/kestrel> | Local inference is free and needs no API key, per the Kestrel README. Finetuned-model inference needs an API key and is not used here. |
 | `moondream` | PyPI | See the package |
 | PyTorch (CPU build) | <https://github.com/pytorch/pytorch> | BSD-3-Clause |
