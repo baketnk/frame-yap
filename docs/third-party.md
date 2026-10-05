@@ -2,8 +2,9 @@
 
 FrameYap's own code is under [LICENSE](../LICENSE). Everything below is fetched
 from, or built against, its upstream project; each keeps its own license. This is
-a pointer list, not a legal audit. No prebuilt archive is published: v0.1 is
-source-only, and Python packages are fetched from PyPI on the user's machine.
+a pointer list, not a legal audit. Published native archives include SDL3 and the OpenVR client library, plus
+the font and required notices. The speech runtime and model are downloaded
+separately on the user's machine; they are not redistributed in the archive.
 
 ## Included in this repository
 

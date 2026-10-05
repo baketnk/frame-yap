@@ -1,7 +1,7 @@
 # Release packaging and idempotent user-local installer
 
-**No GitHub release is published.** Native-only local artifacts have been installed
-and reinstalled on Frame. The installer never pretends an ASR runtime is included when it is not;
+Native-only GitHub release archives are published with the standalone installer.
+The ARM64 artifacts are built, tested, installed and checked on Frame before publication. The installer never pretends an ASR runtime is included when it is not;
 see [third-party notes](third-party.md).
 
 ## Producer
@@ -25,9 +25,9 @@ runtime/bin/python3               # ONLY for an authorized bundled-runtime artif
 The stage copies the self-contained installer into `bin/` and CMake installs
 `scripts/model-status.py` alongside the backend manifests. The package allowlist
 permits `scripts/`; installed `frameyap --list-models` expects the verifier at
-`../scripts/model-status.py`. **No actual staged archive has been audited/tested
-from a clean account for publication**; exercise the entire producer pipeline
-and the installed CLI before treating the payload layout as release-ready.
+`../scripts/model-status.py`. Exercise the entire producer pipeline and installed CLI for each release.
+Upgrade validation on the existing Frame account does not establish a clean-account
+installation or general platform compatibility.
 
 For the current **external-runtime** package, `scripts/stage-native.py --help`
 documents explicit inputs. The old `scripts/stage-native-poc.py` is retained as
@@ -76,18 +76,19 @@ bootstrap, **not** the inference runtime), curl for network release downloads,
 sha256sum and tar for archive handling. **No compiler, sudo, Steam store AppID
 or engine checkout in binary mode.** No minimum glibc floor has been certified;
 preflight alone cannot guarantee compatibility. Download/inspect a pinned installer
-before running it. Current local artifact route:
+before running it. Local artifact route:
 
 ```sh
 sh install.sh --archive /path/to/frameyap-VERSION-linux-aarch64.tar.gz \
   --sha256 64_HEX_DIGIT_HASH --version VERSION
 ```
 
-After an actual vetted release exists, use a real numeric version (for example,
+For a published release, use its numeric version (for example,
 `sh install.sh --mode binary --version 0.1.202609241627 --yes`); the installer
 will retrieve tag `v0.1.202609241627` and its versioned checksum; no `latest` or moving-branch
 lookup. A pipe invocation is supported, never reads answers from the pipe, and must also
-pin a real published tag. **There is no functional public download command yet.**
+pin a real published tag. The README's `releases/latest/download/install.sh` bootstrap
+selects the fixed release version embedded in that published installer.
 
 `--without-model` omits any model files in the selected archive, never deletes
 an existing current model on rerun, and records the choice. Same
@@ -116,7 +117,8 @@ only the new venv and leaves `paths.conf` unchanged. `--print-plan --json` shows
 the packages, index and size (about 200 MB of wheels, roughly 1–1.5 GB on disk)
 without touching anything. The app must be closed (install lock). Transitive
 dependencies are not pinned. Validated end to end on x86-64 Python 3.12
-(2026-09-25); a clean Frame install is still pending.
+(2026-09-25); the owner also reported a successful fresh Frame model/runtime
+installation from v0.1.202609251524. Later upgrade tests preserve that runtime.
 In the source tree, `python3 scripts/model-status.py --list-models` or
 `--check-model redux --model-dir /absolute/model` hash-checks local files;
 the native `frameyap --list-models` / `--check-model` entry points use the

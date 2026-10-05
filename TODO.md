@@ -73,7 +73,8 @@ missing-runtime panel message and the battery readouts on Frame.
 - [x] **A3. Commit the pending `AGENTS.md` rename** ("Frame Dictation" →
   "FrameYap"). (S) Done in baseline checkpoint `07c03ea`.
 - [~] **A4. Runtime dependency pointers.** Repos and licenses are listed in
-  `docs/third-party.md`. No release audit is needed while v0.1 is source-only.
+  `docs/third-party.md`. Audit the staged native libraries and notices for each published archive;
+  speech runtime packages and model files remain separate explicit downloads.
 - [x] **A5. Drop "POC" from the shipped surface.** (S) Public help, README,
   CMake and installer use the release name. `scripts/stage-native-poc.py` remains
   a deprecated compatibility wrapper for `scripts/stage-native.py`, not the
