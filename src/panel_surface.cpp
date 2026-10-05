@@ -673,7 +673,6 @@ struct PanelSurface::Impl {
             rect({975, settings_view.y + int(settings_scroll * (settings_view.h - thumb) / settings_max_scroll),
                   5, thumb}, cyan);
             text("Right stick: scroll", 32, 565, 16, muted, 320);
-            text("OFF: discard idle audio; ON: spike / start latency.", 390, 565, 16, muted, 887);
             const std::string update_note = update_status == UpdateStatus::Idle ? "" :
                 update_status == UpdateStatus::Checking ? "Checking for updates..." :
                 update_status == UpdateStatus::Current ? "FrameYap is up to date." :
