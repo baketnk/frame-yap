@@ -13,14 +13,17 @@ from frameyap.model_files import DEFAULT_MANIFEST_DIR, ManifestError, load_backe
 class BackendTests(unittest.TestCase):
     def test_redux_manifest_preserves_pinned_artifacts_and_launcher_contract(self):
         redux = load_backends()["redux"]
-        self.assertEqual(redux.revision, "fad622f25f303105c20d70e201bcc477c88b620c")
+        self.assertEqual(redux.revision, "2bf128600aac4b16946f7ed8372e56117fe5e23b")
         self.assertEqual({f.path: (f.size, f.sha256) for f in redux.files}, {
             "model.safetensors": (177774490, "78ec25733ee0d0c1586d1346fc86db9d0c2e436e3a8ab1d32a82d1bb8f848d21"),
             "config.json": (12988, "503c653b2e3bb788adbcb04f5abdee532d958686564081baeed133ff10143f6e"),
             "ternary.json": (57970, "1221c6d3ce901ffe09c089da758a8db8b76189f80cff41c5afc244fc61e2051d"),
             "tokenizer.json": (1159960, "bd321b096832a3f270bd3b2a88823957920f1a5c5ada71114a26ea729d0cbe91"),
-            "README.md": (8533, "a8b327f983a8b8ff262ff7bead3a791fbed9350632002af8db85ab5cd84cdaa5"),
+            "README.md": (8832, "930055e6bac7d75114e719850ffaffc8d327e73b4295518c38c81399acd63e46"),
         })
+        self.assertEqual(redux.files[-1].compatible,
+                         ((8533, "a8b327f983a8b8ff262ff7bead3a791fbed9350632002af8db85ab5cd84cdaa5"),))
+        self.assertTrue(all(not file.compatible for file in redux.files[:-1]))
         self.assertEqual(redux.launcher["protocol"], "frameyap-worker-v1")
         self.assertEqual(redux.launcher["arguments"], ["--model", "{model_dir}", "--threads", "{threads}", "--clip-dir", "{clip_dir}"])
         self.assertIn("CC-BY-4.0", redux.license_id)
@@ -47,6 +50,10 @@ class BackendTests(unittest.TestCase):
                 lambda f: f["model"]["files"][0].update(path="../secret"),
                 lambda f: f["model"]["files"][0].update(size=True),
                 lambda f: f["model"]["files"][0].update(sha256="A" * 64),
+                lambda f: f["model"]["files"][0].update(compatible="bad"),
+                lambda f: f["model"]["files"][0].update(compatible=[{"size": True, "sha256": "a" * 64}]),
+                lambda f: f["model"]["files"][0].update(compatible=[{"size": 3, "sha256": "a" * 64}]),
+                lambda f: f["model"]["files"][0].update(compatible=[{"size": 4, "sha256": "a" * 64, "path": "other"}]),
                 lambda f: f["launcher"]["arguments"].append("{unknown}"),
                 lambda f: f["launcher"].update(path="/bin/sh"),
                 lambda f: f["launcher"].update(protocol="not-the-wire-protocol"),

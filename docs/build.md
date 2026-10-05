@@ -93,7 +93,7 @@ and target application compatibility require further headset work.
 
 ## Inference runtime
 
-Redux weights at `fad622f25f303105c20d70e201bcc477c88b620c` are CC-BY-4.0. Pinned
+Redux weights at `2bf128600aac4b16946f7ed8372e56117fe5e23b` are CC-BY-4.0. Pinned
 file sizes/hashes and attribution live in `assets/backends/redux.json`; offline
 `--list-models`/`--check-model redux --model-dir /absolute/model` (or
 `scripts/model-status.py`) verify without inference or downloads. Manifest

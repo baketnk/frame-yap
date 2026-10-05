@@ -61,6 +61,7 @@ class ModelFile:
     path: str
     size: int
     sha256: str
+    compatible: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -127,13 +128,28 @@ def _parse(value):
     parsed = []
     names = set()
     for item in files:
-        _fields(item, ("path", "size", "sha256"), "model file")
+        if not isinstance(item, dict):
+            raise ManifestError("invalid model file fields")
+        _fields(item, ("path", "size", "sha256", "compatible") if "compatible" in item
+                else ("path", "size", "sha256"), "model file")
         name = _relative(item["path"], "model file path")
         size = item["size"]
         if name in names or type(size) is not int or not 0 < size <= _MAX_FILE or not isinstance(item["sha256"], str) or not _HASH.fullmatch(item["sha256"]):
             raise ManifestError("duplicate or invalid pinned model file")
         names.add(name)
-        parsed.append(ModelFile(name, size, item["sha256"]))
+        compatible = item.get("compatible", [])
+        if not isinstance(compatible, list) or len(compatible) > 8:
+            raise ManifestError("invalid compatible model files")
+        pins = []
+        for previous in compatible:
+            _fields(previous, ("size", "sha256"), "compatible model file")
+            old_size, old_hash = previous["size"], previous["sha256"]
+            if (type(old_size) is not int or not 0 < old_size <= _MAX_FILE or
+                    not isinstance(old_hash, str) or not _HASH.fullmatch(old_hash) or
+                    (old_size, old_hash) in [(size, item["sha256"]), *pins]):
+                raise ManifestError("duplicate or invalid compatible model file")
+            pins.append((old_size, old_hash))
+        parsed.append(ModelFile(name, size, item["sha256"], tuple(pins)))
     license_info = value["license"]
     _fields(license_info, ("id", "text"), "license")
     requirements = value["requirements"]
@@ -177,7 +193,11 @@ def load_backends(manifest_dir=DEFAULT_MANIFEST_DIR):
 
 
 def check_file(directory, item):
-    """Return (reason, filename); reason None means the pinned file verifies."""
+    """Verify the current pin or an explicitly compatible existing artifact.
+
+    Downloaders construct a temporary ModelFile with only the current pin so
+    newly fetched bytes must match the revision advertised to the user.
+    """
     root = Path(directory)
     if not root.is_absolute():
         return "model_dir_not_absolute", item.path
@@ -201,13 +221,14 @@ def check_file(directory, item):
             before = os.fstat(file_fd)
             if not stat.S_ISREG(before.st_mode):
                 return "unsafe_file", item.path
-            if before.st_size != item.size:
+            pins = ((item.size, item.sha256), *item.compatible)
+            if before.st_size not in {size for size, _ in pins}:
                 return "size_mismatch", item.path
             digest = hashlib.sha256()
             while chunk := os.read(file_fd, 1024 * 1024):
                 digest.update(chunk)
             after = os.fstat(file_fd)
-            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns) or digest.hexdigest() != item.sha256:
+            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns) or (before.st_size, digest.hexdigest()) not in pins:
                 return "hash_mismatch", item.path
             return None, None
         finally:
