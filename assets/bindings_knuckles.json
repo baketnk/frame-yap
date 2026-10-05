@@ -8,12 +8,42 @@
         {
           "path": "/user/hand/left/input/grip",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/left_grip" } }
+          "inputs": {
+            "click": {
+              "output": "/actions/frameyap/in/left_grip"
+            }
+          }
         },
         {
           "path": "/user/hand/right/input/grip",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/right_grip" } }
+          "inputs": {
+            "click": {
+              "output": "/actions/frameyap/in/right_grip"
+            }
+          }
+        }
+      ]
+    },
+    "/actions/grab": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/grab/in/left_depth"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/grab/in/right_depth"
+            }
+          }
         }
       ]
     }

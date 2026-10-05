@@ -12,13 +12,14 @@
 
 namespace frameyap {
 struct SurfaceEvent {
-    enum class Companion { Plan, Keyboard };
+    enum class Companion { Plan, Keyboard, KeyboardRecenter, Draw };
     std::optional<Companion> launch_companion;
     std::optional<UiAction> action;
     std::optional<Mount> mount;
     std::optional<bool> lasers_anytime;
     std::optional<bool> advanced_debug;
     std::optional<bool> auto_insert;
+    std::optional<bool> gradient_enabled;
     std::optional<bool> close_mic_when_idle;
     std::optional<bool> lock_layout;
     std::optional<bool> wrist_world_fallback;
@@ -57,11 +58,15 @@ public:
     const std::vector<unsigned char>& pixels() const;
     // Handles capture one cursor and never authorize a UI action on release.
     static constexpr auto quit_hold = std::chrono::milliseconds(900);
+    static constexpr auto keyboard_hold = std::chrono::milliseconds(800);
     std::optional<PanelDragKind> pointer_down(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
+    void pointer_move(unsigned cursor, float x, float y);
+    // Called while visible and tracked. Fires once at the threshold without waiting for release.
+    std::optional<SurfaceEvent::Companion> poll_keyboard_hold(Clock::time_point now = Clock::now());
     SurfaceEvent pointer_up(unsigned cursor, float x, float y, Clock::time_point now = Clock::now());
     // OpenVR laser wheel input at the last hovered panel coordinate.
     bool scroll(float x, float y, float vertical_delta);
-    void set_companions(bool plan, bool keyboard);
+    void set_companions(bool plan, bool keyboard, bool draw);
     void set_update_status(UpdateStatus status, std::string version = {});
     bool dragging(unsigned cursor) const;
     // OpenVR intersection masks use top-left coordinates, unlike mouse events.
@@ -75,6 +80,7 @@ public:
     void set_lasers_anytime(bool enabled);
     void set_advanced_debug(bool enabled);
     void set_auto_insert(bool enabled);
+    void set_gradient_enabled(bool enabled);
     void set_close_mic_when_idle(bool enabled);
     void set_clock_24h(bool enabled);
     void set_date_format(DateFormat format);

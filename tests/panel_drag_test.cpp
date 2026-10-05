@@ -98,6 +98,54 @@ int main() {
     assert(moved); near_pose(moved->pose, translated(rotated_pose, -.1f, .2f, -.3f));
     drag.reset(); assert(!drag.update(second_down));
 
+    // Stick depth is independent of controller translation, preserves pose
+    // rotation, and follows the captured panel normal as the controller turns.
+    assert(drag.begin(PanelDragKind::Grab, panel, 1, 1, .5f, .5f, down));
+    drag.step_depth(.1f, 1.); near(float(drag.depth()), 0);
+    drag.step_depth(1.f, .05); near(float(drag.depth()), .03f);
+    auto depth_pose = drag.update(down);
+    assert(depth_pose); near_pose(depth_pose->pose, translated(panel, 0, 0, -.03f));
+    depth_pose = drag.update(translated(down, .1f, .2f, 0));
+    assert(depth_pose); near_pose(depth_pose->pose, translated(panel, .1f, .2f, -.03f));
+    drag.step_depth(0.f, .05); near(float(drag.depth()), .03f);
+    drag.step_depth(-1.f, .05); near(float(drag.depth()), 0);
+    drag.step_depth(1.f, 10.); near(float(drag.depth()), .03f); // bounded time step
+    drag.step_depth(std::numeric_limits<float>::quiet_NaN(), .05);
+    drag.step_depth(1.f, std::numeric_limits<double>::infinity());
+    near(float(drag.depth()), .03f);
+    const auto turned_controller = compose_pose(down, yaw());
+    depth_pose = drag.update(turned_controller);
+    assert(depth_pose);
+    near_pose(depth_pose->pose, translated(compose_pose(turned_controller, relative_pose(down, panel)), -.03f, 0, 0));
+    for (int i = 0; i < 100; ++i) drag.step_depth(1.f, .05);
+    near(float(drag.depth()), 1.5f);
+    for (int i = 0; i < 100; ++i) drag.step_depth(-1.f, .05);
+    near(float(drag.depth()), -1.5f);
+    drag.reset(); near(float(drag.depth()), 0);
+    assert(drag.begin(PanelDragKind::Scale, identity, 1, 1, .5f, .5f, down));
+    drag.step_depth(1.f, .05); near(float(drag.depth()), 0);
+    drag.reset();
+
+    // A controller pointing obliquely at a rotated panel must move depth
+    // perpendicular to the panel rather than along its own pointing axis.
+    const auto angled_panel = translated(yaw(), .25f, .4f, -.3f);
+    assert(drag.begin(PanelDragKind::Grab, angled_panel, 1, 1, .5f, .5f, down));
+    drag.step_depth(1.f, .05);
+    depth_pose = drag.update(down);
+    assert(depth_pose); near_pose(depth_pose->pose, translated(angled_panel, -.03f, 0, 0));
+    const auto angled_moved = translated(compose_pose(down, pitch()), .1f, .2f, -.1f);
+    depth_pose = drag.update(angled_moved);
+    auto expected_relative = relative_pose(down, angled_panel);
+    expected_relative[0][3] -= .03f;
+    assert(depth_pose); near_pose(depth_pose->pose, compose_pose(angled_moved, expected_relative));
+    // The same elapsed movement has the same result at 50 and 100 Hz.
+    for (const double dt : {.01, .02}) {
+        assert(drag.begin(PanelDragKind::Grab, angled_panel, 1, 1, .5f, .5f, down));
+        for (int i = 0; i < int(1. / dt); ++i) drag.step_depth(1.f, dt);
+        near(float(drag.depth()), .6f);
+    }
+    drag.reset();
+
     grab_rotation_case(pitch(), Matrix34{{{{1.f, 0.f, 0.f, .25f}},
                                                 {{0.f, 0.f, -1.f, 1.3f}},
                                                 {{0.f, 1.f, 0.f, 1.4f}}}});

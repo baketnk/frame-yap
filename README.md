@@ -38,7 +38,7 @@ Open **FrameYap** from the desktop application menu, or in the headset from your
 | **Y** (right) | Quick phrases; press again to pick the next one. |
 | Left grip, double-tap | Type + Enter. |
 
-You can also click the panel's buttons with the laser pointer. Nothing is ever typed or submitted without you pressing a button. Buttons can be remapped with **Bindings** on the panel.
+You can also click the panel's buttons with the laser pointer. The Review tab shows **Open Plan**, **Open Keyboard**, and **Open Draw** for companion apps installed on the Frame. Tap **Open Keyboard** to show it; hold for 0.8 seconds to recenter it in front of you. Nothing is ever typed or submitted without you pressing a button. Buttons can be remapped with **Bindings** on the panel.
 
 The header shows battery levels for your controllers and headset. The **Buttons paused** badge means the Steam menu is open: controller buttons go to Steam, so use the pointer instead (or close the menu).
 
@@ -61,7 +61,7 @@ Recognition runs locally with the Parakeet Redux model. The installer downloads 
 
 - **Update:** run the install command again and answer **y** to FrameYap. Answer **n** to the model and runtime questions unless the release notes say they changed.
 - **Check for updates:** Settings → scroll to **Check for updates**. FrameYap contacts GitHub only when you press it. If a newer published release is available, **Install update...** opens a desktop terminal; quit FrameYap and press Enter there to install. Nothing is downloaded by the check itself.
-- **Settings:** `~/.config/frameyap/config.json` (Quick phrases, theme, placement). Restart FrameYap after editing.
+- **Settings:** Animated background is off by default; Settings → **Animated background** turns it on and saves your choice. `~/.config/frameyap/config.json` holds Quick phrases, theme and placement; restart FrameYap after manual edits.
 - **Uninstall:** `sh ~/.local/share/frameyap/current/bin/install.sh --uninstall --unregistered`. Your settings and downloaded model are kept. Delete `~/.local/share/frameyap` and `~/.config/frameyap` to remove everything.
 
 ## More

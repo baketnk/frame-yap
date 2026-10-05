@@ -1,5 +1,6 @@
 #include "overlay.hpp"
 #include "overlay_texture.hpp"
+#include "texture_refresh.hpp"
 #include "angle_fade.hpp"
 #include "gestures.hpp"
 #include "laser_setting.hpp"
@@ -83,11 +84,14 @@ struct Overlay::Impl {
     vr::VROverlayHandle_t handle = vr::k_ulOverlayHandleInvalid;
     std::unique_ptr<OverlayTexture> gpu_texture;
     vr::VRActionSetHandle_t action_set = vr::k_ulInvalidActionSetHandle;
+    vr::VRActionSetHandle_t grab_action_set = vr::k_ulInvalidActionSetHandle;
+    std::array<vr::VRInputValueHandle_t, 2> hands{};
     std::array<vr::VRActionHandle_t, 7> actions{};
+    std::array<vr::VRActionHandle_t, 2> depth_actions{};
     struct Persistence {
         std::filesystem::path settings_path, laser_settings_path;
         bool save_failed = false, debug_save_failed = false, auto_save_failed = false;
-        bool layout_save_failed = false, mic_save_failed = false, laser_change_failed = false;
+        bool layout_save_failed = false, mic_save_failed = false, gradient_save_failed = false, laser_change_failed = false;
         bool placement_save_failed = false;
         bool persist_mount = true;
     } persistence;
@@ -95,7 +99,7 @@ struct Overlay::Impl {
     bool lasers_anytime = false;
     Config config;
     PanelSurface surface;
-    std::optional<std::filesystem::path> plan_launcher, keyboard_launcher;
+    std::optional<std::filesystem::path> plan_launcher, keyboard_launcher, draw_launcher;
     UpdateCheck updates;
     std::filesystem::path install_update_script;
     std::string update_version;
@@ -117,7 +121,7 @@ struct Overlay::Impl {
         vr::TrackedDeviceIndex_t device = vr::k_unTrackedDeviceIndexInvalid;
         bool trigger_observed = false;
         float scale = 1.f;
-        std::chrono::steady_clock::time_point started{};
+        std::chrono::steady_clock::time_point started{}, last_depth_sample{};
     } dragging;
     vr::HmdMatrix34_t world_transform{};
     std::optional<Mount> applied_mount;
@@ -137,6 +141,23 @@ struct Overlay::Impl {
         unsigned overlay_focus_events = 0, global_focus_events = 0, input_focus_captured_events = 0;
         std::string last_pointer_event = "none";
     } diagnostics;
+    struct Performance {
+        bool enabled = [] { const char* flag = std::getenv("FRAMEYAP_PROFILE");
+                            return flag && std::string_view(flag) == "1"; }();
+        uint64_t renders = 0, uploads = 0, motion_ticks = 0, retained_frames = 0, motion_redraws = 0, motion_uploads = 0;
+        double render_ms = 0, upload_ms = 0, motion_ms = 0, motion_max_ms = 0;
+        static double elapsed(std::chrono::steady_clock::time_point start) {
+            return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        }
+        void report() const {
+            if (!enabled) return;
+            std::cout << "FrameYap profile: renders=" << renders << " render_ms=" << render_ms
+                      << " uploads=" << uploads << " upload_ms=" << upload_ms
+                      << " motion_ticks=" << motion_ticks << " motion_ms=" << motion_ms
+                      << " motion_max_ms=" << motion_max_ms << " retained_frames=" << retained_frames
+                      << " motion_redraws=" << motion_redraws << " motion_uploads=" << motion_uploads << std::endl;
+        }
+    } performance;
 
     Impl(const std::string& assets, const std::string& font, std::optional<Mount> requested, bool persist)
         : persistence{default_mount_settings_path(), default_laser_settings_path()},
@@ -149,7 +170,8 @@ struct Overlay::Impl {
         persistence.persist_mount = persist;
         plan_launcher = find_companion("tnkplan");
         keyboard_launcher = find_companion("tnkboard");
-        surface.set_companions(plan_launcher.has_value(), keyboard_launcher.has_value());
+        draw_launcher = find_companion("tnkdraw");
+        surface.set_companions(plan_launcher.has_value(), keyboard_launcher.has_value(), draw_launcher.has_value());
         for (auto selected : {Mount::LeftWrist, Mount::RightWrist, Mount::Head})
             saved_placements[static_cast<size_t>(selected)] =
                 load_relative_placement(default_placement_path(selected), selected);
@@ -189,9 +211,18 @@ struct Overlay::Impl {
                 throw std::runtime_error("Could not set OpenVR action manifest path");
             if (input->GetActionSetHandle("/actions/frameyap", &action_set) != vr::VRInputError_None)
                 throw std::runtime_error("Could not find FrameYap action set");
+            if (input->GetActionSetHandle("/actions/grab", &grab_action_set) != vr::VRInputError_None)
+                throw std::runtime_error("Could not find grab action set");
+            input->GetInputSourceHandle("/user/hand/left", &hands[0]);
+            input->GetInputSourceHandle("/user/hand/right", &hands[1]);
             for (size_t i = 0; i < action_names.size(); ++i)
                 if (input->GetActionHandle((std::string("/actions/frameyap/in/") + action_names[i]).c_str(), &actions[i]) != vr::VRInputError_None)
                     throw std::runtime_error(std::string("Could not find action ") + action_names[i]);
+            for (size_t i = 0; i < depth_actions.size(); ++i) {
+                const char* name = i == 0 ? "left_depth" : "right_depth";
+                if (input->GetActionHandle((std::string("/actions/grab/in/") + name).c_str(), &depth_actions[i]) != vr::VRInputError_None)
+                    throw std::runtime_error(std::string("Could not find action ") + name);
+            }
             overlay_check(overlay->CreateOverlay("local.frameyap.overlay.panel", "FrameYap", &handle), overlay, "CreateOverlay");
             overlay_check(overlay->SetOverlayWidthInMeters(handle, 0.85f), overlay, "SetOverlayWidthInMeters");
             overlay_check(overlay->SetOverlayInputMethod(handle, vr::VROverlayInputMethod_Mouse), overlay, "SetOverlayInputMethod");
@@ -209,6 +240,7 @@ struct Overlay::Impl {
             surface.set_wrist_world_fallback(config.wrist_world_fallback);
             surface.set_advanced_debug(config.advanced_debug);
             surface.set_auto_insert(config.auto_insert);
+            surface.set_gradient_enabled(config.gradient.enabled);
             surface.set_close_mic_when_idle(config.close_mic_when_idle);
             surface.set_layout_locked(config.lock_layout);
             surface.set_clock_24h(config.clock_24h);
@@ -225,7 +257,7 @@ struct Overlay::Impl {
             std::cout << input_mode_status() << std::endl;
         } catch (...) { cleanup(); throw; }
     }
-    ~Impl() { cleanup(); }
+    ~Impl() { performance.report(); cleanup(); }
     void update_intersection_mask() {
         const auto regions = surface.input_regions();
         std::vector<vr::VROverlayIntersectionMaskPrimitive_t> mask(regions.size());
@@ -292,6 +324,7 @@ struct Overlay::Impl {
             world_ready = false; // a fresh world fallback near the wearer, not an old room location
         std::string note = persistence.placement_save_failed ? "Placement not saved; using it only for this session." :
                            persistence.mic_save_failed ? "Mic preference not saved; using it only for this session." :
+                           persistence.gradient_save_failed ? "Could not save background setting." :
                            persistence.layout_save_failed ? "Layout lock not saved; using it only for this session." :
                            persistence.auto_save_failed ? "Auto insert preference not saved; using it only for this session." :
                            persistence.debug_save_failed ? "Debug preference not saved; using it only for this session." :
@@ -388,7 +421,7 @@ struct Overlay::Impl {
             return;
         }
         dragging.scale = size_scale; dragging.canvas = canvas_pose;
-        dragging.started = std::chrono::steady_clock::now();
+        dragging.started = dragging.last_depth_sample = std::chrono::steady_clock::now();
         vr::VRControllerState_t state{};
         dragging.trigger_observed = system->GetControllerState(dragging.device, &state, sizeof(state)) &&
             (state.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger));
@@ -396,6 +429,11 @@ struct Overlay::Impl {
             " device=" + std::to_string(dragging.device) + " trigger-watch=" + (dragging.trigger_observed ? "Y" : "N");
     }
     void finish_drag(bool released) {
+        if (!released && applied_mount && *applied_mount == mount) {
+            canvas_pose = dragging.canvas;
+            size_scale = dragging.scale;
+            placement_dirty = true;
+        }
         if (released && applied_mount && *applied_mount == mount && mount != Mount::World &&
             (size_scale != dragging.scale || canvas_pose != dragging.canvas)) {
             const RelativePlacement current{canvas_pose, size_scale};
@@ -406,6 +444,19 @@ struct Overlay::Impl {
             } else persistence.placement_save_failed = true;
         }
         surface.reset_pointers(); dragging.panel.reset();
+    }
+    std::optional<float> depth_axis() const {
+        const auto left = system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
+        const auto right = system->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
+        const size_t hand = dragging.device == left ? 0 : dragging.device == right ? 1 : depth_actions.size();
+        if (hand == depth_actions.size()) return {};
+        vr::InputAnalogActionData_t data{};
+        if (input->GetAnalogActionData(depth_actions[hand], &data, sizeof(data), hands[hand]) != vr::VRInputError_None ||
+            !data.bActive || data.activeOrigin == vr::k_ulInvalidInputValueHandle || !std::isfinite(data.y)) return {};
+        vr::InputOriginInfo_t origin{};
+        if (input->GetOriginTrackedDeviceInfo(data.activeOrigin, &origin, sizeof(origin)) != vr::VRInputError_None ||
+            origin.trackedDeviceIndex != dragging.device) return {};
+        return data.y;
     }
     void update_drag() {
         if (!dragging.panel.active()) return;
@@ -423,6 +474,11 @@ struct Overlay::Impl {
                         shown && focus && bool(source) && !lost_unwatched_pointer && !timed_out);
             return;
         }
+        const auto now = std::chrono::steady_clock::now();
+        const double dt = std::chrono::duration<double>(now - dragging.last_depth_sample).count();
+        dragging.last_depth_sample = now;
+        if (dragging.kind == PanelDragKind::Grab && diagnostics.action_update_error == vr::VRInputError_None)
+            if (auto axis = depth_axis()) dragging.panel.step_depth(*axis, dt);
         const auto change = dragging.panel.update(*source);
         if (!change) { finish_drag(false); return; }
         const float scale = dragging.kind == PanelDragKind::Scale ? std::clamp(dragging.scale * change->factor, .5f, 2.f) : size_scale;
@@ -461,13 +517,26 @@ struct Overlay::Impl {
         panel = p;
         surface.set_clock_time(std::time(nullptr));
         update_indicators();
-        if (surface.render(p, PanelSurface::Clock::now(), shown)) {
+        // Placement updates reuse the initialized image. Defer cosmetic
+        // rendering/uploads (including gradient ticks) until after the drag;
+        // keep panel and indicator state live for the next render.
+        const bool initialized_motion = dragging.panel.active() && has_texture;
+        if (performance.enabled && initialized_motion) ++performance.retained_frames;
+        refresh_texture(dragging.panel.active(), has_texture,
+                        [&] {
+            const auto start = performance.enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+            const bool rendered = surface.render(p, PanelSurface::Clock::now(), shown);
+            if (performance.enabled && rendered) { if (initialized_motion) ++performance.motion_redraws; ++performance.renders; performance.render_ms += Performance::elapsed(start); }
+            return rendered;
+        }, [&] {
+            const auto start = performance.enabled ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
             gpu_texture->upload(surface.pixels());
             auto texture = gpu_texture->texture();
             overlay_check(overlay->SetOverlayTexture(handle, &texture), overlay, "SetOverlayTexture (Vulkan)");
             ++diagnostics.texture_uploads;
+            if (performance.enabled) { if (initialized_motion) ++performance.motion_uploads; ++performance.uploads; performance.upload_ms += Performance::elapsed(start); }
             has_texture = true;
-        }
+        });
         visibility();
     }
     void reset_input(std::vector<UiAction>& result) {
@@ -524,6 +593,15 @@ struct Overlay::Impl {
     }
     std::vector<UiAction> poll() {
         std::vector<UiAction> result;
+        const auto open_companion = [&](SurfaceEvent::Companion selected) {
+            const auto& launcher = selected == SurfaceEvent::Companion::Plan ? plan_launcher :
+                selected == SurfaceEvent::Companion::Draw ? draw_launcher : keyboard_launcher;
+            const auto command = selected == SurfaceEvent::Companion::KeyboardRecenter ? CompanionCommand::Recenter :
+                selected == SurfaceEvent::Companion::Keyboard ? CompanionCommand::Show : CompanionCommand::Default;
+            if (launcher && !launch_companion(*launcher, command))
+                surface.set_binding_note("Could not open companion app.");
+            else surface.set_binding_note("");
+        };
         if (auto update = updates.poll()) {
             update_version = std::move(update->version);
             surface.set_update_status(update->state == UpdateResult::State::Available ? UpdateStatus::Available :
@@ -568,13 +646,15 @@ struct Overlay::Impl {
                 // a release must still hit the same enabled control.
                 diagnostics.last_pointer_event = "overlay focus changed"; break;
             case vr::VREvent_MouseMove:
-                // Hover is for scrolling only. Manipulation still uses the captured
-                // controller ray, never mouse coordinates from a changing overlay.
-                if (event.data.mouse.cursorIndex < cursor_positions.size())
+                // Hover drives scrolling and hold cancellation. Manipulation uses
+                // the captured controller ray, not changing overlay coordinates.
+                if (event.data.mouse.cursorIndex < cursor_positions.size()) {
                     cursor_positions[event.data.mouse.cursorIndex] = {event.data.mouse.x, H - event.data.mouse.y};
+                    surface.pointer_move(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
+                }
                 break;
             case vr::VREvent_ScrollDiscrete: case vr::VREvent_ScrollSmooth:
-                if (event.data.scroll.cursorIndex < cursor_positions.size() &&
+                if (!dragging.panel.active() && event.data.scroll.cursorIndex < cursor_positions.size() &&
                     cursor_positions[event.data.scroll.cursorIndex]) {
                     const auto [x, y] = *cursor_positions[event.data.scroll.cursorIndex];
                     surface.scroll(x, y, event.data.scroll.ydelta);
@@ -596,7 +676,7 @@ struct Overlay::Impl {
                 diagnostics.last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.launch_companion || event_result.check_updates || event_result.install_update || event_result.advanced_debug || event_result.auto_insert || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.launch_companion || event_result.check_updates || event_result.install_update || event_result.advanced_debug || event_result.auto_insert || event_result.gradient_enabled || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
                     if (event_result.check_updates) {
                         update_version.clear();
@@ -605,13 +685,7 @@ struct Overlay::Impl {
                     if (event_result.install_update && !update_version.empty() &&
                         !open_update_terminal(install_update_script, update_version))
                         surface.set_update_status(UpdateStatus::TerminalFailed);
-                    if (event_result.launch_companion) {
-                        const auto& launcher = *event_result.launch_companion == SurfaceEvent::Companion::Plan ?
-                            plan_launcher : keyboard_launcher;
-                        if (launcher && !launch_companion(*launcher))
-                            surface.set_binding_note("Could not open companion app.");
-                        else surface.set_binding_note("");
-                    }
+                    if (event_result.launch_companion) open_companion(*event_result.launch_companion);
                     if (event_result.model_action) {
                         model_actions.push_back(*event_result.model_action);
                         reset_input(result); // revoke held PTT, delivery and stale pointer approval
@@ -654,6 +728,14 @@ struct Overlay::Impl {
                             !save_close_mic_when_idle(default_config_path(), config.close_mic_when_idle);
                         surface.set_close_mic_when_idle(config.close_mic_when_idle);
                         reset_input(result); // a setting change invalidates held actions
+                        return result;
+                    }
+                    if (event_result.gradient_enabled) {
+                        config.gradient.enabled = *event_result.gradient_enabled;
+                        persistence.gradient_save_failed = persistence.persist_mount &&
+                            !save_gradient_enabled(default_config_path(), config.gradient.enabled);
+                        surface.set_gradient_enabled(config.gradient.enabled);
+                        reset_input(result);
                         return result;
                     }
                     if (event_result.auto_insert) {
@@ -705,8 +787,49 @@ struct Overlay::Impl {
             default: break;
             }
         }
+        vr::VRActiveActionSet_t set{};
+        set.ulActionSet = action_set;
+        set.ulRestrictedToDevice = vr::k_ulInvalidInputValueHandle;
+        // This is a request, not proof of delivery through the dashboard/game.
+        set.nPriority = action_priority();
+        std::array<vr::VRActiveActionSet_t, 2> sets{set, {}};
+        uint32_t count = 1;
+        if (dragging.panel.active() && dragging.kind == PanelDragKind::Grab && tracked(dragging.device)) {
+            const auto role = system->GetControllerRoleForTrackedDeviceIndex(dragging.device);
+            const auto hand = role == vr::TrackedControllerRole_LeftHand ? hands[0] :
+                              role == vr::TrackedControllerRole_RightHand ? hands[1] : vr::k_ulInvalidInputValueHandle;
+            if (hand != vr::k_ulInvalidInputValueHandle) {
+                // Depth priority must never promote recording/typing bindings.
+                sets[1].ulActionSet = grab_action_set;
+                sets[1].ulRestrictedToDevice = hand;
+                sets[1].nPriority = vr::k_nActionSetOverlayGlobalPriorityMin;
+                count = 2;
+            }
+        }
+        diagnostics.action_update_error = input->UpdateActionState(sets.data(), sizeof(sets[0]), count);
+        const bool measuring_motion = performance.enabled && dragging.panel.active();
+        const auto motion_start = measuring_motion ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+        // Event handlers can launch a companion or update a setting. Refresh
+        // tracking immediately before motion submission after that work.
+        if (dragging.panel.active())
+            system->GetDeviceToAbsoluteTrackingPose(vr::TrackingUniverseStanding, 0, poses.data(), uint32_t(poses.size()));
         update_drag();
         place();
+        if (measuring_motion) {
+            ++performance.motion_ticks;
+            const auto elapsed = Performance::elapsed(motion_start);
+            performance.motion_ms += elapsed;
+            performance.motion_max_ms = std::max(performance.motion_max_ms, elapsed);
+        }
+        const auto& hmd = poses[vr::k_unTrackedDeviceIndex_Hmd];
+        if (!shown || !focus || !placed || !hmd.bPoseIsValid || !hmd.bDeviceIsConnected ||
+            !overlay->IsHoverTargetOverlay(handle)) {
+            // Tracking/visibility/hover loss revokes the hold even if OpenVR never sends MouseUp.
+            surface.reset_pointers();
+        } else if (auto command = surface.poll_keyboard_hold()) {
+            ++diagnostics.pointer_actions;
+            open_companion(*command);
+        }
         if (dragging.panel.active()) {
             // A controller used to manipulate the panel must not also authorize
             // Record/Insert/Enter. Require neutral rearm after the drag ends.
@@ -716,14 +839,6 @@ struct Overlay::Impl {
             for (auto& edge : edges) edge.reset();
             return result;
         }
-        vr::VRActiveActionSet_t set{};
-        set.ulActionSet = action_set;
-        set.ulRestrictedToDevice = vr::k_ulInvalidInputValueHandle;
-        // Explicit opt-in affects only sources bound to our existing action set.
-        // Keep requesting it across dashboard/laser states: those are what the
-        // experiment compares. SteamVR's separate permission gate is never changed here.
-        set.nPriority = action_priority();
-        diagnostics.action_update_error = input->UpdateActionState(&set, sizeof(set), 1);
         if (diagnostics.action_update_error != vr::VRInputError_None) {
             reset_input(result); return result;
         }

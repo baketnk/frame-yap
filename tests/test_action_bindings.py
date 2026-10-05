@@ -19,9 +19,9 @@ class ActionBindingTests(unittest.TestCase):
             path = f"/user/hand/right/input/{button}"
             self.assertIn({"name": name, "type": "boolean"}, manifest["actions"])
             self.assertEqual(config["buttons"][action], path)
-            self.assertEqual([s["path"] for s in sources if s["inputs"]["click"]["output"] == name], [path])
+            self.assertEqual([s["path"] for s in sources if s["inputs"].get("click", {}).get("output") == name], [path])
         self.assertEqual(config["buttons"]["enter"], "")
-        self.assertFalse(any(s["inputs"]["click"]["output"] == "/actions/frameyap/in/enter" for s in sources))
+        self.assertFalse(any(s["inputs"].get("click", {}).get("output") == "/actions/frameyap/in/enter" for s in sources))
         self.assertEqual(config["quick_inputs"], ["/new", "/questions", "/help"])
 
     def test_right_x_is_hold_to_talk(self):
@@ -48,6 +48,18 @@ class ActionBindingTests(unittest.TestCase):
             for source in sources
         ), 1)
         self.assertFalse(any(source["path"].endswith("/input/trigger") for source in sources))
+
+    def test_grab_depth_axes_are_hand_specific(self):
+        manifest = json.loads((ROOT / "assets/actions.json").read_text())
+        for binding_file in ("bindings_frame_controller.json", "bindings_knuckles.json"):
+            sources = json.loads((ROOT / "assets" / binding_file).read_text())["bindings"]["/actions/grab"]["sources"]
+            for hand in ("left", "right"):
+                name = f"/actions/grab/in/{hand}_depth"
+                path = f"/user/hand/{hand}/input/thumbstick"
+                self.assertIn({"name": name, "type": "vector2"}, manifest["actions"])
+                self.assertEqual([s for s in sources if s["path"] == path], [{
+                    "path": path, "mode": "joystick", "inputs": {"position": {"output": name}},
+                }])
 
 
 if __name__ == "__main__":

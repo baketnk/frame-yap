@@ -22,7 +22,8 @@ as explicit fallbacks. No desktop ASR server, network hop, LLM cleanup, scene
 renderer, avatar, desktop capture or root service is needed in the primary path.
 
 A first-class product goal is a **one-command GitHub install without a Steam store
-AppID**. v0.1 is source-only; a prebuilt archive is deferred. Use a normal
+AppID**. Published v0.1 archives supply the native app, while the model and
+CPU runtime have separate explicit download steps. Use a normal
 OpenVR application key for registration, not Steamworks. Installation must remain
 user-local with opt-in autolaunch. See [installation design](install-design.md).
 
@@ -109,12 +110,13 @@ one animation redraw per 100 ms on a monotonic clock. Hidden panels do not
 repaint for animation. The locally implemented gradient uses a smooth periodic
 cosine field: one start/end/start cycle across the canvas width, with a shared
 time phase and global canvas coordinates on the perimeter and grab/scale handles.
-`gradient.enabled` defaults to true; `period_seconds` defaults to 30 (finite
-number 5–300), and `strength` to 0.12 (finite number 0–0.3). Its colors derive
+`gradient.enabled` defaults to false; Settings → Animated background can opt in
+and persist the choice. `period_seconds` defaults to 30 (finite number 5–300),
+and `strength` to 0.12 (finite number 0–0.3). Its colors derive
 only from `theme.frame_start` and `theme.frame_end`; strength blends those colors
 into `theme.background`. Disabled mode restores the static solid background
-and existing linear edge/handle gradients. Config is read on restart, with no
-in-panel gradient switch. This is local implementation, **not** device-validated
+and existing linear edge/handle gradients. Manual config changes are read on restart; the in-panel switch takes effect
+immediately. This is local implementation, **not** device-validated
 appearance, frame pacing, performance or headset acceptance. See
 [config and rendering](overlay.md).
 The native implementation uploads the CPU-rasterized panel to

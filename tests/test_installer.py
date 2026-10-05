@@ -87,7 +87,7 @@ class InstallTests(unittest.TestCase):
         self.assertIs(json.loads(config.read_text())["close_mic_when_idle"], False)
         self.assertEqual(json.loads(config.read_text())["backend"], "redux")
         self.assertEqual(json.loads(config.read_text())["gradient"],
-                         {"enabled": True, "period_seconds": 30, "strength": 0.12})
+                         {"enabled": False, "period_seconds": 30, "strength": 0.12})
         self.assertIs(json.loads(config.read_text())["lock_layout"], False)
         self.assertIs(json.loads(config.read_text())["wrist_world_fallback"], True)
         self.assertEqual(list(config.parent.glob("config.json.backup-*")), [])
@@ -255,6 +255,7 @@ class InstallTests(unittest.TestCase):
         config = self.home / ".config/frameyap/config.json"
         config.parent.mkdir(parents=True)
         defaults = installer.CONFIG_DEFAULTS["gradient"]
+        self.assertIs(defaults["enabled"], False)
 
         # Older configs receive defaults; a non-object section is replaced.
         for value in (None, [], "animated", 1):
@@ -276,6 +277,12 @@ class InstallTests(unittest.TestCase):
         self.install("0.1.202609241530", archive, digest)
         self.assertEqual(json.loads(config.read_text())["gradient"],
                          {"enabled": False, "period_seconds": 30, "strength": 0.12})
+        self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
+        original = b'{"gradient":{"enabled":true},"font":"/custom.ttf"}'
+        config.write_bytes(original)
+        self.install("0.1.202609241530", archive, digest)
+        self.assertEqual(json.loads(config.read_text())["gradient"],
+                         {"enabled": True, "period_seconds": 30, "strength": 0.12})
         self.assertIn(original, [p.read_bytes() for p in config.parent.glob("config.json.backup-*")])
 
         # A complete valid section, including numeric boundaries and explicit

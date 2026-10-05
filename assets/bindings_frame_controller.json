@@ -8,32 +8,78 @@
         {
           "path": "/user/hand/left/input/grip",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/left_grip" } }
+          "inputs": {
+            "click": {
+              "output": "/actions/frameyap/in/left_grip"
+            }
+          }
         },
         {
           "path": "/user/hand/right/input/grip",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/right_grip" } }
+          "inputs": {
+            "click": {
+              "output": "/actions/frameyap/in/right_grip"
+            }
+          }
         },
         {
           "path": "/user/hand/right/input/x",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/ptt" } }
+          "inputs": {
+            "click": {
+              "output": "/actions/frameyap/in/ptt"
+            }
+          }
         },
         {
           "path": "/user/hand/right/input/b",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/cancel" } }
+          "inputs": {
+            "click": {
+              "output": "/actions/frameyap/in/cancel"
+            }
+          }
         },
         {
           "path": "/user/hand/right/input/a",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/insert" } }
+          "inputs": {
+            "click": {
+              "output": "/actions/frameyap/in/insert"
+            }
+          }
         },
         {
           "path": "/user/hand/right/input/y",
           "mode": "button",
-          "inputs": { "click": { "output": "/actions/frameyap/in/quick_chat" } }
+          "inputs": {
+            "click": {
+              "output": "/actions/frameyap/in/quick_chat"
+            }
+          }
+        }
+      ]
+    },
+    "/actions/grab": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/grab/in/left_depth"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/thumbstick",
+          "mode": "joystick",
+          "inputs": {
+            "position": {
+              "output": "/actions/grab/in/right_depth"
+            }
+          }
         }
       ]
     }

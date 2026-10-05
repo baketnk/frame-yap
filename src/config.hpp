@@ -15,7 +15,7 @@ struct Theme {
     Rgba frame_start{31, 255, 145, 255}, frame_end{31, 112, 255, 255};
 };
 struct GradientConfig {
-    bool enabled = true;
+    bool enabled = false; // animated background is opt-in; static frame styling remains
     float period_seconds = 30.f;
     float strength = .12f; // muted edge colors blended into theme.background
 };
@@ -45,6 +45,7 @@ Config load_config(const std::filesystem::path& path);
 // Other user customizations and formatting are retained; creates a minimal config if absent.
 bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept;
+bool save_gradient_enabled(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_close_mic_when_idle(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_lock_layout(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_wrist_world_fallback(const std::filesystem::path& path, bool enabled) noexcept;

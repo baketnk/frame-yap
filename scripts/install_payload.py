@@ -47,7 +47,7 @@ CONFIG_DEFAULTS = {
     "theme": {"background": "#0c101b", "card": "#141c2b", "ink": "#e6f0f9",
               "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
               "frame_start": "#1fff91", "frame_end": "#1f70ff"},
-    "gradient": {"enabled": True, "period_seconds": 30, "strength": 0.12},
+    "gradient": {"enabled": False, "period_seconds": 30, "strength": 0.12},
     "buttons": {"left_grip": "/user/hand/left/input/grip",
                 "right_grip": "/user/hand/right/input/grip",
                 "ptt": "/user/hand/right/input/x", "cancel": "/user/hand/right/input/b",

@@ -6,7 +6,8 @@
 namespace frameyap {
 // Resolve an installed launcher once at boot; never search the source checkout.
 std::optional<std::filesystem::path> find_companion(std::string_view name);
-// Launch the installed wrapper (which toggles an existing overlay) without a shell.
+// Fixed control arguments only; never pass pointer/UI text to a shell.
+enum class CompanionCommand { Default, Show, Recenter };
 // Returns false if fork or exec fails; does not wait for the overlay to exit.
-bool launch_companion(const std::filesystem::path& launcher);
+bool launch_companion(const std::filesystem::path& launcher, CompanionCommand command = CompanionCommand::Default);
 }

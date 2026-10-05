@@ -26,7 +26,7 @@ persistent Vulkan RGBA8 image and submits it with `SetOverlayTexture`. The image
 staging allocation and command buffer are reused; tabs do not create extra
 overlays or render targets. The rounded mint-to-blue perimeter,
 shallow curved accent, and dark cards form the panel's visual language.
-With `gradient.enabled` (the default), a low-strength animated field blends
+With `gradient.enabled` (opt-in), a low-strength animated field blends
 `theme.frame_start` and `theme.frame_end` into `theme.background`; the perimeter
 and grab/scale handles share its phase and canvas coordinates. Rounded
 preview, status and control surfaces use independently rasterized antialiased edges
@@ -101,11 +101,16 @@ Settings; no fallback auto-install is attempted.
 
 The transcript wraps by glyph width and scrolls in its review viewport with
 the right-stick laser wheel; a new transcript resets the scroll position.
-The former paging row is retained for **Open Plan** and **Open Keyboard** when
-the installed `tnkplan` or `tnkboard` executable is found at startup in
-`~/.local/bin` or an absolute PATH directory. Missing apps have no button.
-Clicking launches the installed wrapper without a shell; those apps' normal
-second-launch behavior toggles their existing panels.
+The former paging row holds **Open Plan**, **Open Keyboard** and **Open Draw**
+when the installed `tnkplan`, `tnkboard` or `tnkdraw` wrapper is found at startup
+in `~/.local/bin` or an absolute PATH directory. Missing apps have no button;
+available buttons share the row. Open Keyboard short press runs the installed
+wrapper with fixed `--show`; holding it for 800 ms runs fixed `--recenter`
+once and suppresses the short action, placing the keyboard in front of the
+wearer. Leaving the button, losing focus/tracking or hiding the overlay cancels
+a pending hold. Other companion buttons launch their installed wrappers without
+a shell (their normal second-launch behavior may toggle the existing panel).
+Restart FrameYap after installing a companion so its button is discovered.
 Status fits on the single status line; the old bottom detail label is gone.
 The footer remains available on all tabs: Record (labelled Stop while recording),
 Cancel, Type (labelled Enter when nothing is pending review), Type + Enter, Hold Quit. Hold Quit needs a 900 ms press and release on
@@ -174,7 +179,7 @@ installer creates one with defaults on first install. Copy the shipped
     "muted": "#97adc1", "accent": "#1ff0a4", "warning": "#ff6e87",
     "frame_start": "#1fff91", "frame_end": "#1f70ff"
   },
-  "gradient": {"enabled": true, "period_seconds": 30, "strength": 0.12},
+  "gradient": {"enabled": false, "period_seconds": 30, "strength": 0.12},
   "buttons": {
     "ptt": "/user/hand/right/input/x",
     "cancel": "/user/hand/right/input/b",
@@ -194,7 +199,7 @@ A failed save warns and leaves the selection active for this run. Time uses
 the device's local timezone; these controls do not change system time.
 
 Each theme color is `#RRGGBB`; omitted colors keep the default. The optional
-`gradient` object defaults to `{"enabled": true, "period_seconds": 30, "strength": 0.12}`.
+`gradient` object defaults to `{"enabled": false, "period_seconds": 30, "strength": 0.12}`.
 `enabled` must be a boolean; `period_seconds` must be a
 finite number from 5 to 300 (seconds per full cycle), and `strength` a finite
 number from 0 to 0.3. The animation uses a smooth periodic cosine field with
@@ -202,9 +207,11 @@ one start/end/start cycle across the canvas width. Its edge and handle colors
 use the same global canvas coordinates and time phase; it does not add a
 separate handle animation. Colors always come from `theme.frame_start` and
 `theme.frame_end`, while `strength` controls how much of those colors blends
-into `theme.background`. Set `enabled` to `false` for a static solid background
-and the existing linear perimeter/handle gradients. Edit the JSON and restart;
-there is no in-panel gradient switch or hot reload. This is locally implemented,
+into `theme.background`. The default static mode keeps the solid background
+and existing linear perimeter/handle gradients. Settings → **Animated background**
+turns animation on/off immediately and saves only `gradient.enabled` in the JSON
+config (failed saves leave a session-only choice and a warning). Manual JSON edits
+take effect on restart; existing enabled configs stay enabled on upgrade. This is locally implemented,
 not device validated; headset appearance and rendering cost remain unverified.
 `font` is a TTF/OTF file path (not a family name); a missing file uses the
 bundled font.
@@ -375,6 +382,18 @@ Hold the laser's primary click on the bar to **freely position and rotate** the
 panel with the controller, including depth, pitch, yaw and roll. Grab captures
 `inverse(controller_down) * panel_down` and applies that unchanged relative pose
 to each controller pose, so grabbing does not snap or reset the panel orientation.
+During a grab, the grabbing hand's thumbstick Y axis also moves the panel along
+the captured panel's local -Z normal: forward pushes away, backward pulls closer.
+The axis is velocity with a 0.2 dead zone, 0.6 m/s at full deflection and a
+±1.5 m offset limit from the pose-only grab. Returning to center holds the
+current depth; the other hand's stick and scale drags do not change it. A lost
+axis stops adding depth without resetting placement. Frame controller bindings
+provide left/right vector2 actions in a separate `/actions/grab` set, including
+in generated custom button manifests. Only a grab activates this set, restricted
+to the grabbing hand at overlay priority; it requires SteamVR Experimental
+overlay input overrides. It does not promote recording or text actions, and does
+not depend on FrameYap's ordinary `input_priority` preference. Axis delivery during laser drag and dashboard/game focus needs a
+separate headset check. Laser scroll events are ignored while dragging.
 Release leaves the last pose in the chosen mount frame; head/wrist mounts continue
 following that anchor afterward. A completed grab or scale on Head, Left wrist or
 Right wrist saves the full device-relative canvas position, rotation and scale
@@ -470,8 +489,9 @@ coexistence remains unverified.
 
 ### Hardware-free UI checks
 
-The default build tests mount parsing, laser preference persistence, pose geometry
-and controller-relative grab/captured-ray scale math without any native dependencies.
+The default build tests mount parsing, laser preference persistence, pose geometry,
+controller-relative grab/captured-ray scale math and stick-depth integration without
+any native dependencies.
 Drag tests cover XYZ translation, pitch/yaw/roll and lever-arm rotation, re-grabbing
 a moved panel, stationary stability, relative mounts, out-of-bounds scale hits,
 invalid poses/rays and no feedback from prior updates. UI/config/installer tests
@@ -512,8 +532,8 @@ cmake --build build-native --target frameyap_texture_check
 
 It does not initialize OpenVR or establish compositor/headset acceptance.
 
-`assets/actions.json` names seven actions: left/right grip, PTT, cancel,
-Type, Type + Enter and Quick phrases. `insert`, `enter`, and `quick_chat` remain
+`assets/actions.json` names nine actions: left/right grip, PTT, cancel,
+Type, Type + Enter, Quick phrases and the two hand-specific depth axes. `insert`, `enter`, and `quick_chat` remain
 internal binding keys; visible controls read Type, Type + Enter, Quick phrases.
 `bindings_frame_controller.json` maps right X click to hold-to-talk PTT;
 the grip bindings remain for optional remapping/diagnosis. In one dashboard
@@ -521,7 +541,8 @@ probe grips were inactive; a later controls-only probe delivered repeated right
 X PTT BeginRecord/EndRecord callbacks. The wearer reports controller actions
 are usable with Steam's dashboard closed, not with the dashboard itself open.
 Neither probe used a microphone or established game-scene pass-through.
-`bindings_knuckles.json` is an additional **Index/knuckles example only**.
+`bindings_knuckles.json` is an additional **Index/knuckles example only**;
+it includes the two thumbstick depth axes alongside grip taps.
 Collisions with scene actions require
 separate on-device validation. Left grip double tap
 (releases <=250 ms, second press within 350 ms) requests explicit Enter only
@@ -559,8 +580,16 @@ Registration, repeated registration and removal were tested against the running
 Frame runtime, with autolaunch verified off. The overlay explicitly identifies
 its process with the registered app key before setting its action manifest.
 Cold-runtime behavior and actual SteamVR-menu launch still need validation.
-See [packaging](packaging.md); no published release is claimed here.
+See [packaging](packaging.md) for the published native archive and release checks.
 
 A live headset check must be opt-in and distinguish overlay API discovery from
 controller delivery, actual transcription, insertion into a disposable target,
 and human comfort/acceptance.
+
+### Opt-in rendering measurements
+
+`FRAMEYAP_PROFILE=1` prints aggregate CPU raster time, upload time, and grab/scale
+tracking/transform time on exit. Counts and timings contain no speech, typed text
+or pointer coordinates. The motion measurements exclude sleep and other runtime
+work; they do not measure motion-to-photon latency. During an initialized grab or
+scale, neither the renderer nor uploader runs; content updates resume on release.

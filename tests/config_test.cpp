@@ -50,7 +50,7 @@ int main(int argc, char** argv) {
     assert(!load_config(path).clock_24h);
     assert(load_config(path).date_format == DateFormat::MonthDayYear);
     assert(load_config(path).wrist.width == .30f);
-    assert(load_config(path).gradient.enabled);
+    assert(!load_config(path).gradient.enabled);
     assert(load_config(path).gradient.period_seconds == 30.f);
     assert(load_config(path).gradient.strength == .12f);
     auto example = load_config(std::filesystem::path(argv[1]) / "config.example.json");
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
     assert(example.wrist_world_fallback);
     assert(!example.clock_24h && example.date_format == DateFormat::MonthDayYear);
     assert(example.wrist.y == .18f && example.wrist.z == .089f);
-    assert(example.gradient.enabled && example.gradient.period_seconds == 30.f && example.gradient.strength == .12f);
+    assert(!example.gradient.enabled && example.gradient.period_seconds == 30.f && example.gradient.strength == .12f);
     std::filesystem::create_directories(path.parent_path());
     assert(save_backend(path, "fixture_cpu"));
     assert(load_config(path).backend == "fixture_cpu");
@@ -81,6 +81,11 @@ int main(int argc, char** argv) {
     assert(load_config(path).auto_insert);
     assert(save_auto_insert(path, false));
     assert(!load_config(path).auto_insert);
+    assert(save_gradient_enabled(path, true)); // missing gradient creates only the nested setting
+    assert(load_config(path).gradient.enabled);
+    assert(get(path).find("\"gradient\":{\"enabled\":true}") != std::string::npos);
+    assert(save_gradient_enabled(path, false));
+    assert(!load_config(path).gradient.enabled);
     assert(save_close_mic_when_idle(path, true));
     assert(load_config(path).close_mic_when_idle);
     assert(save_close_mic_when_idle(path, false));
@@ -229,12 +234,24 @@ int main(int argc, char** argv) {
     assert(save_auto_insert(path, true)); // unrelated settings retain the effect
     assert(load_config(path).gradient.period_seconds == 45.5f);
     put(path, R"({"gradient":{"strength":0}})");
-    assert(load_config(path).gradient.enabled && load_config(path).gradient.period_seconds == 30.f);
+    assert(!load_config(path).gradient.enabled && load_config(path).gradient.period_seconds == 30.f);
     assert(load_config(path).gradient.strength == 0.f);
     put(path, R"({"gradient":{"period_seconds":5,"strength":0.3}})");
     assert(load_config(path).gradient.period_seconds == 5.f && load_config(path).gradient.strength == .3f);
     put(path, R"({"gradient":{"period_seconds":300}})");
     assert(load_config(path).gradient.period_seconds == 300.f);
+    put(path, R"({"font":"escaped \u0061","gradient":{"period_seconds":45.5,"strength":0.2},"auto_insert":true})");
+    assert(save_gradient_enabled(path, true));
+    assert(load_config(path).gradient.enabled);
+    assert(load_config(path).gradient.period_seconds == 45.5f && load_config(path).gradient.strength == .2f);
+    assert(get(path).find(R"("font":"escaped \u0061")") != std::string::npos);
+    assert(get(path).find(R"("strength":0.2,"enabled":true},"auto_insert":true)") != std::string::npos);
+    assert(save_gradient_enabled(path, false) && !load_config(path).gradient.enabled);
+    assert(save_gradient_enabled(path, true) && load_config(path).gradient.enabled);
+    put(path, R"({"gradient":{"enabled":false,"strength":0.21},"theme":{"ink":"#123ABC"}})");
+    assert(save_gradient_enabled(path, true));
+    assert(get(path) == R"({"gradient":{"enabled":true,"strength":0.21},"theme":{"ink":"#123ABC"}})");
+    assert(load_config(path).gradient.enabled);
     for (auto invalid : {R"({"gradient":true})", R"({"gradient":{"enabled":1}})",
                          R"({"gradient":{"enabled":"false"}})", R"({"gradient":{"period_seconds":0}})",
                          R"({"gradient":{"period_seconds":301}})", R"({"gradient":{"period_seconds":1e99}})",
@@ -242,6 +259,7 @@ int main(int argc, char** argv) {
                          R"({"gradient":{"strength":0.31}})", R"({"gradient":{"strength":1e99}})",
                          R"({"gradient":{"strength":"0.1"}})", R"({"gradient":{"unknown":1}})"}) {
         put(path, invalid); fails([&] { load_config(path); });
+        assert(!save_gradient_enabled(path, true) && get(path) == invalid);
     }
     put(path, R"({"theme":{"background":"#123ABC","accent":"#abcdef","frame_end":"#010203"},"font":"/nonexistent/face.ttf","buttons":{"ptt":"/user/hand/left/input/y","cancel":"/user/hand/right/input/b","right_grip":""}})");
     auto config = load_config(path);
@@ -259,6 +277,8 @@ int main(int argc, char** argv) {
     assert(generated.find("/user/hand/right/input/a") != std::string::npos);
     assert(generated.find("/user/hand/right/input/y") != std::string::npos);
     assert(generated.find("/actions/frameyap/in/quick_chat") != std::string::npos);
+    assert(generated.find("/actions/grab/in/left_depth") != std::string::npos);
+    assert(generated.find("/actions/grab/in/right_depth") != std::string::npos);
     config.buttons["cancel"] = ""; config.buttons["insert"] = ""; config.buttons["enter"] = "";
     auto disabled = action_manifest(argv[1], config);
     generated = get(disabled.parent_path() / "bindings_frame_controller.json");
@@ -266,6 +286,9 @@ int main(int argc, char** argv) {
     assert(generated.find("/actions/frameyap/in/insert") == std::string::npos);
     assert(generated.find("/actions/frameyap/in/enter") == std::string::npos);
     assert(action_manifest(argv[1], {}) == std::filesystem::absolute(std::filesystem::path(argv[1]) / "actions.json"));
+    put(path, R"({"buttons":{"quick_chat":"/user/hand/right/input/thumbstick"}})");
+    generated = get(action_manifest(argv[1], load_config(path)).parent_path() / "bindings_frame_controller.json");
+    assert(generated.find("\"mode\":\"joystick\",\"inputs\":{\"click\":{\"output\":\"/actions/frameyap/in/quick_chat\"}") != std::string::npos);
     put(path, R"({"buttons":{"enter":"/user/hand/right/input/y"}})");
     generated = get(action_manifest(argv[1], load_config(path)).parent_path() / "bindings_frame_controller.json");
     assert(generated.find("/actions/frameyap/in/quick_chat") != std::string::npos);

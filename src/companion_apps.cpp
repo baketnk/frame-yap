@@ -16,7 +16,7 @@ bool executable(const std::filesystem::path& path) {
 }
 }
 std::optional<std::filesystem::path> find_companion(std::string_view name) {
-    if (name != "tnkplan" && name != "tnkboard") return {};
+    if (name != "tnkplan" && name != "tnkboard" && name != "tnkdraw") return {};
     if (const char* home = std::getenv("HOME")) {
         const auto launcher = std::filesystem::path(home) / ".local/bin" / name;
         if (executable(launcher)) return launcher;
@@ -34,10 +34,12 @@ std::optional<std::filesystem::path> find_companion(std::string_view name) {
     }
     return {};
 }
-bool launch_companion(const std::filesystem::path& launcher) {
+bool launch_companion(const std::filesystem::path& launcher, CompanionCommand command) {
     if (!executable(launcher)) return false;
     const auto path = launcher.string();
-    char* const args[] = {const_cast<char*>(path.c_str()), nullptr};
+    const char* option = command == CompanionCommand::Show ? "--show" :
+                         command == CompanionCommand::Recenter ? "--recenter" : nullptr;
+    char* const args[] = {const_cast<char*>(path.c_str()), const_cast<char*>(option), nullptr};
     // Double fork so the long-lived companion is adopted rather than becoming
     // a zombie owned by FrameYap. An O_CLOEXEC pipe reports exec failure only.
     int pipefd[2];

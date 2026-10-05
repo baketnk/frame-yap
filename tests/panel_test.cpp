@@ -1,10 +1,12 @@
 #include "panel_surface.hpp"
 #include <cassert>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <string>
+#include <unistd.h>
 
 using namespace frameyap;
 namespace {
@@ -14,7 +16,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
 }
 void no_action(const SurfaceEvent& event) {
     assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
-           !event.close_mic_when_idle && !event.lock_layout && !event.wrist_world_fallback && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action && !event.launch_companion && !event.check_updates && !event.install_update);
+           !event.close_mic_when_idle && !event.gradient_enabled && !event.lock_layout && !event.wrist_world_fallback && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action && !event.launch_companion && !event.check_updates && !event.install_update);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
     std::ofstream out(path, std::ios::binary);
@@ -27,13 +29,14 @@ void snapshot(PanelSurface& surface, const std::string& path) {
 }
 int main(int argc, char** argv) {
     assert(argc >= 2);
-    // Interaction tests use the opt-out path; animation has a deterministic
-    // injected-clock suite below rather than wall-time-sensitive assertions.
-    PanelSurface surface(argv[1], Mount::World, {}, {.enabled = false});
+    // Ordinary UI uses the default static path; animation has an explicitly
+    // opted-in injected-clock suite below.
+    PanelSurface surface(argv[1], Mount::World);
     Panel p{"Ready to record", "", "Focus your destination before Type. Enter is always separate.", false, false};
     assert(surface.render(p));
     assert(surface.pixels().size() == size_t(PanelSurface::width * PanelSurface::height * 4));
     assert(!surface.render(p));
+    assert(!surface.render(p, PanelSurface::Clock::now() + std::chrono::seconds(60))); // default: no timed redraw
     surface.set_clock_time(std::time_t{1704211440}); // local clock changes only when rendered minute changes
     assert(surface.render(p));
     assert(!surface.render(p));
@@ -138,7 +141,7 @@ int main(int argc, char** argv) {
         // civil clock, and full cycles return byte-identical pixels (including alpha).
         using namespace std::chrono_literals;
         const auto epoch = PanelSurface::Clock::time_point{};
-        PanelSurface animated(argv[1], Mount::World, gradient_theme);
+        PanelSurface animated(argv[1], Mount::World, gradient_theme, {.enabled = true});
         animated.set_clock_time(std::time_t{1704211440});
         assert(animated.render(p, epoch));
         const auto first = animated.pixels();
@@ -185,14 +188,14 @@ int main(int argc, char** argv) {
         assert(animated.render(p, epoch + 41s));
         assert(animated.pointer_up(0, 100, 610, epoch + 41s).action == UiAction::BeginRecord);
         assert(!gradient_surface.render(p, epoch + 300s)); // disabled has no timed redraws
-        PanelSurface faster(argv[1], Mount::World, gradient_theme, {.period_seconds = 10.f, .strength = 0.f});
+        PanelSurface faster(argv[1], Mount::World, gradient_theme, {.enabled = true, .period_seconds = 10.f, .strength = 0.f});
         assert(faster.render(p, epoch));
         const auto fast_first = faster.pixels();
         assert(rgb(fast_first, 500, 190) == gradient_theme.background);
         assert(faster.render(p, epoch + 2500ms) && faster.pixels() != fast_first);
         assert(faster.render(p, epoch + 10s) && faster.pixels() == fast_first);
         if (argc >= 3) {
-            PanelSurface preview(argv[1], Mount::World);
+            PanelSurface preview(argv[1], Mount::World, {}, {.enabled = true});
             preview.render(p, epoch);
             snapshot(preview, std::string(argv[2]) + "-gradient.ppm");
         }
@@ -338,11 +341,43 @@ int main(int argc, char** argv) {
     assert(surface.scroll(200, 400, -2.f));
     assert(surface.render(p));
     no_action(click(surface, 180, 231)); // scrolled settings cannot be clicked above the viewport
-    auto fallback = click(surface, 200, 485);
+    using namespace std::chrono_literals;
+    const auto tick = PanelSurface::Clock::time_point{};
+    const auto static_background = surface.pixels()[pixel];
+    const auto preference = std::filesystem::temp_directory_path() /
+        ("frameyap-gradient-ui-" + std::to_string(::getpid()) + ".json");
+    auto animated_background = click(surface, 200, 470); // y=574 minus 120 scroll
+    assert(animated_background.gradient_enabled == true && !animated_background.action);
+    assert(!surface.render(p)); // caller must apply the change
+    assert(save_gradient_enabled(preference, *animated_background.gradient_enabled));
+    assert(load_config(preference).gradient.enabled);
+    PanelSurface restored(argv[1], Mount::World, {}, load_config(preference).gradient);
+    restored.set_clock_time(std::time_t{1704211500});
+    assert(restored.render(p, tick) && restored.pixels()[pixel] != static_background);
+    surface.set_gradient_enabled(true);
+    assert(surface.render(p, tick));
+    assert(surface.pixels()[pixel] != static_background);
+    if (argc >= 3) snapshot(surface, std::string(argv[2]) + "-settings-animated.ppm");
+    assert(!surface.render(p, tick + 99ms));
+    assert(surface.render(p, tick + 100ms));
+    surface.pointer_down(1, 200, 470);
+    surface.set_gradient_enabled(false);
+    assert(surface.render(p, tick + 200ms));
+    no_action(surface.pointer_up(1, 200, 470)); // old press cannot re-enable it
+    assert(surface.pixels()[pixel] == static_background);
+    assert(!surface.render(p, tick + 300s)); // off: no timed redraws
+    animated_background = click(surface, 200, 470);
+    assert(animated_background.gradient_enabled == true);
+    assert(save_gradient_enabled(preference, false));
+    assert(!load_config(preference).gradient.enabled);
+    std::filesystem::remove(preference);
+    assert(surface.scroll(200, 400, -.5f)); // reveal wrist fallback below the new switch
+    assert(surface.render(p));
+    auto fallback = click(surface, 200, 500);
     assert(fallback.wrist_world_fallback == false && !fallback.action);
     assert(!surface.render(p));
     surface.set_wrist_world_fallback(false); assert(surface.render(p));
-    fallback = click(surface, 200, 485);
+    fallback = click(surface, 200, 500);
     assert(fallback.wrist_world_fallback == true);
     surface.set_wrist_world_fallback(true); assert(surface.render(p));
     assert(surface.scroll(200, 400, -2.f)); // reveal bottom update row and status
@@ -362,6 +397,7 @@ int main(int argc, char** argv) {
     no_action(click(surface, 700, 486));
     assert(click(surface, 280, 610).action == UiAction::Cancel); // footer stays fixed
     assert(surface.scroll(200, 400, 4.f));
+    assert(surface.scroll(200, 400, 1.f));
     assert(surface.render(p));
     assert(!surface.scroll(200, 400, 1.f)); // top clamp
     assert(click(surface, 180, 260).mount == Mount::World);
@@ -382,6 +418,7 @@ int main(int argc, char** argv) {
     no_action(click(surface, 200, 492)); // clock/date controls only exist on Settings
     no_action(click(surface, 680, 492));
     no_action(click(surface, 200, 532)); // mic preference only exists on Settings
+    no_action(click(surface, 200, 470)); // animation toggle only exists on Settings
     assert(!surface.scroll(200, 400, -1.f)); // short Review needs no scrolling
 
     // Bindings opens SteamVR directly, from either tab, without replacing review.
@@ -405,22 +442,100 @@ int main(int argc, char** argv) {
     assert(click(surface, 680, 260).mount == Mount::Head); // still in Settings
     no_action(click(surface, 100, 160));
 
-    // Installed companions alone get launch controls in the old paging row.
+    // Only installed companions occupy the review row, in a stable order.
     no_action(click(surface, 90, 518)); no_action(click(surface, 900, 518));
-    surface.set_companions(true, false); assert(surface.render(p));
+    surface.set_companions(true, false, false); assert(surface.render(p));
     assert(click(surface, 90, 518).launch_companion == SurfaceEvent::Companion::Plan);
-    no_action(click(surface, 900, 518));
-    surface.set_companions(false, true); assert(surface.render(p));
-    no_action(click(surface, 90, 518));
-    assert(click(surface, 900, 518).launch_companion == SurfaceEvent::Companion::Keyboard);
-    surface.set_companions(true, true); assert(surface.render(p));
+    surface.set_companions(false, true, false); assert(surface.render(p));
+    assert(click(surface, 90, 518).launch_companion == SurfaceEvent::Companion::Keyboard);
+    surface.set_companions(false, false, true); assert(surface.render(p));
+    assert(click(surface, 90, 518).launch_companion == SurfaceEvent::Companion::Draw);
+    surface.set_companions(true, true, false); assert(surface.render(p));
     assert(click(surface, 90, 518).launch_companion == SurfaceEvent::Companion::Plan);
     assert(click(surface, 900, 518).launch_companion == SurfaceEvent::Companion::Keyboard);
+    surface.set_companions(true, true, true); assert(surface.render(p));
+    assert(click(surface, 90, 518).launch_companion == SurfaceEvent::Companion::Plan);
+    assert(click(surface, 480, 518).launch_companion == SurfaceEvent::Companion::Keyboard);
+    assert(click(surface, 900, 518).launch_companion == SurfaceEvent::Companion::Draw);
+    {
+        using namespace std::chrono_literals;
+        const auto start = PanelSurface::Clock::now();
+        // A short release explicitly shows; the boundary and either laser cursor
+        // launch exactly one recenter, never a subsequent show on release.
+        for (unsigned cursor : {0u, 1u}) {
+            surface.pointer_down(cursor, 480, 518, start);
+            assert(surface.render(p, start)); // visible hold cue
+            assert(!surface.render(p, start + 99ms)); // no idle/full-speed redraw
+            assert(surface.render(p, start + 100ms));
+            assert(!surface.poll_keyboard_hold(start + 799ms));
+            assert(surface.pointer_up(cursor, 480, 518, start + 799ms).launch_companion ==
+                   SurfaceEvent::Companion::Keyboard);
+            surface.pointer_down(cursor, 480, 518, start);
+            assert(!surface.poll_keyboard_hold(start + 799ms));
+            assert(surface.poll_keyboard_hold(start + 800ms) == SurfaceEvent::Companion::KeyboardRecenter);
+            assert(!surface.poll_keyboard_hold(start + 800ms));
+            assert(!surface.poll_keyboard_hold(start + 5s));
+            no_action(surface.pointer_up(cursor, 480, 518, start + 5s));
+            no_action(surface.pointer_up(cursor, 480, 518, start + 5s));
+            surface.pointer_down(cursor, 480, 518, start);
+            assert(surface.pointer_up(cursor, 480, 518, start + 800ms).launch_companion ==
+                   SurfaceEvent::Companion::KeyboardRecenter); // release on threshold before polling
+        }
+        surface.pointer_down(0, 480, 518, start);
+        surface.pointer_down(0, 480, 518, start + 500ms); // duplicate down must not restart the clock
+        assert(surface.poll_keyboard_hold(start + 800ms) == SurfaceEvent::Companion::KeyboardRecenter);
+        no_action(surface.pointer_up(0, 480, 518, start + 800ms));
+        surface.pointer_down(0, 480, 518, start);
+        surface.pointer_down(1, 480, 518, start);
+        surface.pointer_move(0, 300, 518); // one cursor leaving cannot cancel the other
+        assert(surface.poll_keyboard_hold(start + 800ms) == SurfaceEvent::Companion::KeyboardRecenter);
+        assert(!surface.poll_keyboard_hold(start + 800ms));
+        no_action(surface.pointer_up(0, 480, 518, start + 800ms));
+        no_action(surface.pointer_up(1, 480, 518, start + 800ms));
+        surface.pointer_down(0, 480, 518, start);
+        surface.pointer_move(0, 300, 518); // leaving cancels even if pointer comes back
+        surface.pointer_move(0, 480, 518);
+        assert(!surface.poll_keyboard_hold(start + 5s));
+        no_action(surface.pointer_up(0, 480, 518, start + 5s));
+        surface.pointer_down(1, 480, 518, start);
+        no_action(surface.pointer_up(1, 900, 518, start + 5s)); // release outside
+        assert(!surface.poll_keyboard_hold(start + 5s));
+        surface.pointer_down(0, 480, 518, start);
+        surface.reset_pointers(); // tracking/focus loss, hiding, relocation
+        assert(!surface.poll_keyboard_hold(start + 5s));
+        no_action(surface.pointer_up(0, 480, 518, start + 5s));
+        surface.pointer_down(1, 480, 518, start);
+        no_action(click(surface, 290, 160)); // changing tab revokes other cursor
+        assert(!surface.poll_keyboard_hold(start + 5s));
+        no_action(surface.pointer_up(1, 480, 518, start + 5s));
+        no_action(click(surface, 90, 160)); // back to Review
+        surface.pointer_down(0, 480, 518, start);
+        surface.set_companions(true, false, true);
+        assert(!surface.poll_keyboard_hold(start + 5s));
+        no_action(surface.pointer_up(0, 480, 518, start + 5s));
+        surface.set_companions(true, true, true);
+        no_action(surface.pointer_up(1, 480, 518, start + 5s)); // no matching left down (e.g. right mouse)
+        assert(!surface.poll_keyboard_hold(start + 5s));
+        surface.pointer_down(0, 90, 518, start); // other companions never turn into recenter
+        assert(!surface.poll_keyboard_hold(start + 5s));
+        assert(surface.pointer_up(0, 90, 518, start + 5s).launch_companion == SurfaceEvent::Companion::Plan);
+        surface.pointer_down(1, 900, 518, start);
+        assert(!surface.poll_keyboard_hold(start + 5s));
+        assert(surface.pointer_up(1, 900, 518, start + 5s).launch_companion == SurfaceEvent::Companion::Draw);
+        assert(surface.render(p, start + 5s));
+        assert(!surface.render(p, start + 5s)); // no perpetual hold repaint
+        if (argc >= 3) {
+            surface.pointer_down(0, 480, 518, start + 6s);
+            assert(surface.render(p, start + 6s + 400ms));
+            snapshot(surface, std::string(argv[2]) + "-keyboard-hold.ppm");
+            surface.reset_pointers();
+        }
+    }
     p.quick_open = true; assert(surface.render(p));
-    no_action(click(surface, 90, 518)); no_action(click(surface, 900, 518));
+    no_action(click(surface, 90, 518)); no_action(click(surface, 480, 518)); no_action(click(surface, 900, 518));
     assert(!surface.scroll(200, 400, -1.f));
     p.quick_open = false; assert(surface.render(p));
-    surface.set_companions(false, false); assert(surface.render(p));
+    surface.set_companions(false, false, false); assert(surface.render(p));
     // Long UTF-8, newlines and malformed bytes scroll within the preview.
     p.transcript.clear();
     for (int i = 0; i < 60; ++i) p.transcript += "Line " + std::to_string(i) + ": café / 日本語 / naïve / Ω\n";

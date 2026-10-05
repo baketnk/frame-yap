@@ -31,10 +31,11 @@ struct Rect {
 enum class Control { Review, Settings, Bindings, Plan, Keyboard, Record, Cancel, Insert, Enter, Quit,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
                      Clock24h, Date, LockLayout, CloseMicWhenIdle, Models, ModelRow,
-                     ModelInstall, ModelPrev, ModelNext, About, WristWorldFallback, UpdateCheck, UpdateInstall };
+                     ModelInstall, ModelPrev, ModelNext, About, WristWorldFallback, UpdateCheck, UpdateInstall, Draw,
+                     AnimatedBackground };
 enum class Tab { Review, Settings, Models, About };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 36> buttons{{
+constexpr std::array<Button, 38> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
@@ -68,15 +69,17 @@ constexpr std::array<Button, 36> buttons{{
     {{32, 530, 214, 36}, Control::ModelPrev, "Previous"},
     {{260, 530, 214, 36}, Control::ModelNext, "Next"},
     {{346, 378, 154, 44}, Control::About, "About"},
-    {{32, 584, 936, 50}, Control::WristWorldFallback, "Wrist world fallback"},
-    {{32, 640, 454, 42}, Control::UpdateCheck, "Check for updates"},
-    {{514, 640, 454, 42}, Control::UpdateInstall, "Install update..."},
+    {{32, 626, 936, 50}, Control::WristWorldFallback, "Wrist world fallback"},
+    {{32, 682, 454, 42}, Control::UpdateCheck, "Check for updates"},
+    {{514, 682, 454, 42}, Control::UpdateInstall, "Install update..."},
+    {{32, 496, 454, 44}, Control::Draw, "Open Draw"},
+    {{32, 574, 936, 36}, Control::AnimatedBackground, "Animated background"},
 }};
 constexpr Rect settings_view{32, 232, 936, 316};
 constexpr Rect review_view{48, 212, 904, 260};
 constexpr int review_line_height = 42;
 // Leave a status row after the optional update controls, within the viewport.
-constexpr int settings_max_scroll = 722 - (settings_view.y + settings_view.h);
+constexpr int settings_max_scroll = 764 - (settings_view.y + settings_view.h);
 std::optional<UiAction> action(Control c) {
     switch (c) {
     case Control::Record: return UiAction::Record;
@@ -100,7 +103,7 @@ bool settings_control(Control c) {
     return c == Control::Models || c == Control::About || mounting(c) ||
            c == Control::Recenter || c == Control::LasersAnytime || c == Control::AdvancedDebug ||
            c == Control::AutoInsert || c == Control::Clock24h || c == Control::Date ||
-           c == Control::CloseMicWhenIdle || c == Control::WristWorldFallback ||
+           c == Control::CloseMicWhenIdle || c == Control::AnimatedBackground || c == Control::WristWorldFallback ||
            c == Control::UpdateCheck || c == Control::UpdateInstall;
 }
 // Invalid bytes become visible replacement glyphs, never control commands.
@@ -141,7 +144,7 @@ struct PanelSurface::Impl {
     bool clock_24h = false, layout_locked = false;
     float settings_scroll = 0.f;
     std::optional<Rect> clip_view;
-    bool plan_present = false, keyboard_present = false;
+    bool plan_present = false, keyboard_present = false, draw_present = false;
     UpdateStatus update_status = UpdateStatus::Idle;
     std::string update_version;
     float review_scroll = 0.f;
@@ -152,7 +155,8 @@ struct PanelSurface::Impl {
     StatusIndicators indicators;
     std::array<int, 2> pressed{{-1, -1}};
     std::array<PanelSurface::Clock::time_point, 2> press_time{};
-    int hold_progress = 0;
+    std::array<bool, 2> keyboard_fired{};
+    int hold_progress = 0, keyboard_progress = 0;
     int drag_cursor = -1;
     std::vector<std::string> lines;
     size_t model_page = 0;
@@ -390,10 +394,11 @@ struct PanelSurface::Impl {
         if (c == Control::ModelInstall) return tab == Tab::Models;
         if (c == Control::Plan) return tab == Tab::Review && plan_present;
         if (c == Control::Keyboard) return tab == Tab::Review && keyboard_present;
+        if (c == Control::Draw) return tab == Tab::Review && draw_present;
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
             c == Control::AdvancedDebug || c == Control::AutoInsert ||
             c == Control::Clock24h || c == Control::Date || c == Control::LockLayout ||
-            c == Control::CloseMicWhenIdle) return tab == Tab::Settings;
+            c == Control::CloseMicWhenIdle || c == Control::AnimatedBackground) return tab == Tab::Settings;
         return true;
     }
     bool enabled(Control c) const {
@@ -416,6 +421,19 @@ struct PanelSurface::Impl {
     }
     Rect button_rect(const Button& b) const {
         auto r = b.r;
+        if (b.id == Control::Plan || b.id == Control::Keyboard || b.id == Control::Draw) {
+            // Only installed companions occupy the review row. Keep the full
+            // hit region and label together as the row grows from one to three.
+            const int count = int(plan_present) + int(keyboard_present) + int(draw_present);
+            const int index = (b.id == Control::Keyboard ? int(plan_present) : 0) +
+                              (b.id == Control::Draw ? int(plan_present) + int(keyboard_present) : 0);
+            if (count) {
+                constexpr int gap = 12, available_width = 936;
+                const int width = (available_width - gap * (count - 1)) / count;
+                r.x = 32 + index * (width + gap);
+                r.w = index == count - 1 ? 968 - r.x : width;
+            }
+        }
         if (settings_control(b.id)) r.y -= int(std::lround(settings_scroll));
         return r;
     }
@@ -429,6 +447,7 @@ struct PanelSurface::Impl {
     }
     void reset() {
         pressed.fill(-1);
+        keyboard_fired.fill(false);
         drag_cursor = -1;
     }
     // Static facts only: nothing here is a live check of the model or device.
@@ -476,12 +495,17 @@ struct PanelSurface::Impl {
         }
         panel = p;
         if (panel.quick_open && tab != Tab::Review) { tab = Tab::Review; dirty = true; }
-        int progress = 0;
-        for (size_t cursor = 0; cursor < pressed.size(); ++cursor)
+        int progress = 0, keyboard = 0;
+        for (size_t cursor = 0; cursor < pressed.size(); ++cursor) {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - press_time[cursor]).count();
             if (pressed[cursor] == 10)
-                progress = std::max(progress, std::clamp(int(std::chrono::duration_cast<std::chrono::milliseconds>(
-                    PanelSurface::Clock::now() - press_time[cursor]).count() / 100) + 1, 1, 10));
-        if (progress != hold_progress) { hold_progress = progress; dirty = true; }
+                progress = std::max(progress, std::clamp(int(elapsed / 100) + 1, 1, 10));
+            if (pressed[cursor] >= 0 && buttons[pressed[cursor]].id == Control::Keyboard && !keyboard_fired[cursor])
+                keyboard = std::max(keyboard, std::clamp(int(elapsed / 100) + 1, 1, 8));
+        }
+        if (progress != hold_progress || keyboard != keyboard_progress) {
+            hold_progress = progress; keyboard_progress = keyboard; dirty = true;
+        }
         auto label = panel_clock(clock_time, clock_24h, date_format);
         if (label.time != displayed_clock.time || label.date != displayed_clock.date) dirty = true;
         if (!dirty) return false;
@@ -575,8 +599,11 @@ struct PanelSurface::Impl {
                  32, 225, 17, muted, 968);
         }
         rect({32, 550, 936, 1}, mix(card, cyan, .17f));
-        if (tab == Tab::Review && !panel.quick_open && max_review_scroll() > 0)
-            text("Right stick: scroll review", 32, 568, 16, muted, 400);
+        if (tab == Tab::Review && !panel.quick_open) {
+            if (keyboard_present) text("Hold Open Keyboard 0.8s: recenter",
+                                       max_review_scroll() > 0 ? 450 : 32, 568, 19, muted, 968);
+            if (max_review_scroll() > 0) text("Right stick: scroll review", 32, 568, 16, muted, 400);
+        }
         for (size_t i = 0; i < buttons.size(); ++i) {
             const auto& b = buttons[i];
             if (!visible(b.id)) continue;
@@ -590,6 +617,7 @@ struct PanelSurface::Impl {
                             (b.id == Control::LasersAnytime && lasers_anytime) ||
                             (b.id == Control::AdvancedDebug && advanced_debug) ||
                             (b.id == Control::AutoInsert && auto_insert) ||
+                            (b.id == Control::AnimatedBackground && gradient.enabled) ||
                             (b.id == Control::CloseMicWhenIdle && close_mic_when_idle) ||
                             (b.id == Control::LockLayout && layout_locked);
             const Color fill = !on ? mix(background, card, .40f) :
@@ -600,11 +628,14 @@ struct PanelSurface::Impl {
             rounded(r, std::min(16, r.h / 3), fill,
                     !on ? mix(card, muted, .13f) : highlighted ? accent : mix(card, muted, .38f),
                     highlighted ? .23f : 0.f, highlighted ? 2 : 1);
-            if (b.id == Control::Quit && (pressed[0] == int(i) || pressed[1] == int(i))) {
+            if ((b.id == Control::Quit || b.id == Control::Keyboard) &&
+                (pressed[0] == int(i) || pressed[1] == int(i))) {
                 const int cursor = pressed[0] == int(i) ? 0 : 1;
+                const auto duration = b.id == Control::Quit ? PanelSurface::quit_hold : PanelSurface::keyboard_hold;
                 const float fraction = std::clamp(float(std::chrono::duration_cast<std::chrono::milliseconds>(
-                    PanelSurface::Clock::now() - press_time[cursor]).count()) / PanelSurface::quit_hold.count(), 0.f, 1.f);
-                rect({r.x + 7, r.y + r.h - 9, int((r.w - 14) * fraction), 3}, pink);
+                    now - press_time[cursor]).count()) / duration.count(), 0.f, 1.f);
+                rect({r.x + 7, r.y + r.h - 9, int((r.w - 14) * fraction), 3},
+                     b.id == Control::Quit ? pink : cyan);
             }
             const std::string label = b.id == Control::ModelRow ? [&]() {
                     const auto& m = panel.models[model_page * 6 + i - 23];
@@ -623,10 +654,12 @@ struct PanelSurface::Impl {
                  on ? ink : mix(background, muted, .48f), r.x + r.w - 8);
             if (mounting(b.id) && selected) text("ON", r.x + r.w - 56, r.y + 38, 23, cyan, r.x + r.w - 12);
             if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug || b.id == Control::AutoInsert ||
-                b.id == Control::LockLayout || b.id == Control::CloseMicWhenIdle || b.id == Control::WristWorldFallback) {
+                b.id == Control::LockLayout || b.id == Control::CloseMicWhenIdle || b.id == Control::AnimatedBackground ||
+                b.id == Control::WristWorldFallback) {
                 bool active = b.id == Control::LasersAnytime ? lasers_anytime :
                               b.id == Control::AutoInsert ? auto_insert :
                               b.id == Control::LockLayout ? layout_locked :
+                              b.id == Control::AnimatedBackground ? gradient.enabled :
                               b.id == Control::CloseMicWhenIdle ? close_mic_when_idle :
                               b.id == Control::WristWorldFallback ? wrist_world_fallback : advanced_debug;
                 text(active ? "ON" : "OFF", r.x + r.w - 66, r.y + r.h / 2 + 9, 22,
@@ -649,7 +682,7 @@ struct PanelSurface::Impl {
                 "Could not check for updates.";
             if (!update_note.empty()) {
                 clip_view = settings_view;
-                text(update_note, 32, 716 - int(std::lround(settings_scroll)), 18,
+                text(update_note, 32, 758 - int(std::lround(settings_scroll)), 18,
                      (update_status == UpdateStatus::Failed || update_status == UpdateStatus::TerminalFailed) ? pink : cyan, 968);
                 clip_view.reset();
             }
@@ -699,7 +732,7 @@ bool PanelSurface::dragging(unsigned cursor) const {
     return cursor < impl_->pressed.size() && int(cursor) == impl_->drag_cursor;
 }
 std::optional<PanelDragKind> PanelSurface::pointer_down(unsigned cursor, float x, float y, Clock::time_point now) {
-    if (cursor >= impl_->pressed.size() || impl_->drag_cursor >= 0) return {};
+    if (cursor >= impl_->pressed.size() || impl_->drag_cursor >= 0 || impl_->pressed[cursor] >= 0) return {};
     const auto contains = [&](Bounds b) { return Rect{b.x, b.y, b.w, b.h}.contains(x, y); };
     if (!impl_->layout_locked && (contains(grab) || contains(scale))) {
         impl_->reset(); // other cursor's prior approval cannot survive relocation
@@ -708,7 +741,30 @@ std::optional<PanelDragKind> PanelSurface::pointer_down(unsigned cursor, float x
     }
     impl_->pressed[cursor] = impl_->hit(x, y);
     impl_->press_time[cursor] = now;
-    if (impl_->pressed[cursor] == 10) impl_->dirty = true;
+    impl_->keyboard_fired[cursor] = false;
+    if (impl_->pressed[cursor] == 10 ||
+        (impl_->pressed[cursor] >= 0 && buttons[impl_->pressed[cursor]].id == Control::Keyboard)) impl_->dirty = true;
+    return {};
+}
+void PanelSurface::pointer_move(unsigned cursor, float x, float y) {
+    if (cursor >= impl_->pressed.size() || impl_->pressed[cursor] < 0) return;
+    const int index = impl_->pressed[cursor];
+    if (buttons[index].id == Control::Keyboard && impl_->hit(x, y) != index) {
+        impl_->pressed[cursor] = -1; // leaving cancels; returning cannot rearm the same press
+        impl_->keyboard_fired[cursor] = false;
+        impl_->dirty = true;
+    }
+}
+std::optional<SurfaceEvent::Companion> PanelSurface::poll_keyboard_hold(Clock::time_point now) {
+    for (size_t cursor = 0; cursor < impl_->pressed.size(); ++cursor) {
+        const int index = impl_->pressed[cursor];
+        if (index >= 0 && buttons[index].id == Control::Keyboard && !impl_->keyboard_fired[cursor] &&
+            now - impl_->press_time[cursor] >= keyboard_hold) {
+            impl_->keyboard_fired[cursor] = true;
+            impl_->dirty = true;
+            return SurfaceEvent::Companion::KeyboardRecenter;
+        }
+    }
     return {};
 }
 SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::time_point now) {
@@ -719,9 +775,15 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
         return result;
     }
     int index = std::exchange(impl_->pressed[cursor], -1);
-    if (index == 10) impl_->dirty = true;
+    const bool fired = std::exchange(impl_->keyboard_fired[cursor], false);
+    if (index == 10 || (index >= 0 && buttons[index].id == Control::Keyboard)) impl_->dirty = true;
     if (index < 0 || impl_->hit(x, y) != index) return result;
     auto c = buttons[index].id;
+    if (c == Control::Keyboard) {
+        if (!fired) result.launch_companion = now - impl_->press_time[cursor] >= keyboard_hold ?
+            SurfaceEvent::Companion::KeyboardRecenter : SurfaceEvent::Companion::Keyboard;
+        return result;
+    }
     if (c == Control::Quit && now - impl_->press_time[cursor] < quit_hold) return result;
     if (c == Control::Record) result.action = impl_->panel.recording ? UiAction::EndRecord : UiAction::BeginRecord;
     else if (auto a = action(c)) result.action = a;
@@ -730,6 +792,7 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
     else if (c == Control::LasersAnytime) result.lasers_anytime = !impl_->lasers_anytime;
     else if (c == Control::AdvancedDebug) result.advanced_debug = !impl_->advanced_debug;
     else if (c == Control::AutoInsert) result.auto_insert = !impl_->auto_insert;
+    else if (c == Control::AnimatedBackground) result.gradient_enabled = !impl_->gradient.enabled;
     else if (c == Control::CloseMicWhenIdle) result.close_mic_when_idle = !impl_->close_mic_when_idle;
     else if (c == Control::LockLayout) result.lock_layout = !impl_->layout_locked;
     else if (c == Control::WristWorldFallback) result.wrist_world_fallback = !impl_->wrist_world_fallback;
@@ -775,8 +838,9 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
         impl_->tab = c == Control::Review ? Tab::Review : Tab::Settings;
         impl_->install_confirm = false; impl_->consent_snapshot.reset(); impl_->reset(); impl_->dirty = true;
     }
-    else if (c == Control::Plan || c == Control::Keyboard) {
-        result.launch_companion = c == Control::Plan ? SurfaceEvent::Companion::Plan : SurfaceEvent::Companion::Keyboard;
+    else if (c == Control::Plan || c == Control::Keyboard || c == Control::Draw) {
+        result.launch_companion = c == Control::Plan ? SurfaceEvent::Companion::Plan :
+            c == Control::Keyboard ? SurfaceEvent::Companion::Keyboard : SurfaceEvent::Companion::Draw;
         impl_->reset();
     }
     return result;
@@ -800,9 +864,9 @@ bool PanelSurface::scroll(float x, float y, float vertical_delta) {
     impl_->dirty = true;
     return true;
 }
-void PanelSurface::set_companions(bool plan, bool keyboard) {
-    if (impl_->plan_present != plan || impl_->keyboard_present != keyboard) {
-        impl_->plan_present = plan; impl_->keyboard_present = keyboard;
+void PanelSurface::set_companions(bool plan, bool keyboard, bool draw) {
+    if (impl_->plan_present != plan || impl_->keyboard_present != keyboard || impl_->draw_present != draw) {
+        impl_->plan_present = plan; impl_->keyboard_present = keyboard; impl_->draw_present = draw;
         impl_->reset(); impl_->dirty = true;
     }
 }
@@ -857,6 +921,14 @@ void PanelSurface::set_advanced_debug(bool enabled) {
 void PanelSurface::set_auto_insert(bool enabled) {
     if (impl_->auto_insert != enabled) {
         impl_->auto_insert = enabled;
+        impl_->reset();
+        impl_->dirty = true;
+    }
+}
+void PanelSurface::set_gradient_enabled(bool enabled) {
+    if (impl_->gradient.enabled != enabled) {
+        impl_->gradient.enabled = enabled;
+        impl_->animation_start.reset(); // a new opt-in cycle starts at the next render
         impl_->reset();
         impl_->dirty = true;
     }

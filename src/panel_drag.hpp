@@ -2,6 +2,7 @@
 
 #include "mount.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 
@@ -128,11 +129,27 @@ public:
         return true;
     }
 
+    // The stick is velocity, not absolute placement. Positive Y moves along
+    // the captured panel's -Z normal in controller coordinates, even for an angled ray.
+    void step_depth(float axis_y, double seconds) {
+        if (!active_ || kind_ != PanelDragKind::Grab || !std::isfinite(axis_y) ||
+            !std::isfinite(seconds) || seconds <= 0) return;
+        const double magnitude = std::abs(std::clamp(double(axis_y), -1., 1.));
+        if (magnitude <= .2) return;
+        const double velocity = std::copysign((magnitude - .2) / .8 * .6, axis_y);
+        depth_ = std::clamp(depth_ + velocity * std::min(seconds, .05), -1.5, 1.5);
+    }
+
+    double depth() const { return depth_; }
+
     std::optional<PanelDragUpdate> update(const Matrix34& controller_pose) const {
         using namespace panel_drag_detail;
         if (!active_ || !rigid(controller_pose)) return std::nullopt;
         if (kind_ == PanelDragKind::Grab) {
-            const Matrix34 pose = compose_pose(controller_pose, relative_panel_);
+            auto relative = relative_panel_;
+            for (int row = 0; row < 3; ++row)
+                relative[row][3] -= relative_panel_[row][2] * static_cast<float>(depth_);
+            const Matrix34 pose = compose_pose(controller_pose, relative);
             if (!rigid(pose)) return std::nullopt;
             return PanelDragUpdate{pose, 1.f};
         }
@@ -150,7 +167,7 @@ public:
         return PanelDragUpdate{panel_pose_, static_cast<float>(factor)};
     }
 
-    void reset() { active_ = false; }
+    void reset() { active_ = false; depth_ = 0; }
     bool active() const { return active_; }
 
 private:
@@ -160,6 +177,7 @@ private:
     Matrix34 panel_pose_{}, relative_panel_{};
     Vec3 center_{}, normal_{}, anchor_{}, down_hit_{}, local_ray_{};
     double baseline_sq_ = 0;
+    double depth_ = 0;
 };
 
 } // namespace frameyap

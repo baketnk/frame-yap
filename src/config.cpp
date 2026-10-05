@@ -307,7 +307,7 @@ Config load_config(const std::filesystem::path& path) {
 }
 namespace {
 bool save_option(const std::filesystem::path& path, std::string_view key,
-                 std::string_view value, bool string_value) noexcept {
+                 std::string_view value, bool string_value, std::string_view parent_key = {}) noexcept {
     try {
         if (path.empty() || !path.is_absolute() || std::filesystem::is_symlink(path)) return false;
         const bool existing = std::filesystem::exists(path);
@@ -318,14 +318,28 @@ bool save_option(const std::filesystem::path& path, std::string_view key,
         auto root = parser.parse(); parser.ws();
         if (!root.is_object || parser.pos != bytes.size()) return false;
         const std::string encoded = string_value ? "\"" + std::string(value) + "\"" : std::string(value);
-        auto it = root.object.find(std::string(key));
-        if (it != root.object.end()) {
-            if (it->second.is_string != string_value || (!string_value && !it->second.is_bool)) return false;
-            if (it->second.value == value) return true;
-            bytes.replace(it->second.start, it->second.end - it->second.start, encoded);
-        } else {
-            bytes.insert(root.end - 1, std::string(root.object.empty() ? "" : ",") +
-                "\"" + std::string(key) + "\":" + encoded);
+        const Json* object = &root;
+        if (!parent_key.empty()) {
+            const auto parent = root.object.find(std::string(parent_key));
+            if (parent == root.object.end()) {
+                bytes.insert(root.end - 1, std::string(root.object.empty() ? "" : ",") +
+                    "\"" + std::string(parent_key) + "\":{\"" + std::string(key) + "\":" + encoded + "}");
+                object = nullptr;
+            } else {
+                if (!parent->second.is_object) return false;
+                object = &parent->second;
+            }
+        }
+        if (object) {
+            auto it = object->object.find(std::string(key));
+            if (it != object->object.end()) {
+                if (it->second.is_string != string_value || (!string_value && !it->second.is_bool)) return false;
+                if (it->second.value == value) return true;
+                bytes.replace(it->second.start, it->second.end - it->second.start, encoded);
+            } else {
+                bytes.insert(object->end - 1, std::string(object->object.empty() ? "" : ",") +
+                    "\"" + std::string(key) + "\":" + encoded);
+            }
         }
         // The native reader rejects files >=4097 bytes, even if the JSON is valid.
         if (bytes.size() > 4096) return false;
@@ -347,6 +361,9 @@ bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexce
 }
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "auto_insert", enabled);
+}
+bool save_gradient_enabled(const std::filesystem::path& path, bool enabled) noexcept {
+    return save_option(path, "enabled", enabled ? "true" : "false", false, "gradient");
 }
 bool save_close_mic_when_idle(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "close_mic_when_idle", enabled);
@@ -405,8 +422,25 @@ std::filesystem::path action_manifest(const std::string& assets, const Config& c
     for (const auto& [action, path] : buttons) {
         if (path.empty()) continue;
         if (!used.emplace(path, action).second) throw std::runtime_error("Two actions share Frame button: " + path);
+        // A remapped thumbstick click must share the joystick source rather
+        // than create a second source for the same physical input path.
+        if (path == "/user/hand/left/input/thumbstick" || path == "/user/hand/right/input/thumbstick") continue;
         if (binding.back() != '[') binding += ',';
         binding += "{\"path\":\"" + path + "\",\"mode\":\"button\",\"inputs\":{\"click\":{\"output\":\"/actions/frameyap/in/" + action + "\"}}}";
+    }
+    // Keep configured stick clicks in the ordinary set. The dedicated grab
+    // set contains only position, so its priority cannot promote a text action.
+    for (const auto& hand : {"left", "right"}) {
+        const std::string path = std::string("/user/hand/") + hand + "/input/thumbstick";
+        if (auto it = used.find(path); it != used.end()) {
+            if (binding.back() != '[') binding += ',';
+            binding += "{\"path\":\"" + path + "\",\"mode\":\"joystick\",\"inputs\":{\"click\":{\"output\":\"/actions/frameyap/in/" + it->second + "\"}}}";
+        }
+    }
+    binding += "]},\"/actions/grab\":{\"sources\":[";
+    for (const auto& hand : {"left", "right"}) {
+        if (binding.back() != '[') binding += ',';
+        binding += "{\"path\":\"/user/hand/" + std::string(hand) + "/input/thumbstick\",\"mode\":\"joystick\",\"inputs\":{\"position\":{\"output\":\"/actions/grab/in/" + hand + "_depth\"}}}";
     }
     binding += "]}}}";
     auto manifest = read_file(source);
