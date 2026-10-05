@@ -1216,6 +1216,57 @@ with patch.object(module, "check_host"), patch.object(module.urllib.request, "ur
             self.assertIn("mismatched", json.loads(output.getvalue())["message"])
             fetch.assert_not_called()
 
+    def test_model_card_upgrade_retains_verified_legacy_without_network(self):
+        shutil.copyfile(REPO / "python/frameyap/model_files.py",
+                        self.stage / "python/frameyap/model_files.py")
+        manifest = json.loads((REPO / "assets/backends/redux.json").read_text())
+        old, new = b"previous attributed card", b"updated attributed model card"
+        def pin(content):
+            return {"size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+        manifest["model"]["files"] = [{"path": "README.md", **pin(old)}]
+        manifests = self.stage / "assets/backends"
+        manifests.mkdir()
+        card_manifest = manifests / "redux.json"
+        card_manifest.write_text(json.dumps(manifest))
+        archive, digest = self.package("0.1.202609241530")
+        self.install("0.1.202609241530", archive, digest, "--without-model")
+        destination = self.base / "models"
+        destination.mkdir()
+        card = destination / "README.md"
+        card.write_bytes(old)
+        manifest["model"]["files"] = [{"path": "README.md", **pin(new),
+                                          "compatible": [pin(old)]}]
+        card_manifest.write_text(json.dumps(manifest))
+        archive, digest = self.package("0.1.202609241531")
+        with patch.object(installer.urllib.request, "urlopen") as fetch:
+            self.install("0.1.202609241531", archive, digest, "--without-model")
+            module, backend, _ = installer.installed_backend(self.data / "frameyap", "redux")
+            self.assertEqual(module.check_model(backend, destination)["state"], "installed_verified")
+            argv = ["--install-model", "--model-dir", str(destination), "--yes", "--json"]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.cli(argv), 0)
+            fetch.assert_not_called()
+            self.assertEqual(card.read_bytes(), old)
+            card.write_bytes(b"x" * len(old))
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.cli(argv), 1)
+            fetch.assert_not_called()
+            card.unlink()
+        class Response(io.BytesIO):
+            def geturl(self):
+                return "https://huggingface.co/fixture"
+        # Fresh downloads require the current card even though the old one is
+        # permitted for already installed, independently hashed model files.
+        with patch.object(installer.urllib.request, "urlopen", return_value=Response(old)):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.cli(argv), 1)
+            self.assertFalse(card.exists())
+        with patch.object(installer.urllib.request, "urlopen", return_value=Response(new)) as fetch:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(installer.cli(argv), 0)
+            fetch.assert_called_once()
+            self.assertEqual(card.read_bytes(), new)
+
     def test_runtime_install_is_explicit_cpu_pinned_and_updates_only_python_path(self):
         # subprocess is mocked: no venv, pip or network is touched.
         root = self.data / "frameyap"

@@ -57,7 +57,7 @@ device="cpu", cpu_threads=threads)` and persistent
 Install an **isolated** Python runtime with the
 moondream 2.4.0, kestrel 0.8.0 and compatible CPU dependencies; provide
 preinstalled local weights from revision
-`fad622f25f303105c20d70e201bcc477c88b620c` and pass its directory
+`2bf128600aac4b16946f7ed8372e56117fe5e23b` and pass its directory
 explicitly. The code verifies exact sizes and SHA-256 of weights/config/tokenizer
 against `assets/backends/redux.json` via the shared, offline
 `python/frameyap/model_files.py` schema/verifier before importing model libraries.
