@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import sys
 
+# Installed release inventories must remain unchanged by status queries.
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from frameyap.model_files import DEFAULT_MANIFEST_DIR, ManifestError, check_model, load_backends
 

@@ -12,6 +12,8 @@ check("${APP}" 0 "\"schema\": 1.*\"models\"|\"models\".*\"schema\": 1" --list-mo
 check("${APP}" 1 "\"state\": \"not_installed\"" --check-model redux --model-dir "${STAGE}/absent" --json)
 check("${APP}" 2 "^$" --check-model "redux;echo" --model-dir "${STAGE}/absent" --json)
 check("${APP}" 2 "^$" --check-model "../redux" --model-dir "${STAGE}/absent" --json)
+# Remove the previous fixture, including caches left by older test runs.
+file(REMOVE_RECURSE "${STAGE}")
 # Minimal installed payload, independent of the source tree's script/module/asset paths.
 file(MAKE_DIRECTORY "${STAGE}/bin" "${STAGE}/scripts" "${STAGE}/python/frameyap" "${STAGE}/assets/backends")
 file(COPY "${APP}" DESTINATION "${STAGE}/bin")
@@ -41,3 +43,14 @@ check("${STAGE}/bin/${name}" 0 "\"state\": \"installed_verified\""
 file(WRITE "${STAGE}/models/toy/weights.bin" "HELLO")
 check("${STAGE}/bin/${name}" 1 "\"reason\": \"hash_mismatch\""
   --check-model toy --manifest-dir "${STAGE}/fixtures" --model-dir "${STAGE}/models/toy" --json)
+
+# The standalone script must also preserve the inventory without the launcher.
+execute_process(COMMAND python3 "${STAGE}/scripts/model-status.py" --list-models
+  RESULT_VARIABLE standalone_status OUTPUT_QUIET ERROR_VARIABLE standalone_error)
+if(NOT standalone_status EQUAL 0)
+  message(FATAL_ERROR "Standalone model status failed: ${standalone_error}")
+endif()
+file(GLOB_RECURSE generated_cache "${STAGE}/python/*.pyc")
+if(generated_cache OR EXISTS "${STAGE}/python/frameyap/__pycache__")
+  message(FATAL_ERROR "Offline model status modified the installed release: ${generated_cache}")
+endif()

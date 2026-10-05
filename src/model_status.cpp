@@ -29,7 +29,7 @@ int model_status(const CliOptions& options, const char* executable) {
         script = fs::path(FRAMEYAP_SOURCE_ROOT) / "scripts/model-status.py";
     if (!fs::is_regular_file(script))
         throw std::runtime_error("model-status.py missing beside application layout: " + script.string());
-    std::vector<std::string> args{"python3", script.string()};
+    std::vector<std::string> args{"python3", "-B", script.string()};
     if (options.mode == CliMode::ListModels) args.emplace_back("--list-models");
     else { args.emplace_back("--check-model"); args.push_back(options.model_id); }
     if (!options.model_dir.empty()) { args.emplace_back("--model-dir"); args.push_back(options.model_dir); }
