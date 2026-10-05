@@ -44,3 +44,9 @@ SDL3 and OpenVR SDK sources, builds, tests, stages and packages. The release
 commit sets `RELEASE_VERSION` in `scripts/install_payload.py` (then
 `python3 scripts/sync-installer.py`); upload the archive, its `.sha256` and
 `install.sh` to the GitHub release.
+
+When starting over SSH, supply the verified Gamescope Xwayland `DISPLAY` as well
+as `XDG_RUNTIME_DIR` from the user's session. Do not assume `:0` is always the
+text destination. Without `DISPLAY`, the focus guard refuses Type and preserves
+the review; the status line reports `Input unavailable: DISPLAY missing`.
+Launch from Steam/the desktop menu to inherit the normal session environment.

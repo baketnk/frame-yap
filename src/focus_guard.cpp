@@ -167,9 +167,11 @@ bool FocusGuard::arm() {
     auto& p = *impl_;
     if (p.attempted || p.dead) return false;
     p.attempted = true;
+    const char* display = std::getenv("DISPLAY");
+    if (!display || !*display) { p.reason = "DISPLAY missing"; p.dead = true; return false; }
     int screen_number = 0;
     p.connection = xcb_connect(nullptr, &screen_number);
-    if (!p.connection || xcb_connection_has_error(p.connection)) { p.dead = true; return false; }
+    if (!p.connection || xcb_connection_has_error(p.connection)) { p.reason = "X display unavailable"; p.dead = true; return false; }
     const xcb_setup_t* setup = xcb_get_setup(p.connection);
     auto iter = xcb_setup_roots_iterator(setup);
     for (int i = 0; i < screen_number && iter.rem; ++i) xcb_screen_next(&iter);

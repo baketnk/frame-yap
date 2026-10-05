@@ -89,7 +89,9 @@ void Controller::delivery_detail(DeliveryResult result, bool submit) {
 }
 std::shared_ptr<ControllerFocus> Controller::manual_focus() {
     auto focus = focus_factory_();
-    if (!focus || !focus->arm()) throw std::runtime_error("Current target not verified; review kept");
+    if (!focus || !focus->arm())
+        throw std::runtime_error(std::string("Current target not verified: ") +
+                                 (focus ? focus->failure() : "focus unavailable") + "; review kept");
     return std::shared_ptr<ControllerFocus>(std::move(focus));
 }
 void Controller::queue_paced(std::string text, bool enter, bool review,
@@ -370,7 +372,8 @@ void Controller::action(UiAction action) {
     } catch (const std::exception& e) {
         if (session_.state() == State::Recording || session_.state() == State::Transcribing) {
             audio_.close(); session_.fail(); armed_focus_.reset(); status_note_.clear();
-        } else status_note_ = "Input unavailable - check destination";
+        } else status_note_ = std::string(e.what()).find("DISPLAY missing") != std::string::npos ?
+            "Input unavailable: DISPLAY missing" : "Input unavailable - check destination";
         detail_ = e.what();
     }
 }

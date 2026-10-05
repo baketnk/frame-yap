@@ -33,6 +33,12 @@ private:
 int main() {
     try {
         DisplaySetting isolated_display;
+        unsetenv("DISPLAY");
+        FocusGuard missing_display;
+        CHECK(!missing_display.arm());
+        CHECK(std::string(missing_display.failure()) == "DISPLAY missing");
+        CHECK(!missing_display.arm());
+        setenv("DISPLAY", "frameyap-no-such-display:9876", 1);
         FocusGuard guard; // Construction must not connect to X.
         CHECK(!guard.valid());
         CHECK(!guard.arm()); // No server: fail closed.

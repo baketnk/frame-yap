@@ -36,6 +36,7 @@ public:
     virtual ~ControllerFocus() = default;
     virtual bool arm() = 0;
     virtual bool valid() = 0;
+    virtual const char* failure() const { return "focus unavailable"; }
 };
 using FocusFactory = std::function<std::unique_ptr<ControllerFocus>()>;
 

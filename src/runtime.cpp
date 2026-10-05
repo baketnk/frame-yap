@@ -106,6 +106,7 @@ public:
         trace_(std::string("focus invalid: ") + guard_.failure());
         return false;
     }
+    const char* failure() const override { return guard_.failure(); }
 private:
     FocusGuard guard_;
     DeliveryTrace& trace_;
