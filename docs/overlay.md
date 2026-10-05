@@ -390,10 +390,16 @@ current depth; the other hand's stick and scale drags do not change it. A lost
 axis stops adding depth without resetting placement. Frame controller bindings
 provide left/right vector2 actions in a separate `/actions/grab` set, including
 in generated custom button manifests. Only a grab activates this set, restricted
-to the grabbing hand at overlay priority; it requires SteamVR Experimental
-overlay input overrides. It does not promote recording or text actions, and does
+to the grabbing hand at overlay priority; that app-action route requires SteamVR Experimental
+overlay input overrides. If the app axis is unavailable, controller-tagged
+compositor smooth-scroll events provide depth at 0.04 m per scroll unit, bounded
+to 3 cm per event and the same total travel limit. Only the grabbing controller
+is accepted. Smooth events are requested only during grab, integrated once
+without multiplying by elapsed time, and discarded whenever the app axis is
+available to avoid applying both streams. It does not promote recording or text actions, and does
 not depend on FrameYap's ordinary `input_priority` preference. Axis delivery during laser drag and dashboard/game focus needs a
-separate headset check. Laser scroll events are ignored while dragging.
+separate headset check. Grab scroll events affect only depth; scale scroll
+events are ignored, and ordinary UI scrolling resumes after release.
 Release leaves the last pose in the chosen mount frame; head/wrist mounts continue
 following that anchor afterward. A completed grab or scale on Head, Left wrist or
 Right wrist saves the full device-relative canvas position, rotation and scale

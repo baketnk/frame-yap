@@ -145,6 +145,8 @@ struct Overlay::Impl {
         bool enabled = [] { const char* flag = std::getenv("FRAMEYAP_PROFILE");
                             return flag && std::string_view(flag) == "1"; }();
         uint64_t renders = 0, uploads = 0, motion_ticks = 0, retained_frames = 0, motion_redraws = 0, motion_uploads = 0;
+        uint64_t depth_samples = 0, depth_axis_active = 0, depth_scroll_events = 0, depth_scroll_accepted = 0;
+        double max_depth = 0;
         double render_ms = 0, upload_ms = 0, motion_ms = 0, motion_max_ms = 0;
         static double elapsed(std::chrono::steady_clock::time_point start) {
             return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
@@ -155,7 +157,10 @@ struct Overlay::Impl {
                       << " uploads=" << uploads << " upload_ms=" << upload_ms
                       << " motion_ticks=" << motion_ticks << " motion_ms=" << motion_ms
                       << " motion_max_ms=" << motion_max_ms << " retained_frames=" << retained_frames
-                      << " motion_redraws=" << motion_redraws << " motion_uploads=" << motion_uploads << std::endl;
+                      << " motion_redraws=" << motion_redraws << " motion_uploads=" << motion_uploads
+                      << " depth_samples=" << depth_samples << " depth_axis_active=" << depth_axis_active
+                      << " depth_scroll_events=" << depth_scroll_events << " depth_scroll_accepted=" << depth_scroll_accepted
+                      << " max_depth=" << max_depth << std::endl;
         }
     } performance;
 
@@ -233,9 +238,9 @@ struct Overlay::Impl {
                 persistence.laser_change_failed = true;
             }
             overlay_check(overlay->SetOverlayFlag(handle, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true), overlay, "Laser scroll");
-            // Smooth events are optional on some runtimes; discrete wheel events
-            // keep Settings usable if the compositor declines the smooth mode.
-            overlay->SetOverlayFlag(handle, vr::VROverlayFlags_SendVRSmoothScrollEvents, true);
+            // Normal UI scrolling uses discrete events. Request the compositor
+            // smooth stream only while grabbing for the depth fallback.
+            overlay->SetOverlayFlag(handle, vr::VROverlayFlags_SendVRSmoothScrollEvents, false);
             surface.set_lasers_anytime(lasers_anytime);
             surface.set_wrist_world_fallback(config.wrist_world_fallback);
             surface.set_advanced_debug(config.advanced_debug);
@@ -422,6 +427,8 @@ struct Overlay::Impl {
         }
         dragging.scale = size_scale; dragging.canvas = canvas_pose;
         dragging.started = dragging.last_depth_sample = std::chrono::steady_clock::now();
+        if (kind == PanelDragKind::Grab)
+            overlay->SetOverlayFlag(handle, vr::VROverlayFlags_SendVRSmoothScrollEvents, true);
         vr::VRControllerState_t state{};
         dragging.trigger_observed = system->GetControllerState(dragging.device, &state, sizeof(state)) &&
             (state.ulButtonPressed & vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger));
@@ -429,6 +436,7 @@ struct Overlay::Impl {
             " device=" + std::to_string(dragging.device) + " trigger-watch=" + (dragging.trigger_observed ? "Y" : "N");
     }
     void finish_drag(bool released) {
+        overlay->SetOverlayFlag(handle, vr::VROverlayFlags_SendVRSmoothScrollEvents, false);
         if (!released && applied_mount && *applied_mount == mount) {
             canvas_pose = dragging.canvas;
             size_scale = dragging.scale;
@@ -477,8 +485,16 @@ struct Overlay::Impl {
         const auto now = std::chrono::steady_clock::now();
         const double dt = std::chrono::duration<double>(now - dragging.last_depth_sample).count();
         dragging.last_depth_sample = now;
-        if (dragging.kind == PanelDragKind::Grab && diagnostics.action_update_error == vr::VRInputError_None)
-            if (auto axis = depth_axis()) dragging.panel.step_depth(*axis, dt);
+        if (dragging.kind == PanelDragKind::Grab) {
+            const auto axis = diagnostics.action_update_error == vr::VRInputError_None ? depth_axis() : std::nullopt;
+            if (performance.enabled) {
+                ++performance.depth_samples;
+                performance.depth_axis_active += bool(axis);
+            }
+            dragging.panel.update_depth(axis, dt);
+            if (performance.enabled)
+                performance.max_depth = std::max(performance.max_depth, std::abs(dragging.panel.depth()));
+        }
         const auto change = dragging.panel.update(*source);
         if (!change) { finish_drag(false); return; }
         const float scale = dragging.kind == PanelDragKind::Scale ? std::clamp(dragging.scale * change->factor, .5f, 2.f) : size_scale;
@@ -654,6 +670,17 @@ struct Overlay::Impl {
                 }
                 break;
             case vr::VREvent_ScrollDiscrete: case vr::VREvent_ScrollSmooth:
+                if (dragging.panel.active()) {
+                    if (event.eventType == vr::VREvent_ScrollSmooth && dragging.kind == PanelDragKind::Grab) {
+                        const bool accepted = dragging.panel.queue_scroll_depth(event.trackedDeviceIndex,
+                                                                                dragging.device, event.data.scroll.ydelta);
+                        if (performance.enabled) {
+                            ++performance.depth_scroll_events;
+                            performance.depth_scroll_accepted += accepted;
+                        }
+                    }
+                    break; // depth consumes the grab input; never scroll the UI
+                }
                 if (!dragging.panel.active() && event.data.scroll.cursorIndex < cursor_positions.size() &&
                     cursor_positions[event.data.scroll.cursorIndex]) {
                     const auto [x, y] = *cursor_positions[event.data.scroll.cursorIndex];

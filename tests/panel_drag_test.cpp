@@ -146,6 +146,36 @@ int main() {
     }
     drag.reset();
 
+    // Compositor events are source-tagged and already time-integrated.
+    assert(drag.begin(PanelDragKind::Grab, angled_panel, 1, 1, .5f, .5f, down));
+    assert(!drag.queue_scroll_depth(2, 1, 1.f)); // the other hand
+    assert(!drag.queue_scroll_depth(std::numeric_limits<uint32_t>::max(), 1, 1.f));
+    assert(!drag.queue_scroll_depth(1, 1, std::numeric_limits<float>::quiet_NaN()));
+    assert(drag.queue_scroll_depth(1, 1, .5f));
+    drag.update_depth({}, .001); near(float(drag.depth()), .02f);
+    drag.update_depth({}, .05); near(float(drag.depth()), .02f); // no replay
+    depth_pose = drag.update(down);
+    assert(depth_pose); near_pose(depth_pose->pose, translated(angled_panel, -.02f, 0, 0));
+    assert(drag.queue_scroll_depth(1, 1, 100.f));
+    drag.update_depth({}, 100.); near(float(drag.depth()), .05f); // capped, no dt multiplication
+    assert(drag.queue_scroll_depth(1, 1, -.5f));
+    drag.update_depth({}, 0); near(float(drag.depth()), .03f); // opposite direction
+    assert(drag.queue_scroll_depth(1, 1, 1.f));
+    drag.update_depth(0.f, .05); near(float(drag.depth()), .03f); // active centered axis wins
+    assert(drag.queue_scroll_depth(1, 1, 1.f));
+    drag.update_depth(1.f, .05); near(float(drag.depth()), .06f); // no double application
+    for (int i = 0; i < 100; ++i) assert(drag.queue_scroll_depth(1, 1, 1.f));
+    drag.update_depth({}, .01); near(float(drag.depth()), 1.5f);
+    assert(drag.queue_scroll_depth(1, 1, -.5f));
+    drag.reset(); // queued events cannot leak into a later grab
+    assert(drag.begin(PanelDragKind::Grab, angled_panel, 1, 1, .5f, .5f, down));
+    drag.update_depth({}, .05); near(float(drag.depth()), 0);
+    assert(drag.begin(PanelDragKind::Scale, identity, 1, 1, .5f, .5f, down));
+    assert(!drag.queue_scroll_depth(1, 1, 1.f));
+    drag.update_depth({}, .05); near(float(drag.depth()), 0);
+    drag.reset();
+    assert(!drag.queue_scroll_depth(1, 1, 1.f));
+
     grab_rotation_case(pitch(), Matrix34{{{{1.f, 0.f, 0.f, .25f}},
                                                 {{0.f, 0.f, -1.f, 1.3f}},
                                                 {{0.f, 1.f, 0.f, 1.4f}}}});

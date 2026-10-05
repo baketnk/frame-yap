@@ -4,6 +4,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <utility>
 #include <optional>
 
 namespace frameyap {
@@ -140,6 +143,23 @@ public:
         depth_ = std::clamp(depth_ + velocity * std::min(seconds, .05), -1.5, 1.5);
     }
 
+    // Compositor smooth scroll is already integrated over time. Accept only
+    // the captured controller, cap each event at 3 cm, and consume it once.
+    bool queue_scroll_depth(uint32_t source, uint32_t grabbing_device, float delta) {
+        if (!active_ || kind_ != PanelDragKind::Grab ||
+            source == std::numeric_limits<uint32_t>::max() || source != grabbing_device ||
+            !std::isfinite(delta)) return false;
+        pending_scroll_ = std::clamp(pending_scroll_ + std::clamp(double(delta) * .04, -.03, .03), -1.5, 1.5);
+        return true;
+    }
+
+    void update_depth(std::optional<float> axis, double seconds) {
+        const double scroll = std::exchange(pending_scroll_, 0.0);
+        if (!active_ || kind_ != PanelDragKind::Grab) return;
+        if (axis && std::isfinite(*axis)) step_depth(*axis, seconds);
+        else depth_ = std::clamp(depth_ + scroll, -1.5, 1.5);
+    }
+
     double depth() const { return depth_; }
 
     std::optional<PanelDragUpdate> update(const Matrix34& controller_pose) const {
@@ -167,7 +187,7 @@ public:
         return PanelDragUpdate{panel_pose_, static_cast<float>(factor)};
     }
 
-    void reset() { active_ = false; depth_ = 0; }
+    void reset() { active_ = false; depth_ = pending_scroll_ = 0; }
     bool active() const { return active_; }
 
 private:
@@ -177,7 +197,7 @@ private:
     Matrix34 panel_pose_{}, relative_panel_{};
     Vec3 center_{}, normal_{}, anchor_{}, down_hit_{}, local_ray_{};
     double baseline_sq_ = 0;
-    double depth_ = 0;
+    double depth_ = 0, pending_scroll_ = 0;
 };
 
 } // namespace frameyap
