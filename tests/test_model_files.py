@@ -74,6 +74,29 @@ class ModelFileTests(unittest.TestCase):
             (model / "nested").symlink_to(root)
             self.assertEqual(check_model(backend, model)["reason"], "unsafe_file")
 
+    def test_compatible_card_still_requires_exact_hash_and_safe_file(self):
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            _, backend = self.fixture(root)
+            current, previous = b"current card", b"old card"
+            item = ModelFile("README.md", len(current), hashlib.sha256(current).hexdigest(),
+                             ((len(previous), hashlib.sha256(previous).hexdigest()),))
+            backend = replace(backend, files=(item,))
+            card = root / "README.md"
+            for content in (current, previous):
+                card.write_bytes(content)
+                self.assertEqual(check_model(backend, root)["state"], "installed_verified")
+            # A download temp pin must never accept an older artifact.
+            self.assertEqual(check_file(root, ModelFile(item.path, item.size, item.sha256))[0],
+                             "size_mismatch")
+            card.write_bytes(b"bad card")
+            self.assertEqual(check_model(backend, root)["reason"], "hash_mismatch")
+            card.unlink()
+            outside = root / "outside"
+            outside.write_bytes(previous)
+            card.symlink_to(outside)
+            self.assertEqual(check_model(backend, root)["reason"], "unsafe_file")
+
     def test_second_backend_status_without_runtime_changes(self):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)

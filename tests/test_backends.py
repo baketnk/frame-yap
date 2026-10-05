@@ -21,6 +21,9 @@ class BackendTests(unittest.TestCase):
             "tokenizer.json": (1159960, "bd321b096832a3f270bd3b2a88823957920f1a5c5ada71114a26ea729d0cbe91"),
             "README.md": (8832, "930055e6bac7d75114e719850ffaffc8d327e73b4295518c38c81399acd63e46"),
         })
+        self.assertEqual(redux.files[-1].compatible,
+                         ((8533, "a8b327f983a8b8ff262ff7bead3a791fbed9350632002af8db85ab5cd84cdaa5"),))
+        self.assertTrue(all(not file.compatible for file in redux.files[:-1]))
         self.assertEqual(redux.launcher["protocol"], "frameyap-worker-v1")
         self.assertEqual(redux.launcher["arguments"], ["--model", "{model_dir}", "--threads", "{threads}", "--clip-dir", "{clip_dir}"])
         self.assertIn("CC-BY-4.0", redux.license_id)
@@ -47,6 +50,10 @@ class BackendTests(unittest.TestCase):
                 lambda f: f["model"]["files"][0].update(path="../secret"),
                 lambda f: f["model"]["files"][0].update(size=True),
                 lambda f: f["model"]["files"][0].update(sha256="A" * 64),
+                lambda f: f["model"]["files"][0].update(compatible="bad"),
+                lambda f: f["model"]["files"][0].update(compatible=[{"size": True, "sha256": "a" * 64}]),
+                lambda f: f["model"]["files"][0].update(compatible=[{"size": 3, "sha256": "a" * 64}]),
+                lambda f: f["model"]["files"][0].update(compatible=[{"size": 4, "sha256": "a" * 64, "path": "other"}]),
                 lambda f: f["launcher"]["arguments"].append("{unknown}"),
                 lambda f: f["launcher"].update(path="/bin/sh"),
                 lambda f: f["launcher"].update(protocol="not-the-wire-protocol"),

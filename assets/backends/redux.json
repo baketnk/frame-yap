@@ -16,7 +16,7 @@
       {"path": "config.json", "size": 12988, "sha256": "503c653b2e3bb788adbcb04f5abdee532d958686564081baeed133ff10143f6e"},
       {"path": "ternary.json", "size": 57970, "sha256": "1221c6d3ce901ffe09c089da758a8db8b76189f80cff41c5afc244fc61e2051d"},
       {"path": "tokenizer.json", "size": 1159960, "sha256": "bd321b096832a3f270bd3b2a88823957920f1a5c5ada71114a26ea729d0cbe91"},
-      {"path": "README.md", "size": 8832, "sha256": "930055e6bac7d75114e719850ffaffc8d327e73b4295518c38c81399acd63e46"}
+      {"path": "README.md", "size": 8832, "sha256": "930055e6bac7d75114e719850ffaffc8d327e73b4295518c38c81399acd63e46", "compatible": [{"size": 8533, "sha256": "a8b327f983a8b8ff262ff7bead3a791fbed9350632002af8db85ab5cd84cdaa5"}]}
     ]
   },
   "attribution": "Moondream/M87 Labs, Parakeet Redux, derived from NVIDIA Parakeet TDT 0.6B v3; original model card README.md retained with the files.",

@@ -232,6 +232,11 @@ back to desktop/cloud inference. The benchmark ran on revision
 `fad622f25f303105c20d70e201bcc477c88b620c`, which no longer resolves after the
 upstream history was rewritten; the weights, config, ternary map and tokenizer at
 `2bf1286` are byte-identical to it (same SHA-256), only the model card README differs.
+The manifest explicitly accepts the previous card's pinned size and SHA-256 for
+existing installations, so updating FrameYap requires no model download. New
+downloads must verify against the current revision's card; unknown or modified
+cards are still rejected. The optional per-file `compatible` list contains exact
+`size`/`sha256` pairs for previously installed artifacts, never download fallbacks.
 
 The earlier benchmark used this local API (its source belongs to the originating
 repository, not this project):
