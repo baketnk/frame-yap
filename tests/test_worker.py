@@ -36,9 +36,11 @@ def fake_child():
     parser.add_argument("--clip-dir", required=True)
     parser.add_argument("--advanced-debug", action="store_true")
     args = parser.parse_args()
-    if args.model in ("fail", "missing-model", "missing-import"):
+    if args.model in ("analytics-off", "analytics-on"):
+        assert os.environ.get("FRAMEYAP_MOONDREAM_ANALYTICS") == ("1" if args.model == "analytics-on" else "0")
+    if args.model in ("fail", "missing-model", "missing-import", "analytics-unsupported"):
         worker.send_frame(1, b"F", {"fail": b"", "missing-model": b"M",
-                                      "missing-import": b"I"}[args.model])
+                                      "missing-import": b"I", "analytics-unsupported": b"P"}[args.model])
         return
     if args.model == "crash":
         return

@@ -1,13 +1,16 @@
 #include "worker.hpp"
 
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <fstream>
 #include <limits>
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -34,6 +37,23 @@ int main(int argc, char** argv) {
     try {
         std::vector<float> clip(3200, 0.25f);
         Worker worker;
+        // Native settings replace (rather than trust) any launcher environment.
+        ::setenv("FRAMEYAP_MOONDREAM_ANALYTICS", "1", 1);
+        worker.start(argv[1], argv[2], "analytics-off");
+        until([&] { worker.poll(); return worker.ready(); });
+        worker.stop();
+        ::setenv("FRAMEYAP_MOONDREAM_ANALYTICS", "0", 1);
+        worker.start(argv[1], argv[2], "analytics-on", 2, false, {}, {}, {}, true);
+        until([&] { worker.poll(); return worker.ready(); });
+        worker.stop(true);
+        for (bool enabled : {false, true, false}) {
+            worker.start(argv[1], argv[2], enabled ? "analytics-on" : "analytics-off",
+                         2, false, {}, {}, {}, enabled);
+            until([&] { worker.poll(); return worker.ready(); });
+            worker.stop(true);
+            assert(!worker.ready() && std::filesystem::is_empty(runtime));
+        }
+        ::unsetenv("FRAMEYAP_MOONDREAM_ANALYTICS");
         worker.start(argv[1], argv[2], "ok", 2);
         assert(!worker.ready());
         until([&] { worker.poll(); return worker.ready(); });
@@ -85,7 +105,8 @@ int main(int argc, char** argv) {
         });
         assert(!worker.ready());
         for (const auto& [mode, message] : std::vector<std::pair<const char*, const char*>>{
-                 {"missing-model", "check --model"}, {"missing-import", "check --python"}}) {
+                 {"missing-model", "check --model"}, {"missing-import", "check --python"},
+                 {"analytics-unsupported", "Telemetry protection unavailable"}}) {
             worker.start(argv[1], argv[2], mode, 2);
             failed = false;
             until([&] {
@@ -155,6 +176,56 @@ int main(int argc, char** argv) {
             return failed;
         });
         assert(std::filesystem::is_empty(runtime));
+        // OFF must not run an enabled process's termination/atexit hooks. This
+        // fixture only writes local sentinels; no runtime, network or hardware.
+        {
+            char temporary[] = "/tmp/frameyap-privacy-test-XXXXXX";
+            assert(::mkdtemp(temporary));
+            const std::filesystem::path root(temporary);
+            const auto script = root / "shutdown-worker.py";
+            const auto marker = root / "shutdown";
+            {
+                std::ofstream out(script);
+                out << R"PY(import atexit, os, signal, struct, sys
+from pathlib import Path
+marker = Path(sys.argv[sys.argv.index('--model') + 1])
+def terminated(*unused):
+    marker.with_suffix('.term').write_text('termination hook ran')
+    sys.exit(0)
+signal.signal(signal.SIGTERM, terminated)
+atexit.register(lambda: marker.with_suffix('.exit').write_text('exit hook ran'))
+marker.with_suffix('.pid').write_text(str(os.getpid()))
+os.write(1, struct.pack('<I', 1) + b'Y')
+while os.read(0, 1):
+    pass
+)PY";
+            }
+            // Prove the fixture would expose a graceful shutdown flush.
+            worker.start(argv[1], script.string(), marker.string());
+            until([&] { worker.poll(); return worker.ready(); });
+            worker.stop();
+            assert(std::filesystem::exists(root / "shutdown.term") &&
+                   std::filesystem::exists(root / "shutdown.exit"));
+            std::filesystem::remove(root / "shutdown.term");
+            std::filesystem::remove(root / "shutdown.exit");
+            worker.start(argv[1], script.string(), marker.string(), 2, false, {}, {}, {}, true);
+            until([&] { worker.poll(); return worker.ready(); });
+            pid_t old_pid = -1;
+            { std::ifstream pid(root / "shutdown.pid"); pid >> old_pid; }
+            assert(old_pid > 0);
+            worker.stop(true);
+            assert(!std::filesystem::exists(root / "shutdown.term") &&
+                   !std::filesystem::exists(root / "shutdown.exit"));
+            assert(::kill(old_pid, 0) == -1 && errno == ESRCH);
+            int status = 0;
+            assert(::waitpid(old_pid, &status, WNOHANG) == -1 && errno == ECHILD);
+            // Restart only after the previous enabled worker is gone and reaped.
+            worker.start(argv[1], argv[2], "analytics-off");
+            until([&] { worker.poll(); return worker.ready(); });
+            worker.stop(true);
+            std::filesystem::remove_all(root);
+            assert(std::filesystem::is_empty(runtime));
+        }
         // A separate fake worker proves stderr is not part of the framed pipe,
         // even when diagnostics fill its pipe before the ready frame.
         char scratch[] = "/tmp/frameyap-debug-test-XXXXXX";

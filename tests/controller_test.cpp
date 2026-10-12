@@ -21,21 +21,29 @@ struct AudioFake final : ControllerAudio {
     int seconds() const override { return 0; }
 };
 struct WorkerFake final : ControllerWorker {
-    bool loaded = false;
-    int starts = 0, stops = 0, submissions = 0;
-    bool debug = false;
+    bool loaded = false, fail_start = false, fail_poll = false;
+    int starts = 0, stops = 0, immediate_stops = 0, submissions = 0;
+    bool debug = false, analytics = false;
     uint64_t request = 0;
     std::deque<WorkerReply> replies;
-    void start(bool advanced) override { loaded = true; ++starts; debug = advanced; }
+    void start(bool advanced, bool moondream_analytics) override {
+        assert(!loaded); // replacement may start only after the old worker stops
+        ++starts; debug = advanced; analytics = moondream_analytics;
+        if (fail_start) throw std::runtime_error("worker start failed");
+        loaded = true;
+    }
     bool ready() const override { return loaded; }
     void submit(uint64_t id, const std::vector<float>& pcm) override {
         assert(loaded && pcm.size() == 3200); request = id; ++submissions;
     }
     std::optional<WorkerReply> poll() override {
+        if (fail_poll) { fail_poll = false; throw std::runtime_error("worker poll failed"); }
         if (replies.empty()) return std::nullopt;
         auto result = replies.front(); replies.pop_front(); return result;
     }
-    void stop() override { loaded = false; ++stops; replies.clear(); }
+    void stop(bool immediate = false) override {
+        loaded = false; ++stops; immediate_stops += immediate; replies.clear();
+    }
 };
 struct FocusState { bool armed = true, valid = true; int checks = 0, destroyed = 0; };
 struct FocusFake final : ControllerFocus {
@@ -73,10 +81,11 @@ struct Fixture {
             return std::make_unique<Lease>(input);
         };
     }
-    Controller make(bool automatic = false, bool close_mic = false, PacedDelivery* paced = nullptr) {
+    Controller make(bool automatic = false, bool close_mic = false, PacedDelivery* paced = nullptr,
+                    bool analytics = false) {
         return Controller(audio, worker, acquire(),
             [this]() -> std::unique_ptr<ControllerFocus> { return std::make_unique<FocusFake>(focus); },
-            {"Hi", "Next"}, automatic, false, close_mic, paced);
+            {"Hi", "Next"}, automatic, false, close_mic, paced, analytics);
     }
 };
 void ready(Controller& c) { c.initialize(); c.tick(); assert(c.state() == State::Ready); }
@@ -92,6 +101,118 @@ void result(Controller& c, Fixture& f, std::string text) {
 }
 }
 int main() {
+    for (bool enabled : {false, true}) {
+        Fixture f; auto c = f.make(false, false, nullptr, enabled);
+        assert(f.worker.starts == 0 && f.audio.prepares == 0);
+        c.initialize();
+        assert(c.state() == State::Warming && f.worker.starts == 1 &&
+               f.worker.analytics == enabled && !f.worker.debug);
+        c.settings(false, false, false, enabled); // every-frame settings, even while warming
+        assert(f.worker.starts == 1);
+        c.tick();
+        c.settings(false, false, false, enabled);
+        assert(c.state() == State::Ready && f.worker.starts == 1);
+        release(c, f);
+        c.settings(false, false, false, enabled); // no cancellation without a real change
+        assert(c.state() == State::Transcribing && f.worker.starts == 1);
+        result(c, f, "unchanged"); assert(c.state() == State::Review);
+        c.shutdown();
+    }
+    {
+        Fixture f; auto c = f.make(false, false, nullptr, true);
+        c.initialize(); // OFF also applies while the previous model is still warming
+        assert(c.state() == State::Warming && f.worker.analytics);
+        c.settings(false, false, false, false);
+        assert(c.state() == State::Warming && !f.worker.analytics && f.worker.starts == 2 &&
+               f.worker.immediate_stops == 1 && !f.audio.opened);
+        c.action(UiAction::EndRecord); c.action(UiAction::Enter);
+        assert(f.worker.submissions == 0 && f.input.enter == 0);
+        c.tick(); assert(c.state() == State::Ready);
+        c.shutdown();
+    }
+    {
+        Fixture f; auto c = f.make(true); ready(c);
+        c.action(UiAction::BeginRecord);
+        assert(c.state() == State::Recording && f.audio.opened);
+        c.settings(true, false, false, true);
+        assert(c.state() == State::Warming && !f.audio.opened && f.focus.destroyed == 1 &&
+               f.worker.starts == 2 && f.worker.immediate_stops == 1 && f.worker.analytics);
+        c.action(UiAction::EndRecord); c.action(UiAction::Enter);
+        assert(f.worker.submissions == 0 && f.input.enter == 0);
+        c.tick(); release(c, f);
+        c.settings(true, false, false, false); // OFF discards an enabled worker's pending request
+        assert(c.state() == State::Warming && !f.worker.analytics && f.worker.starts == 3 &&
+               f.worker.immediate_stops == 2);
+        f.worker.replies.push_back({f.worker.request, "stale", {}});
+        c.tick();
+        assert(c.state() == State::Ready && c.panel().transcript.empty() && f.input.text == 0);
+        release(c, f); f.focus.valid = false; result(c, f, "review to discard");
+        assert(c.state() == State::Review);
+        c.settings(true, true, false, true); // combined debug/analytics change warms only once
+        assert(c.state() == State::Warming && f.worker.starts == 4 && f.worker.debug &&
+               f.worker.analytics && c.panel().transcript.empty());
+        c.action(UiAction::Insert); assert(f.input.text == 0);
+        c.tick(); c.action(UiAction::QuickChat); assert(c.panel().quick_open);
+        c.settings(true, true, false, false);
+        assert(!c.panel().quick_open && f.worker.starts == 5 && !f.worker.analytics);
+        c.tick(); c.shutdown();
+    }
+    {
+        Fixture f; auto c = f.make(false, false, nullptr, true); ready(c);
+        f.worker.fail_start = true;
+        c.settings(false, false, false, false);
+        assert(c.state() == State::Error && !f.worker.loaded && !f.audio.opened &&
+               !f.worker.analytics && f.worker.starts == 2 && f.worker.immediate_stops == 1);
+        c.settings(false, false, false, false); // startup failure must not auto-loop every frame
+        assert(f.worker.starts == 2);
+        f.worker.fail_start = false;
+        c.action(UiAction::Record); c.tick();
+        assert(c.state() == State::Ready && f.worker.starts == 3 && !f.worker.analytics);
+        f.worker.fail_poll = true; c.tick(); assert(c.state() == State::Error && !f.worker.loaded);
+        c.settings(false, false, false, true); c.tick();
+        assert(c.state() == State::Ready && f.worker.starts == 4 && f.worker.analytics);
+        release(c, f); c.action(UiAction::Cancel);
+        assert(c.state() == State::Error && !f.worker.loaded);
+        c.settings(false, false, false, false); c.tick();
+        assert(c.state() == State::Ready && f.worker.starts == 5 && !f.worker.analytics);
+        c.shutdown();
+    }
+    {
+        Fixture f; auto c = f.make();
+        c.backend_changed(false, "Model unavailable");
+        for (bool enabled : {true, false, true, false}) {
+            const int stopped = f.worker.immediate_stops;
+            c.settings(false, false, false, enabled);
+            assert(c.state() == State::Error && !c.panel().record_available &&
+                   !f.worker.loaded && f.worker.starts == 0 && f.worker.immediate_stops == stopped + 1);
+            c.settings(false, false, false, enabled);
+            c.action(UiAction::Record); c.action(UiAction::Enter); c.tick();
+            assert(f.worker.starts == 0 && f.worker.immediate_stops == stopped + 1 && f.input.enter == 0);
+        }
+        c.backend_changed(true); c.tick();
+        assert(c.state() == State::Ready && f.worker.starts == 1 && !f.worker.analytics);
+        c.shutdown();
+    }
+    {
+        Fixture f;
+        auto now = std::chrono::steady_clock::time_point{};
+        PacedDelivery paced(f.acquire(), [&] { return now; });
+        auto c = f.make(false, false, &paced, true); ready(c);
+        release(c, f); result(c, f, std::string(81, 'a'));
+        c.action(UiAction::Enter); // queued, before first text batch
+        c.settings(false, false, false, false);
+        assert(!paced.active() && c.panel().transcript.empty() && f.input.events.empty());
+        c.tick(); release(c, f); result(c, f, std::string(81, 'b'));
+        c.action(UiAction::Enter); c.tick();
+        assert(f.input.text == 1 && paced.active());
+        c.settings(false, false, false, true);
+        assert(!paced.active() && c.panel().transcript.empty() &&
+               c.panel().detail.find("Earlier input may have queued") != std::string::npos);
+        now += std::chrono::milliseconds(150); c.tick();
+        c.settings(false, false, false, true);
+        assert(f.input.text == 1 && f.input.enter == 0 && f.worker.starts == 3);
+        c.shutdown();
+    }
     {
         Fixture f; auto c = f.make(false); ready(c);
         release(c, f); result(c, f, "pending preview");

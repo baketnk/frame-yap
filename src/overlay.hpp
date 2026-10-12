@@ -47,6 +47,10 @@ public:
     std::vector<ModelAction> take_model_actions();
     void draw(const Panel& panel);
     bool advanced_debug() const;
+    bool moondream_analytics() const;
+    // Call after the controller applies effective consent and stops the old
+    // worker. OFF must take effect before potentially slow filesystem writes.
+    void flush_pending_analytics_save();
     bool auto_insert() const;
     bool close_mic_when_idle() const;
     const std::vector<std::string>& quick_inputs() const;

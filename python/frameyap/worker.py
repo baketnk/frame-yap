@@ -8,6 +8,8 @@ by default, or captured privately with explicit --advanced-debug. This module ne
 """
 
 import argparse
+import importlib.metadata
+import inspect
 import os
 from pathlib import Path
 import stat
@@ -23,6 +25,10 @@ try:
     from .model_files import DEFAULT_MANIFEST_DIR, ManifestError, check_model, load_backends
 except ImportError:  # direct executable script
     from model_files import DEFAULT_MANIFEST_DIR, ManifestError, check_model, load_backends
+
+
+class TelemetryProtectionError(RuntimeError):
+    """An unaudited runtime must not start while analytics are disabled."""
 
 
 class LocalModelError(ValueError):
@@ -84,6 +90,34 @@ def local_model(path, manifest_dir=DEFAULT_MANIFEST_DIR):
     return str(Path(path))
 
 
+def disable_kestrel_telemetry():
+    """Patch only the audited runtime, before constructing any engine.
+
+    Kestrel 0.8.0 has no supported opt-out. Startup, periodic, shutdown and
+    authentication-retry uploads share this coroutine. Keep the patch local to
+    this worker process and re-audit both packages before allowing upgrades.
+    """
+    for package, expected in (("moondream", "2.4.0"), ("kestrel", "0.8.0")):
+        if importlib.metadata.version(package) != expected:
+            raise TelemetryProtectionError("unsupported runtime version for telemetry protection")
+    from kestrel.photon import PhotonReporter
+    flush = getattr(PhotonReporter, "_flush_window", None)
+    if not inspect.iscoroutinefunction(flush):
+        raise TelemetryProtectionError("unsupported telemetry reporter interface")
+    parameters = inspect.signature(flush).parameters
+    if (list(parameters) != ["self", "rotate"] or
+            parameters["rotate"].kind != inspect.Parameter.KEYWORD_ONLY or
+            parameters["rotate"].default is not True):
+        raise TelemetryProtectionError("unsupported telemetry reporter interface")
+
+    async def no_telemetry(self, *, rotate=True):
+        # No account standing also disables cloud finetune authentication.
+        # FrameYap uses only the local base Redux model, not cloud finetunes.
+        return None
+
+    PhotonReporter._flush_window = no_telemetry
+
+
 def load_model(path, threads, manifest_dir=DEFAULT_MANIFEST_DIR):
     # Set before importing moondream/torch/huggingface dependencies, even when
     # invoked directly without the native adapter.
@@ -98,6 +132,10 @@ def load_model(path, threads, manifest_dir=DEFAULT_MANIFEST_DIR):
     import torch
     torch.set_num_threads(threads)
     torch.set_num_interop_threads(1)
+    # Native Settings passes an explicit 0/1 through the dispatcher. Missing
+    # or malformed values remain OFF; a changed setting starts a fresh worker.
+    if os.environ.get("FRAMEYAP_MOONDREAM_ANALYTICS") != "1":
+        disable_kestrel_telemetry()
     import moondream as md  # noqa: explicit lazy import
     return md.photon("moondream/parakeet-redux", model_path=directory,
                      device="cpu", cpu_threads=threads)
@@ -211,6 +249,10 @@ def main(argv=None):
         except LocalModelError:
             if args.advanced_debug: traceback.print_exc(file=sys.stderr)
             send_frame(protocol_fd, b"F", b"M")
+            return 1
+        except TelemetryProtectionError:
+            if args.advanced_debug: traceback.print_exc(file=sys.stderr)
+            send_frame(protocol_fd, b"F", b"P")
             return 1
         except ImportError:
             if args.advanced_debug: traceback.print_exc(file=sys.stderr)

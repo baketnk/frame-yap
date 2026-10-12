@@ -246,25 +246,30 @@ Worker::Worker(std::chrono::milliseconds warmup, std::chrono::milliseconds reque
 }
 Worker::~Worker() { stop(); }
 
-void Worker::stop() {
+void Worker::stop(bool immediate) {
     auto& s = *state_;
-    close_fd(s.to_child);
-    close_fd(s.from_child);
     if (s.pid > 0) {
-        ::kill(s.pid, SIGTERM); // Dispatcher handles and reaps its owned child.
-        auto until = Clock::now() + std::chrono::milliseconds(500);
         int status = 0;
-        while (::waitpid(s.pid, &status, WNOHANG) == 0 && Clock::now() < until) {
-            try { s.drain_debug(); } catch (...) {} // stop/destructor are best effort
-            ::usleep(10000);
+        if (!immediate) {
+            // Signal before closing stdin: EOF could otherwise run the enabled
+            // runtime's graceful-shutdown analytics flush before TERM arrives.
+            ::kill(s.pid, SIGTERM); // Dispatcher kills/reaps its owned child.
+            auto until = Clock::now() + std::chrono::milliseconds(500);
+            while (::waitpid(s.pid, &status, WNOHANG) == 0 && Clock::now() < until) {
+                try { s.drain_debug(); } catch (...) {} // stop/destructor are best effort
+                ::usleep(10000);
+            }
         }
-        // Spawned in a dedicated group: if dispatcher was stuck or died before
-        // reaping, stop its remaining model process too. Never signal a session.
+        // Analytics revocation skips all graceful hooks and kills every process
+        // in the dedicated owned group before pipe EOF or a replacement start.
+        // Normal shutdown also cleans up a stuck dispatcher/model. No sessions
+        // or unrelated processes are signalled; prior network sends cannot be undone.
         ::kill(-s.pid, SIGKILL);
-        if (::waitpid(s.pid, &status, WNOHANG) == 0)
-            while (::waitpid(s.pid, &status, 0) < 0 && errno == EINTR) {}
+        while (::waitpid(s.pid, &status, 0) < 0 && errno == EINTR) {}
         s.pid = -1;
     }
+    close_fd(s.to_child);
+    close_fd(s.from_child);
     try { s.drain_debug(); } catch (...) {}
     close_fd(s.debug_pipe);
     close_fd(s.debug_file);
@@ -280,7 +285,7 @@ void Worker::stop() {
 void Worker::start(const std::string& python, const std::string& script,
                    const std::string& model, int threads, bool advanced_debug,
                    const std::string& backend, const std::string& manifest_dir,
-                   const std::string& root) {
+                   const std::string& root, bool moondream_analytics) {
     if (state_->pid > 0) throw std::logic_error("worker already started");
     if (python.empty() || script.empty() || model.empty() || threads < 1 || threads > 64)
         throw std::invalid_argument("python, script, local model and 1..64 threads required");
@@ -309,13 +314,17 @@ void Worker::start(const std::string& python, const std::string& script,
         for (char** e = environ; *e; ++e) {
             std::string_view entry(*e);
             if (entry.starts_with("PYTHONDONTWRITEBYTECODE=") ||
-                entry.starts_with("FRAMEYAP_ADVANCED_DEBUG=")) continue;
+                entry.starts_with("FRAMEYAP_ADVANCED_DEBUG=") ||
+                entry.starts_with("FRAMEYAP_MOONDREAM_ANALYTICS=")) continue;
             environment.emplace_back(*e);
         }
         environment.emplace_back("PYTHONDONTWRITEBYTECODE=1");
         // Explicit protocol opt-in; dispatcher forwards it to known Redux without
         // appending unsupported flags to third-party backend launchers.
         environment.emplace_back(std::string("FRAMEYAP_ADVANCED_DEBUG=") + (advanced_debug ? "1" : "0"));
+        // Only the saved/in-panel choice authorizes analytics. An inherited
+        // launcher environment must never override the default-off setting.
+        environment.emplace_back(std::string("FRAMEYAP_MOONDREAM_ANALYTICS=") + (moondream_analytics ? "1" : "0"));
         std::vector<char*> envp;
         for (auto& value : environment) envp.push_back(value.data());
         envp.push_back(nullptr);
@@ -448,6 +457,8 @@ std::optional<WorkerReply> Worker::poll() {
                         throw std::runtime_error("Missing/mismatched local model files or private clip directory; check --model");
                     if (size == 2 && s.input[5] == 'I')
                         throw std::runtime_error("Configured local worker runtime unavailable; check --python and backend launcher");
+                    if (size == 2 && s.input[5] == 'P')
+                        throw std::runtime_error("Telemetry protection unavailable; reinstall the pinned speech runtime");
                     throw std::runtime_error("Local backend failed to load; check runtime and verified model files");
                 }
                 if ((type != 'R' && type != 'E') || size < 9 || !s.loaded || !s.pending ||

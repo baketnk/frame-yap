@@ -15,7 +15,7 @@ SurfaceEvent click(PanelSurface& surface, float x, float y, unsigned cursor = 0)
     return surface.pointer_up(cursor, x, y);
 }
 void no_action(const SurfaceEvent& event) {
-    assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.auto_insert &&
+    assert(!event.action && !event.mount && !event.lasers_anytime && !event.advanced_debug && !event.moondream_analytics && !event.auto_insert &&
            !event.close_mic_when_idle && !event.gradient_enabled && !event.lock_layout && !event.wrist_world_fallback && !event.clock_24h && !event.date_format && !event.recenter && !event.open_bindings && !event.model_action && !event.launch_companion && !event.check_updates && !event.install_update);
 }
 void snapshot(PanelSurface& surface, const std::string& path) {
@@ -706,5 +706,102 @@ int main(int argc, char** argv) {
     assert(click(about, 100, 610).action == UiAction::BeginRecord);
     no_action(click(about, 290, 160)); about.render(about_panel); // Settings returns
     assert(about.pixels() == settings_pixels);
+    // Analytics is OFF until a separately painted disclosure is confirmed and
+    // the caller successfully persists the choice. Dismissal never opts in.
+    PanelSurface analytics(argv[1], Mount::World);
+    Panel analytics_panel{"Ready", "", "", true, false};
+    analytics.render(analytics_panel);
+    assert(analytics.visible_analytics_review_lines().empty());
+    no_action(click(analytics, 700, 470)); // switch hidden outside Settings
+    no_action(click(analytics, 290, 160));
+    assert(analytics.scroll(200, 400, -2.5f)); // analytics row: 574 - 120
+    analytics.render(analytics_panel);
+    if (argc >= 3) snapshot(analytics, std::string(argv[2]) + "-analytics-off.ppm");
+    no_action(click(analytics, 700, 470));
+    assert(analytics.visible_analytics_review_lines().empty());
+    no_action(click(analytics, 700, 510)); // no opt-in before disclosure is painted
+    assert(analytics.render(analytics_panel));
+    const auto disclosure = analytics.visible_analytics_review_lines();
+    std::string disclosure_text;
+    for (const auto& line : disclosure) disclosure_text += line + " ";
+    for (const auto* required : {"Moondream", "hostname", "device", "model", "usage",
+                                "network", "restarts", "discards", "saves successfully"})
+        assert(disclosure_text.find(required) != std::string::npos);
+    if (argc >= 3) snapshot(analytics, std::string(argv[2]) + "-analytics-consent.ppm");
+    assert(!analytics.available(UiAction::Record) && !analytics.available(UiAction::Insert));
+    assert(!analytics.allow_bound_action(UiAction::BeginRecord)); // both PTT and grip use this gate
+    assert(!analytics.allow_bound_action(UiAction::Record));
+    assert(!analytics.allow_bound_action(UiAction::Insert));
+    assert(!analytics.allow_bound_action(UiAction::Enter));
+    assert(!analytics.allow_bound_action(UiAction::QuickChat));
+    assert(analytics.allow_bound_action(UiAction::EndRecord)); // an existing capture can still finish
+    assert(!analytics.visible_analytics_review_lines().empty());
+    no_action(click(analytics, 180, 510)); // Keep OFF
+    assert(analytics.visible_analytics_review_lines().empty());
+    analytics.render(analytics_panel);
+    no_action(click(analytics, 700, 470)); analytics.render(analytics_panel);
+    analytics.pointer_down(0, 700, 510);
+    no_action(click(analytics, 180, 510, 1)); // other pointer cancels
+    no_action(analytics.pointer_up(0, 700, 510));
+    for (const auto* dismiss : {"settings", "review", "bindings", "reset", "quick", "state", "cancel", "bound_cancel"}) {
+        no_action(click(analytics, 290, 160)); analytics.render(analytics_panel);
+        no_action(click(analytics, 700, 470)); analytics.render(analytics_panel);
+        assert(!analytics.visible_analytics_review_lines().empty());
+        analytics.pointer_down(0, 700, 510);
+        if (std::string(dismiss) == "settings") no_action(click(analytics, 290, 160, 1));
+        else if (std::string(dismiss) == "review") no_action(click(analytics, 100, 160, 1));
+        else if (std::string(dismiss) == "bindings") assert(click(analytics, 480, 160, 1).open_bindings);
+        else if (std::string(dismiss) == "reset") analytics.reset_pointers();
+        else if (std::string(dismiss) == "quick") {
+            analytics_panel.quick_open = true; analytics.render(analytics_panel);
+            analytics_panel.quick_open = false; analytics.render(analytics_panel);
+        } else if (std::string(dismiss) == "state") analytics.set_moondream_analytics(false);
+        else if (std::string(dismiss) == "bound_cancel") assert(analytics.allow_bound_action(UiAction::Cancel));
+        else assert(click(analytics, 300, 610, 1).action == UiAction::Cancel);
+        assert(analytics.visible_analytics_review_lines().empty());
+        no_action(analytics.pointer_up(0, 700, 510)); // stale confirmation cannot survive
+    }
+    no_action(click(analytics, 290, 160)); analytics.render(analytics_panel);
+    no_action(click(analytics, 700, 470)); analytics.render(analytics_panel);
+    analytics.pointer_down(1, 700, 510);
+    auto analytics_event = click(analytics, 700, 510);
+    assert(analytics_event.moondream_analytics == true && !analytics_event.action);
+    no_action(analytics.pointer_up(1, 700, 510)); // two pointers cannot repeat consent
+    assert(analytics.visible_analytics_review_lines().empty());
+    Config analytics_config;
+    assert(!apply_moondream_analytics(analytics_config, {}, *analytics_event.moondream_analytics));
+    analytics.set_moondream_analytics(analytics_config.moondream_analytics);
+    analytics.render(analytics_panel);
+    no_action(click(analytics, 700, 470)); // failed save still needs fresh confirmation
+    analytics.render(analytics_panel);
+    analytics_event = click(analytics, 700, 510);
+    assert(analytics_event.moondream_analytics == true);
+    const auto analytics_preference = std::filesystem::temp_directory_path() /
+        ("frameyap-analytics-ui-" + std::to_string(::getpid()) + ".json");
+    assert(apply_moondream_analytics(analytics_config, analytics_preference, true));
+    analytics.set_moondream_analytics(analytics_config.moondream_analytics);
+    analytics.render(analytics_panel);
+    assert(load_config(analytics_preference).moondream_analytics);
+    if (argc >= 3) snapshot(analytics, std::string(argv[2]) + "-analytics-on.ppm");
+    analytics_event = click(analytics, 700, 470);
+    assert(analytics_event.moondream_analytics == false); // disable is one click
+    assert(!apply_moondream_analytics(analytics_config, {}, false));
+    analytics.set_moondream_analytics(analytics_config.moondream_analytics, true);
+    analytics.render(analytics_panel);
+    if (argc >= 3) snapshot(analytics, std::string(argv[2]) + "-analytics-retry.ppm");
+    assert(!analytics_config.moondream_analytics && load_config(analytics_preference).moondream_analytics);
+    analytics_event = click(analytics, 700, 470);
+    assert(analytics_event.moondream_analytics == false); // Save analytics OFF retries OFF
+    assert(analytics.visible_analytics_review_lines().empty());
+    assert(apply_moondream_analytics(analytics_config, analytics_preference, false));
+    analytics.set_moondream_analytics(analytics_config.moondream_analytics);
+    analytics.render(analytics_panel);
+    assert(!load_config(analytics_preference).moondream_analytics);
+    analytics.pointer_down(0, 700, 470);
+    analytics.set_moondream_analytics(true); // changed state invalidates stale toggle
+    no_action(analytics.pointer_up(0, 700, 470));
+    analytics.set_moondream_analytics(false);
+    no_action(click(analytics, 700, 470)); // successful disable restores ordinary opt-in flow
+    std::filesystem::remove(analytics_preference);
     std::cout << "panel checks passed (no OpenVR, microphone or input injection)\n";
 }

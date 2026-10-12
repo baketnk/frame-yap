@@ -1,6 +1,6 @@
 # FrameYap
 
-On-device voice typing for Steam Frame. Hold a button, speak, check the text, and type it into whatever app has focus. Speech recognition runs on the headset itself; nothing is sent to the cloud.
+On-device voice typing for Steam Frame. Hold a button, speak, check the text, and type it into whatever app has focus. Speech recognition runs on the headset itself.
 
 [![FrameYap’s review panel on Steam Frame, with recording controls, controller and headset battery levels, and Settings and Bindings tabs.](docs/images/frameyap-ui.png)](https://youtu.be/9dg2KfojYTE)
 
@@ -55,7 +55,15 @@ The header shows battery levels for your controllers and headset. The **Buttons 
 
 ## Privacy
 
-Recognition runs locally with the Parakeet Redux model. The installer downloads FrameYap from GitHub, the model from Hugging Face and the Python packages (moondream, Kestrel, CPU Torch) from PyPI and PyTorch; after that, FrameYap works offline. By default the microphone stays open while FrameYap is running and idle audio is thrown away; turn on **Settings → Close mic when idle** to close it between recordings (it may clip the first syllable). Recordings and transcripts are not kept, unless you turn on **Advanced debug**, whose logs may contain speech.
+Recognition runs locally with the Parakeet Redux model. **FrameYap itself does not collect or send analytics.** Its separately installed Moondream/Kestrel runtime includes upstream telemetry; see [Kestrel's telemetry disclosure](https://pypi.org/project/kestrel/0.8.0/#description).
+
+**Settings → Moondream analytics is OFF by default**, including for existing settings files without this option. With it OFF, FrameYap suppresses the Kestrel reporter before starting recognition. Turning it ON requires confirming the in-app disclosure and successfully saving the preference. ON leaves the upstream reporter enabled: Kestrel 0.8.0 sends hostname, model/service name, device details, timestamps, random instance/report IDs, and aggregate request/error/token counts to the default endpoint `https://api.moondream.ai/v1/photon/telemetry`. Reports are attempted at model startup, about every 60 seconds (even while idle), and on graceful runtime shutdown. On FrameYap's CPU path, device information identifies CPU and zero GPU memory. The audited reporter does not send audio or transcripts.
+
+Changing the setting restarts recognition and discards current recording, review text and queued dictation. Turning it OFF stops the old worker without a final graceful-shutdown report; it cannot recall requests already sent. The choice is saved as `moondream_analytics` in `~/.config/frameyap/config.json`. If saving OFF fails, it still applies for this session; the panel warns that the old saved choice may return next launch and offers **Save analytics OFF** to retry.
+
+Kestrel 0.8.0 has no supported opt-out, so OFF uses a narrow in-process monkey-patch for **moondream 2.4.0 / Kestrel 0.8.0**. It does not edit installed dependency files or affect other programs. With OFF selected, an unknown version or changed reporter interface stops recognition with **Telemetry protection unavailable** rather than silently allowing analytics. Quit FrameYap, then restore the pinned runtime using the `--install-runtime --yes` command in Troubleshooting; upgrades need a fresh compatibility review. ON does not apply that patch or its version guard. This is not a network sandbox for every third-party library. Earlier releases without this setting did not suppress Kestrel telemetry. See [worker implementation and verification](docs/worker.md#moondream-analytics).
+
+The installer downloads FrameYap from GitHub, the model from Hugging Face and the Python packages (moondream, Kestrel, CPU Torch) from PyPI and PyTorch. **Check for updates** contacts GitHub when pressed. Once installed, recognition can run offline. By default the microphone stays open while FrameYap is running and idle audio is thrown away; turn on **Settings → Close mic when idle** to close it between recordings (it may clip the first syllable). Recordings and transcripts are not kept, unless you turn on **Advanced debug**, whose logs may contain speech.
 
 ## Update and uninstall
 

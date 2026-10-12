@@ -55,6 +55,11 @@ def serve(backend, root, python, model_dir, clip_dir, threads, advanced_debug=Fa
     # launchers need not accept --advanced-debug or know this environment key.
     env["FRAMEYAP_ADVANCED_DEBUG"] = "1" if (advanced_debug and backend.id == "redux" and
         backend.launcher["type"] == "python" and backend.launcher["path"] == "python/frameyap/worker.py") else "0"
+    # Only our known Redux launcher receives the explicit analytics opt-in.
+    # A caller's inherited value must not enable it for arbitrary backends.
+    env["FRAMEYAP_MOONDREAM_ANALYTICS"] = "1" if (
+        os.environ.get("FRAMEYAP_MOONDREAM_ANALYTICS") == "1" and backend.id == "redux" and
+        backend.launcher["type"] == "python" and backend.launcher["path"] == "python/frameyap/worker.py") else "0"
     # A child cannot inherit input-delivery authority. stdout is exclusively frames.
     try:
         child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -74,7 +79,7 @@ def serve(backend, root, python, model_dir, clip_dir, threads, advanced_debug=Fa
     try:
         ready = read_frame(child.stdout.fileno())
         if ready is None or ready[:1] == b"F":
-            send_frame(output_fd, b"F", ready[1:2] if ready and ready[1:2] in (b"M", b"I") else b"D")
+            send_frame(output_fd, b"F", ready[1:2] if ready and ready[1:2] in (b"M", b"I", b"P") else b"D")
             return 1
         if ready != b"Y":
             send_frame(output_fd, b"F", b"D")

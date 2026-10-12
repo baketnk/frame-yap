@@ -32,10 +32,10 @@ enum class Control { Review, Settings, Bindings, Plan, Keyboard, Record, Cancel,
                      World, Left, Right, Head, Recenter, LasersAnytime, AdvancedDebug, AutoInsert,
                      Clock24h, Date, LockLayout, CloseMicWhenIdle, Models, ModelRow,
                      ModelInstall, ModelPrev, ModelNext, About, WristWorldFallback, UpdateCheck, UpdateInstall, Draw,
-                     AnimatedBackground };
-enum class Tab { Review, Settings, Models, About };
+                     AnimatedBackground, MoondreamAnalytics, AnalyticsConfirm, AnalyticsKeepOff };
+enum class Tab { Review, Settings, Models, About, AnalyticsConsent };
 struct Button { Rect r; Control id; const char* label; };
-constexpr std::array<Button, 38> buttons{{
+constexpr std::array<Button, 41> buttons{{
     {{32, 138, 180, 46}, Control::Review, "Review"},
     {{226, 138, 180, 46}, Control::Settings, "Settings"},
     {{420, 138, 180, 46}, Control::Bindings, "Bindings"},
@@ -73,8 +73,18 @@ constexpr std::array<Button, 38> buttons{{
     {{32, 682, 454, 42}, Control::UpdateCheck, "Check for updates"},
     {{514, 682, 454, 42}, Control::UpdateInstall, "Install update..."},
     {{32, 496, 454, 44}, Control::Draw, "Open Draw"},
-    {{32, 574, 936, 36}, Control::AnimatedBackground, "Animated background"},
+    {{32, 574, 454, 36}, Control::AnimatedBackground, "Animated background"},
+    {{514, 574, 454, 36}, Control::MoondreamAnalytics, "Moondream analytics"},
+    {{514, 490, 454, 44}, Control::AnalyticsConfirm, "Confirm Enable"},
+    {{32, 490, 454, 44}, Control::AnalyticsKeepOff, "Keep OFF"},
 }};
+const std::vector<std::string> analytics_review_lines{
+    "Enabling sends analytics to Moondream over the network:",
+    "hostname, device details, model details and usage events.",
+    "Speech recognition still runs locally.",
+    "Changing this setting restarts recognition and discards",
+    "any current recording, transcript or queued dictation.",
+    "Analytics stay OFF unless this choice saves successfully."};
 constexpr Rect settings_view{32, 232, 936, 316};
 constexpr Rect review_view{48, 212, 904, 260};
 constexpr int review_line_height = 42;
@@ -103,7 +113,7 @@ bool settings_control(Control c) {
     return c == Control::Models || c == Control::About || mounting(c) ||
            c == Control::Recenter || c == Control::LasersAnytime || c == Control::AdvancedDebug ||
            c == Control::AutoInsert || c == Control::Clock24h || c == Control::Date ||
-           c == Control::CloseMicWhenIdle || c == Control::AnimatedBackground || c == Control::WristWorldFallback ||
+           c == Control::CloseMicWhenIdle || c == Control::AnimatedBackground || c == Control::MoondreamAnalytics || c == Control::WristWorldFallback ||
            c == Control::UpdateCheck || c == Control::UpdateInstall;
 }
 // Invalid bytes become visible replacement glyphs, never control commands.
@@ -140,6 +150,7 @@ struct PanelSurface::Impl {
     Color background, card, ink, muted, cyan, pink;
     Tab tab = Tab::Review;
     bool dirty = true, lasers_anytime = false, advanced_debug = false, auto_insert = false;
+    bool moondream_analytics = false, analytics_unsaved_off = false, analytics_consent_rendered = false;
     bool close_mic_when_idle = false, wrist_world_fallback = true;
     bool clock_24h = false, layout_locked = false;
     float settings_scroll = 0.f;
@@ -376,6 +387,7 @@ struct PanelSurface::Impl {
         return float(lines.size() > 6 ? (lines.size() - 6) * review_line_height : 0);
     }
     bool available(UiAction a) const {
+        if (tab == Tab::AnalyticsConsent && a != UiAction::Cancel && a != UiAction::Quit) return false;
         if (a == UiAction::Record) return tab != Tab::Models && !panel.quick_open && (panel.recording || panel.record_available);
         // With nothing to review, Type is an explicit Enter.
         if (a == UiAction::Insert) return tab != Tab::Models && !panel.quick_open && panel.enabled && !panel.recording;
@@ -386,6 +398,7 @@ struct PanelSurface::Impl {
     }
     bool visible(Control c) const {
         if (panel.quick_open && c != Control::Cancel && c != Control::Enter && c != Control::Quit) return false;
+        if (c == Control::AnalyticsConfirm || c == Control::AnalyticsKeepOff) return tab == Tab::AnalyticsConsent;
         if (c == Control::Models || c == Control::About || c == Control::WristWorldFallback ||
             c == Control::UpdateCheck) return tab == Tab::Settings;
         if (c == Control::UpdateInstall) return tab == Tab::Settings && update_status == UpdateStatus::Available;
@@ -398,11 +411,12 @@ struct PanelSurface::Impl {
         if (mounting(c) || c == Control::Recenter || c == Control::LasersAnytime ||
             c == Control::AdvancedDebug || c == Control::AutoInsert ||
             c == Control::Clock24h || c == Control::Date || c == Control::LockLayout ||
-            c == Control::CloseMicWhenIdle || c == Control::AnimatedBackground) return tab == Tab::Settings;
+            c == Control::CloseMicWhenIdle || c == Control::AnimatedBackground || c == Control::MoondreamAnalytics) return tab == Tab::Settings;
         return true;
     }
     bool enabled(Control c) const {
         if (auto a = action(c)) return available(*a);
+        if (c == Control::AnalyticsConfirm) return analytics_consent_rendered && !moondream_analytics;
         if (c == Control::UpdateCheck) return update_status != UpdateStatus::Checking;
         if (c == Control::Recenter) return mount == Mount::World;
         if (c == Control::ModelRow) return !panel.model_busy;
@@ -455,7 +469,7 @@ struct PanelSurface::Impl {
         rounded({32, 204, 936, 334}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
         text("FrameYap", 48, 244, 30, ink, 952);
         text("Version " + (version.empty() ? std::string("unknown") : version), 48, 276, 22, cyan, 952);
-        text("On-device voice typing for Steam Frame. Nothing is sent to the cloud.", 48, 306, 19, muted, 952);
+        text("On-device voice typing. Optional Moondream analytics in Settings.", 48, 306, 19, muted, 952);
         const auto it = std::find_if(panel.models.begin(), panel.models.end(), [&](const auto& m) { return m.id == panel.selected_backend; });
         const std::array<std::pair<const char*, std::string>, 5> rows{{
             {"Source", "github.com/baketnk/frame-yap"},
@@ -492,6 +506,10 @@ struct PanelSurface::Impl {
         if (p.quick_open != panel.quick_open || p.models != panel.models ||
             p.selected_backend != panel.selected_backend || p.model_busy != panel.model_busy) {
             reset(); install_confirm = false; consent_snapshot.reset();
+            if (tab == Tab::AnalyticsConsent) {
+                tab = Tab::Settings;
+                analytics_consent_rendered = false;
+            }
         }
         panel = p;
         if (panel.quick_open && tab != Tab::Review) { tab = Tab::Review; dirty = true; }
@@ -592,6 +610,13 @@ struct PanelSurface::Impl {
             } else text("No model selected.", 32, 225, 18, pink, 968);
         } else if (tab == Tab::About) {
             about();
+        } else if (tab == Tab::AnalyticsConsent) {
+            rounded({32, 204, 936, 334}, 16, mix(card, muted, .08f), mix(card, cyan, .25f), .18f);
+            text("Enable Moondream analytics?", 48, 244, 30, pink, 952);
+            for (size_t i = 0; i < analytics_review_lines.size(); ++i)
+                text(analytics_review_lines[i], 48, 284 + int(i) * 31, 22, ink, 952);
+            // Events before this disclosure has been painted cannot opt in.
+            analytics_consent_rendered = true;
         } else {
             text("Hold Quit: hold 0.9s then release. Lasers anytime: system-wide; may affect games.",
                  32, 204, 18, pink, 968);
@@ -616,6 +641,7 @@ struct PanelSurface::Impl {
                             (mounting(b.id) && *mounting(b.id) == mount) ||
                             (b.id == Control::LasersAnytime && lasers_anytime) ||
                             (b.id == Control::AdvancedDebug && advanced_debug) ||
+                            (b.id == Control::MoondreamAnalytics && moondream_analytics) ||
                             (b.id == Control::AutoInsert && auto_insert) ||
                             (b.id == Control::AnimatedBackground && gradient.enabled) ||
                             (b.id == Control::CloseMicWhenIdle && close_mic_when_idle) ||
@@ -644,24 +670,26 @@ struct PanelSurface::Impl {
                 }() : b.id == Control::ModelInstall && install_confirm ? "Confirm Install" :
                 b.id == Control::Record && panel.recording ? "Stop" :
                 b.id == Control::Insert && panel.transcript.empty() ? "Enter" :
+                b.id == Control::MoondreamAnalytics && analytics_unsaved_off ? "Save analytics OFF" :
                 b.id == Control::Clock24h ? (clock_24h ? "Clock: 24 hour" : "Clock: 12 hour") :
                 b.id == Control::Date ? (date_format == DateFormat::Off ? "Date: Off" :
                     date_format == DateFormat::MonthDayYear ? "Date: MM/DD/YYYY" :
                     date_format == DateFormat::DayMonthYear ? "Date: DD/MM/YYYY" : "Date: YYYY-MM-DD") : b.label;
             text(label, r.x + 16, r.y + r.h / 2 + 9,
-                 b.id == Control::Date ? 23 : b.id == Control::CloseMicWhenIdle ? 22 :
+                 b.id == Control::Date ? 23 : b.id == Control::CloseMicWhenIdle || b.id == Control::MoondreamAnalytics ? 22 :
                  b.id == Control::Enter ? 20 : 27,
                  on ? ink : mix(background, muted, .48f), r.x + r.w - 8);
             if (mounting(b.id) && selected) text("ON", r.x + r.w - 56, r.y + 38, 23, cyan, r.x + r.w - 12);
             if (b.id == Control::LasersAnytime || b.id == Control::AdvancedDebug || b.id == Control::AutoInsert ||
                 b.id == Control::LockLayout || b.id == Control::CloseMicWhenIdle || b.id == Control::AnimatedBackground ||
-                b.id == Control::WristWorldFallback) {
+                b.id == Control::WristWorldFallback || b.id == Control::MoondreamAnalytics) {
                 bool active = b.id == Control::LasersAnytime ? lasers_anytime :
                               b.id == Control::AutoInsert ? auto_insert :
                               b.id == Control::LockLayout ? layout_locked :
                               b.id == Control::AnimatedBackground ? gradient.enabled :
                               b.id == Control::CloseMicWhenIdle ? close_mic_when_idle :
                               b.id == Control::WristWorldFallback ? wrist_world_fallback : advanced_debug;
+                if (b.id == Control::MoondreamAnalytics) active = moondream_analytics;
                 text(active ? "ON" : "OFF", r.x + r.w - 66, r.y + r.h / 2 + 9, 22,
                      active ? cyan : muted, r.x + r.w - 12);
             }
@@ -724,8 +752,17 @@ PanelSurface::~PanelSurface() = default;
 bool PanelSurface::render(const Panel& p, Clock::time_point now, bool animate) { return impl_->render(p, now, animate); }
 const std::vector<unsigned char>& PanelSurface::pixels() const { return impl_->pixels; }
 bool PanelSurface::available(UiAction a) const { return impl_->available(a); }
+bool PanelSurface::allow_bound_action(UiAction action) {
+    if (action == UiAction::Cancel) { reset_pointers(); return true; }
+    if (action == UiAction::EndRecord) return true;
+    return available(action == UiAction::BeginRecord ? UiAction::Record : action);
+}
 std::vector<std::string> PanelSurface::visible_model_review_lines() const {
     return impl_->visible_consent_lines();
+}
+std::vector<std::string> PanelSurface::visible_analytics_review_lines() const {
+    return impl_->tab == Tab::AnalyticsConsent && impl_->analytics_consent_rendered ?
+        analytics_review_lines : std::vector<std::string>{};
 }
 bool PanelSurface::dragging(unsigned cursor) const {
     return cursor < impl_->pressed.size() && int(cursor) == impl_->drag_cursor;
@@ -778,6 +815,14 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
     if (index == 10 || (index >= 0 && buttons[index].id == Control::Keyboard)) impl_->dirty = true;
     if (index < 0 || impl_->hit(x, y) != index) return result;
     auto c = buttons[index].id;
+    if (impl_->tab == Tab::AnalyticsConsent) {
+        // Leaving or cancelling never leaves an opt-in armed behind another view.
+        impl_->tab = Tab::Settings;
+        impl_->analytics_consent_rendered = false;
+        impl_->reset(); impl_->dirty = true;
+        if (c == Control::AnalyticsConfirm) { result.moondream_analytics = true; return result; }
+        if (c == Control::AnalyticsKeepOff) return result;
+    }
     if (c == Control::Keyboard) {
         if (!fired) result.launch_companion = now - impl_->press_time[cursor] >= keyboard_hold ?
             SurfaceEvent::Companion::KeyboardRecenter : SurfaceEvent::Companion::Keyboard;
@@ -790,6 +835,14 @@ SurfaceEvent PanelSurface::pointer_up(unsigned cursor, float x, float y, Clock::
     else if (c == Control::Recenter) { result.recenter = true; impl_->reset(); }
     else if (c == Control::LasersAnytime) result.lasers_anytime = !impl_->lasers_anytime;
     else if (c == Control::AdvancedDebug) result.advanced_debug = !impl_->advanced_debug;
+    else if (c == Control::MoondreamAnalytics) {
+        if (impl_->moondream_analytics || impl_->analytics_unsaved_off) result.moondream_analytics = false;
+        else {
+            impl_->tab = Tab::AnalyticsConsent;
+            impl_->analytics_consent_rendered = false;
+        }
+        impl_->reset(); impl_->dirty = true;
+    }
     else if (c == Control::AutoInsert) result.auto_insert = !impl_->auto_insert;
     else if (c == Control::AnimatedBackground) result.gradient_enabled = !impl_->gradient.enabled;
     else if (c == Control::CloseMicWhenIdle) result.close_mic_when_idle = !impl_->close_mic_when_idle;
@@ -881,7 +934,14 @@ void PanelSurface::set_indicators(const StatusIndicators& indicators) {
 void PanelSurface::set_binding_note(std::string note) {
     if (impl_->binding_note != note) { impl_->binding_note = std::move(note); impl_->dirty = true; }
 }
-void PanelSurface::reset_pointers() { impl_->reset(); }
+void PanelSurface::reset_pointers() {
+    impl_->reset();
+    if (impl_->tab == Tab::AnalyticsConsent) {
+        impl_->tab = Tab::Settings;
+        impl_->analytics_consent_rendered = false;
+        impl_->dirty = true;
+    }
+}
 std::vector<PanelSurface::Bounds> PanelSurface::input_regions() const {
     std::vector<Bounds> result{{10, 10, CW - 20, CH - 20}};
     if (!impl_->layout_locked) { result.push_back(grab); result.push_back(scale); }
@@ -915,6 +975,17 @@ void PanelSurface::set_advanced_debug(bool enabled) {
         impl_->advanced_debug = enabled;
         impl_->reset();
         impl_->dirty = true;
+    }
+}
+void PanelSurface::set_moondream_analytics(bool enabled, bool unsaved_off) {
+    unsaved_off = unsaved_off && !enabled;
+    if (impl_->moondream_analytics != enabled || impl_->analytics_unsaved_off != unsaved_off ||
+        impl_->tab == Tab::AnalyticsConsent) {
+        impl_->moondream_analytics = enabled;
+        impl_->analytics_unsaved_off = unsaved_off;
+        if (impl_->tab == Tab::AnalyticsConsent) impl_->tab = Tab::Settings;
+        impl_->analytics_consent_rendered = false;
+        impl_->reset(); impl_->dirty = true;
     }
 }
 void PanelSurface::set_auto_insert(bool enabled) {
