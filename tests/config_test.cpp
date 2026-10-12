@@ -1,4 +1,7 @@
 #include "config.hpp"
+#include <csignal>
+#include <sys/resource.h>
+#include <sys/wait.h>
 #include "panel_clock.hpp"
 #include <cassert>
 #include <cstdlib>
@@ -43,6 +46,7 @@ int main(int argc, char** argv) {
     assert(load_config(path).backend == "redux");
     assert(!load_config(path).experimental_input_priority);
     assert(!load_config(path).advanced_debug);
+    assert(!load_config(path).moondream_analytics);
     assert(!load_config(path).auto_insert);
     assert(!load_config(path).close_mic_when_idle);
     assert(!load_config(path).lock_layout);
@@ -61,6 +65,7 @@ int main(int argc, char** argv) {
     assert(example.font.empty());
     assert(!example.experimental_input_priority);
     assert(!example.advanced_debug);
+    assert(!example.moondream_analytics);
     assert(!example.auto_insert);
     assert(!example.close_mic_when_idle);
     assert(!example.lock_layout);
@@ -69,6 +74,71 @@ int main(int argc, char** argv) {
     assert(example.wrist.y == .18f && example.wrist.z == .089f);
     assert(!example.gradient.enabled && example.gradient.period_seconds == 30.f && example.gradient.strength == .12f);
     std::filesystem::create_directories(path.parent_path());
+    // Both new files and old configs without an explicit opt-in remain OFF.
+    put(path, "{}\n");
+    assert(!load_config(path).moondream_analytics);
+    std::filesystem::remove(path);
+    assert(save_moondream_analytics(path, true));
+    assert(load_config(path).moondream_analytics);
+    assert(get(path) == "{\"moondream_analytics\":true}\n");
+    assert(save_moondream_analytics(path, false));
+    // A buffered flush can fail after operator<< appeared to succeed. Simulate
+    // disk exhaustion in a child so the rest of the test keeps its file limit.
+    const auto before_failed_flush = get(path);
+    const pid_t flush_child = ::fork();
+    assert(flush_child >= 0);
+    if (flush_child == 0) {
+        std::signal(SIGXFSZ, SIG_IGN);
+        struct rlimit limit{};
+        assert(::getrlimit(RLIMIT_FSIZE, &limit) == 0);
+        limit.rlim_cur = 0;
+        assert(::setrlimit(RLIMIT_FSIZE, &limit) == 0);
+        Config consent;
+        assert(!apply_moondream_analytics(consent, path, true));
+        assert(!consent.moondream_analytics);
+        assert(get(path) == before_failed_flush); // original config is never replaced
+        for (const auto& entry : std::filesystem::directory_iterator(path.parent_path()))
+            assert(!entry.path().filename().string().starts_with("config.json.tmp."));
+        ::_exit(0);
+    }
+    int flush_status = 0;
+    assert(::waitpid(flush_child, &flush_status, 0) == flush_child);
+    assert(WIFEXITED(flush_status) && WEXITSTATUS(flush_status) == 0);
+    assert(get(path) == before_failed_flush);
+    assert(!load_config(path).moondream_analytics);
+    for (const auto* invalid : {R"({"moondream_analytics":"true"})", R"({"moondream_analytics":0})",
+                               R"({"moondream_analytics":1})", R"({"moondream_analytics":null})",
+                               R"({"moondream_analytics":[]})", R"({"moondream_analytics":{}})",
+                               R"({"moondream_analytics":true,"moondream_analytics":false})"}) {
+        put(path, invalid);
+        fails([&] { load_config(path); });
+        assert(!save_moondream_analytics(path, true));
+        assert(!save_moondream_analytics(path, false));
+        assert(get(path) == invalid);
+    }
+    put(path, R"({"unknown_setting":{"keep":"verbatim"},"moondream_analytics":true})");
+    const auto unknown_analytics_config = get(path);
+    fails([&] { load_config(path); });
+    assert(!save_moondream_analytics(path, false));
+    assert(get(path) == unknown_analytics_config); // never erase unknown customizations
+    put(path, "{\n  \"font\":\"escaped \\u0061\", \"moondream_analytics\":false, \"theme\":{\"ink\":\"#123ABC\"}\n}\n");
+    assert(save_moondream_analytics(path, true));
+    assert(get(path) == "{\n  \"font\":\"escaped \\u0061\", \"moondream_analytics\":true, \"theme\":{\"ink\":\"#123ABC\"}\n}\n");
+    auto analytics_config = load_config(path);
+    assert(!apply_moondream_analytics(analytics_config, {}, false));
+    assert(!analytics_config.moondream_analytics); // failed disable still stops this session
+    assert(load_config(path).moondream_analytics); // callers must disclose next-launch risk
+    assert(!apply_moondream_analytics(analytics_config, {}, true));
+    assert(!analytics_config.moondream_analytics); // never enable after failed save
+    assert(!apply_moondream_analytics(analytics_config, path / "not-a-directory", true));
+    assert(!analytics_config.moondream_analytics);
+    assert(apply_moondream_analytics(analytics_config, path, false));
+    assert(!analytics_config.moondream_analytics && !load_config(path).moondream_analytics);
+    assert(apply_moondream_analytics(analytics_config, path, true));
+    assert(analytics_config.moondream_analytics && load_config(path).moondream_analytics);
+    const auto analytics_before = get(path);
+    assert(save_moondream_analytics(path, true) && get(path) == analytics_before);
+    assert(save_moondream_analytics(path, false));
     assert(save_backend(path, "fixture_cpu"));
     assert(load_config(path).backend == "fixture_cpu");
     assert(!save_backend(path, "../escaped") && !save_backend(path, "UPPER"));
@@ -132,6 +202,8 @@ int main(int argc, char** argv) {
     auto link = dir / "linked-config";
     std::filesystem::create_symlink(path, link);
     assert(!save_advanced_debug(link, false));
+    assert(!save_moondream_analytics(link, true));
+    assert(!save_moondream_analytics(link, false));
     assert(!save_auto_insert(link, true));
     assert(!save_close_mic_when_idle(link, true));
     assert(!save_lock_layout(link, true));
@@ -140,6 +212,7 @@ int main(int argc, char** argv) {
     put(path, R"({"font":")" + std::string(4090, 'x') + R"("})");
     before = get(path);
     assert(!save_advanced_debug(path, true) && get(path) == before);
+    assert(!save_moondream_analytics(path, true) && get(path) == before);
     put(path, R"({"input_priority":"experimental","advanced_debug":true})");
     auto experimental = load_config(path);
     assert(experimental.experimental_input_priority && experimental.advanced_debug);

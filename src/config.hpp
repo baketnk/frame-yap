@@ -28,6 +28,7 @@ struct Config {
     // Requests OpenVR's experimental global action priority; SteamVR must allow it too.
     bool experimental_input_priority = false;
     bool advanced_debug = false; // opt-in full diagnostic logging; never raw audio recording
+    bool moondream_analytics = false; // explicit opt-in to the speech runtime's outbound analytics
     bool auto_insert = false; // opt-in; runtime also requires uninterrupted verified Xwayland focus
     bool close_mic_when_idle = false; // default keeps the device open, discarding idle audio
     bool lock_layout = false; // hide the grab and scale handles when enabled
@@ -44,6 +45,10 @@ Config load_config(const std::filesystem::path& path);
 // Update only the selected boolean in an existing valid config; false on invalid/unwritable paths.
 // Other user customizations and formatting are retained; creates a minimal config if absent.
 bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept;
+bool save_moondream_analytics(const std::filesystem::path& path, bool enabled) noexcept;
+// Enabling takes effect only after persistence succeeds; disabling always takes
+// effect for this session. Returns whether the requested choice was saved.
+bool apply_moondream_analytics(Config& config, const std::filesystem::path& path, bool enabled) noexcept;
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_gradient_enabled(const std::filesystem::path& path, bool enabled) noexcept;
 bool save_close_mic_when_idle(const std::filesystem::path& path, bool enabled) noexcept;

@@ -18,6 +18,7 @@ struct SurfaceEvent {
     std::optional<Mount> mount;
     std::optional<bool> lasers_anytime;
     std::optional<bool> advanced_debug;
+    std::optional<bool> moondream_analytics;
     std::optional<bool> auto_insert;
     std::optional<bool> gradient_enabled;
     std::optional<bool> close_mic_when_idle;
@@ -79,6 +80,8 @@ public:
     void set_version(std::string version);
     void set_lasers_anytime(bool enabled);
     void set_advanced_debug(bool enabled);
+    // An unsaved disable remains OFF; clicking its retry control saves OFF again.
+    void set_moondream_analytics(bool enabled, bool unsaved_off = false);
     void set_auto_insert(bool enabled);
     void set_gradient_enabled(bool enabled);
     void set_close_mic_when_idle(bool enabled);
@@ -88,9 +91,13 @@ public:
     void set_binding_note(std::string note);
     void set_indicators(const StatusIndicators& indicators);
     bool available(UiAction action) const;
+    // Controller bindings obey the same consent gate as pointer controls.
+    // Cancel dismisses consent and stale pointer approval; EndRecord stays safe.
+    bool allow_bound_action(UiAction action);
     // Exact text rows currently shown in the consent viewport (empty outside it).
     // OpenVR has no screen-reader accessibility channel for this canvas.
     std::vector<std::string> visible_model_review_lines() const;
+    std::vector<std::string> visible_analytics_review_lines() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

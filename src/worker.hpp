@@ -29,11 +29,13 @@ public:
     void start(const std::string& python, const std::string& script,
                const std::string& model, int threads = 2, bool advanced_debug = false,
                const std::string& backend = {}, const std::string& manifest_dir = {},
-               const std::string& root = {});
+               const std::string& root = {}, bool moondream_analytics = false);
     bool ready() const;
     void submit(uint64_t id, const std::vector<float>& pcm);
     std::optional<WorkerReply> poll();
-    void stop();
+    // Immediate revocation kills the owned process group without running a
+    // runtime's graceful analytics flush; the direct worker is reaped on return.
+    void stop(bool immediate = false);
 
 private:
     struct State;

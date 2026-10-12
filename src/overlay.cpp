@@ -91,6 +91,8 @@ struct Overlay::Impl {
     struct Persistence {
         std::filesystem::path settings_path, laser_settings_path;
         bool save_failed = false, debug_save_failed = false, auto_save_failed = false;
+        bool analytics_save_failed = false, analytics_disable_unsaved = false;
+        bool analytics_disable_pending = false;
         bool layout_save_failed = false, mic_save_failed = false, gradient_save_failed = false, laser_change_failed = false;
         bool placement_save_failed = false;
         bool persist_mount = true;
@@ -244,6 +246,7 @@ struct Overlay::Impl {
             surface.set_lasers_anytime(lasers_anytime);
             surface.set_wrist_world_fallback(config.wrist_world_fallback);
             surface.set_advanced_debug(config.advanced_debug);
+            surface.set_moondream_analytics(config.moondream_analytics);
             surface.set_auto_insert(config.auto_insert);
             surface.set_gradient_enabled(config.gradient.enabled);
             surface.set_close_mic_when_idle(config.close_mic_when_idle);
@@ -327,7 +330,9 @@ struct Overlay::Impl {
         const Mount effective = *selected;
         if (effective == Mount::World && applied_mount && *applied_mount != Mount::World)
             world_ready = false; // a fresh world fallback near the wearer, not an old room location
-        std::string note = persistence.placement_save_failed ? "Placement not saved; using it only for this session." :
+        std::string note = persistence.analytics_disable_unsaved ? "Analytics OFF this session; save failed. Could be ON next launch. Click Save analytics OFF to retry." :
+                           persistence.analytics_save_failed ? "Could not save analytics preference; analytics remain OFF." :
+                           persistence.placement_save_failed ? "Placement not saved; using it only for this session." :
                            persistence.mic_save_failed ? "Mic preference not saved; using it only for this session." :
                            persistence.gradient_save_failed ? "Could not save background setting." :
                            persistence.layout_save_failed ? "Layout lock not saved; using it only for this session." :
@@ -335,7 +340,7 @@ struct Overlay::Impl {
                            persistence.debug_save_failed ? "Debug preference not saved; using it only for this session." :
                            persistence.laser_change_failed ? "SteamVR declined the laser mode change." :
                            persistence.save_failed ? "Preference could not be saved; using it for this session." : "";
-        if (effective != mount) note = persistence.save_failed ? "Wrist untracked; world fallback. Preference not saved." :
+        if (effective != mount && !persistence.analytics_save_failed) note = persistence.save_failed ? "Wrist untracked; world fallback. Preference not saved." :
                                                      "Wrist not tracked - using world space until it returns.";
         if (effective == Mount::World && !world_ready) {
             const auto& hmd = poses[vr::k_unTrackedDeviceIndex_Hmd];
@@ -703,7 +708,7 @@ struct Overlay::Impl {
                 diagnostics.last_pointer_event = "up button=" + std::to_string(event.data.mouse.button);
                 if (event.data.mouse.button == vr::VRMouseButton_Left) {
                     auto event_result = surface.pointer_up(event.data.mouse.cursorIndex, event.data.mouse.x, H - event.data.mouse.y);
-                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.launch_companion || event_result.check_updates || event_result.install_update || event_result.advanced_debug || event_result.auto_insert || event_result.gradient_enabled || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
+                    if (event_result.action || event_result.mount || event_result.recenter || event_result.lasers_anytime || event_result.open_bindings || event_result.launch_companion || event_result.check_updates || event_result.install_update || event_result.advanced_debug || event_result.moondream_analytics || event_result.auto_insert || event_result.gradient_enabled || event_result.close_mic_when_idle || event_result.lock_layout || event_result.wrist_world_fallback || event_result.clock_24h || event_result.date_format || event_result.model_action) ++diagnostics.pointer_actions;
                     if (event_result.action) result.push_back(*event_result.action);
                     if (event_result.check_updates) {
                         update_version.clear();
@@ -779,6 +784,26 @@ struct Overlay::Impl {
                         reset_input(result);
                         // Runtime observes the change before handling this batch,
                         // restarts its worker and invalidates pending work/actions.
+                        return result;
+                    }
+                    if (event_result.moondream_analytics) {
+                        const bool enabled = *event_result.moondream_analytics;
+                        if (!enabled) {
+                            // No filesystem work here: return effective OFF to
+                            // the runtime so it stops the opted-in worker first.
+                            config.moondream_analytics = false;
+                            persistence.analytics_disable_pending = true;
+                        } else {
+                            // Non-persistent overlays cannot opt in. An ON
+                            // worker starts only after a successful config write.
+                            persistence.analytics_save_failed = !apply_moondream_analytics(config,
+                                persistence.persist_mount ? default_config_path() : std::filesystem::path{}, true);
+                            persistence.analytics_disable_unsaved = false;
+                        }
+                        surface.set_moondream_analytics(config.moondream_analytics, persistence.analytics_disable_unsaved);
+                        reset_input(result);
+                        // Runtime observes effective consent before handling this
+                        // batch and replaces the worker, discarding pending work.
                         return result;
                     }
                     if (event_result.open_bindings) {
@@ -872,28 +897,40 @@ struct Overlay::Impl {
         auto [la, ld] = digital(0);
         auto [ra, rd] = digital(1);
         const auto now = DoubleTap::Clock::now();
-        if (left.update(la && focus, ld, available(UiAction::Enter), now)) result.push_back(UiAction::Enter);
-        switch (right.update(ra && focus && !panel.quick_open, rd, now)) {
-        case GripRecord::Change::Begin: grip_capture = true; result.push_back(UiAction::BeginRecord); break;
-        case GripRecord::Change::End: grip_capture = false; result.push_back(UiAction::EndRecord); break;
-        case GripRecord::Change::Cancel: grip_capture = false; result.push_back(UiAction::Cancel); break;
+        auto bound_action = [&](UiAction action) {
+            if (!surface.allow_bound_action(action)) return false;
+            if (action == UiAction::Cancel) {
+                reset_input(result); // no later release from a cancelled PTT/grip
+                if (!result.empty() && result.back() == UiAction::Cancel) return true;
+            }
+            result.push_back(action);
+            return true;
+        };
+        if (left.update(la && focus, ld, available(UiAction::Enter), now)) bound_action(UiAction::Enter);
+        switch (right.update(ra && focus && !panel.quick_open &&
+                             (grip_capture || available(UiAction::Record)), rd, now)) {
+        case GripRecord::Change::Begin: grip_capture = bound_action(UiAction::BeginRecord); break;
+        case GripRecord::Change::End: grip_capture = false; bound_action(UiAction::EndRecord); break;
+        case GripRecord::Change::Cancel: grip_capture = false; bound_action(UiAction::Cancel); break;
         case GripRecord::Change::None: break;
         }
         constexpr std::array<UiAction, 5> mapped{{UiAction::Record, UiAction::Cancel, UiAction::Insert, UiAction::Enter, UiAction::QuickChat}};
         for (size_t i = 0; i < edges.size(); ++i) {
             auto [active, down] = digital(i + 2);
-            if (i == 0 && (!active || !focus || !panel.enabled || panel.quick_open) && edges[i].reset()) {
-                ptt_capture = false; result.push_back(UiAction::Cancel);
+            const bool record_allowed = ptt_capture || available(UiAction::Record);
+            if (i == 0 && (!active || !focus || !panel.enabled || panel.quick_open || !record_allowed) && edges[i].reset()) {
+                ptt_capture = false; bound_action(UiAction::Cancel);
             }
-            auto change = edges[i].update(active && focus && ((panel.enabled && (i != 0 || !panel.quick_open)) || i == 1), down);
+            auto change = edges[i].update(active && focus &&
+                ((panel.enabled && (i != 0 || (!panel.quick_open && record_allowed))) || i == 1), down);
             if (i == 0) {
                 if (change == NeutralEdge::Change::Down) {
-                    ptt_capture = true; result.push_back(UiAction::BeginRecord);
+                    ptt_capture = bound_action(UiAction::BeginRecord);
                 } else if (change == NeutralEdge::Change::Up) {
-                    ptt_capture = false; result.push_back(UiAction::EndRecord);
+                    ptt_capture = false; bound_action(UiAction::EndRecord);
                 }
             } else if (change == NeutralEdge::Change::Down && available(mapped[i])) {
-                result.push_back(mapped[i]);
+                bound_action(mapped[i]);
             }
         }
         return result;
@@ -911,6 +948,16 @@ std::vector<ModelAction> Overlay::take_model_actions() {
 }
 void Overlay::draw(const Panel& panel) { impl_->draw(panel); }
 bool Overlay::advanced_debug() const { return impl_->config.advanced_debug; }
+bool Overlay::moondream_analytics() const { return impl_->config.moondream_analytics; }
+void Overlay::flush_pending_analytics_save() {
+    auto& persistence = impl_->persistence;
+    if (!persistence.analytics_disable_pending) return;
+    persistence.analytics_disable_pending = false;
+    persistence.analytics_save_failed = !save_moondream_analytics(
+        persistence.persist_mount ? default_config_path() : std::filesystem::path{}, false);
+    persistence.analytics_disable_unsaved = persistence.analytics_save_failed;
+    impl_->surface.set_moondream_analytics(false, persistence.analytics_disable_unsaved);
+}
 bool Overlay::auto_insert() const { return impl_->config.auto_insert; }
 bool Overlay::close_mic_when_idle() const { return impl_->config.close_mic_when_idle; }
 const std::vector<std::string>& Overlay::quick_inputs() const { return impl_->config.quick_inputs; }

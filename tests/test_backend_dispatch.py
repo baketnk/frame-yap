@@ -23,6 +23,8 @@ write = sys.stdout.buffer.write
 assert len(sys.argv) in (3, 4), 'generic backend received unsupported flags'
 if os.environ.get('FRAMEYAP_ADVANCED_DEBUG') != '0':
     raise AssertionError('generic launcher must not receive Redux debug opt-in')
+if os.environ.get('FRAMEYAP_MOONDREAM_ANALYTICS') != '0':
+    raise AssertionError('generic launcher must not receive Redux analytics opt-in')
 if os.environ.get('FAKE_PID_PATH'):
     import signal
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
@@ -84,7 +86,7 @@ class BackendDispatchTest(unittest.TestCase):
                     '--backend', 'fake', '--root', str(root), '--python', sys.executable,
                     '--manifest-dir', str(root / 'assets/backends'), '--model', str(model),
                     '--clip-dir', str(clip), '--threads', '2']
-            env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1'}
+            env = {**os.environ, 'PYTHONDONTWRITEBYTECODE': '1', 'FRAMEYAP_MOONDREAM_ANALYTICS': '1'}
             with subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, env=env) as child:
                 self.assertEqual(read_frame(child.stdout), b'Y')
@@ -106,6 +108,45 @@ class BackendDispatchTest(unittest.TestCase):
                 self.assertEqual(read_frame(child.stdout), b'FM')
                 child.stdin.close()
                 self.assertEqual(child.wait(timeout=5), 1)
+
+    def test_redux_analytics_choice_and_privacy_failure_forwarding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            manifests = root / 'assets/backends'
+            manifests.mkdir(parents=True)
+            launcher = root / 'python/frameyap/worker.py'
+            launcher.parent.mkdir(parents=True)
+            model = root / 'model'
+            model.mkdir()
+            (model / 'fixture').write_bytes(b'fixture')
+            clip = root / 'clip'
+            clip.mkdir(mode=0o700)
+            manifest = {
+                'schema': 1, 'id': 'redux', 'display_name': 'Fixture Redux',
+                'launcher': {'type': 'python', 'path': 'python/frameyap/worker.py',
+                    'arguments': ['{model_dir}', '{clip_dir}'], 'protocol': 'frameyap-worker-v1'},
+                'model': {'source': 'https://example.org/fixture', 'revision': 'v1',
+                    'files': [{'path': 'fixture', 'size': 7, 'sha256': hashlib.sha256(b'fixture').hexdigest()}]},
+                'attribution': 'Fixture', 'license': {'id': 'MIT', 'text': 'Fixture'},
+                'requirements': {'cpu': 'None', 'gpu': 'None'}}
+            (manifests / 'redux.json').write_text(json.dumps(manifest))
+            argv = [sys.executable, str(ROOT / 'python/frameyap/backend_worker.py'),
+                '--backend', 'redux', '--root', str(root), '--python', sys.executable,
+                '--manifest-dir', str(manifests), '--model', str(model), '--clip-dir', str(clip), '--threads', '2']
+            for value in ('0', '1', 'invalid'):
+                expected = '1' if value == '1' else '0'
+                launcher.write_text("import os, struct, sys\n"
+                    + f"assert os.environ.get('FRAMEYAP_MOONDREAM_ANALYTICS') == {expected!r}\n"
+                    + "sys.stdout.buffer.write(struct.pack('<I', 1) + b'Y'); sys.stdout.buffer.flush()\n"
+                    + "sys.stdin.buffer.read()\n")
+                result = subprocess.run(argv, input=b'', capture_output=True, timeout=5,
+                    env={**os.environ, 'FRAMEYAP_MOONDREAM_ANALYTICS': value})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, frame(b'Y'))
+            launcher.write_text("import struct, sys\nsys.stdout.buffer.write(struct.pack('<I', 2) + b'FP')\n")
+            result = subprocess.run(argv, input=b'', capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(result.stdout, frame(b'FP'))
 
     def test_status_consent_digest_rejected_before_installer_on_same_id_change(self):
         with tempfile.TemporaryDirectory() as temp:

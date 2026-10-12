@@ -169,6 +169,10 @@ void write_file(const std::filesystem::path& path, const std::string& content, b
             std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
             out << content;
             if (!out) throw std::runtime_error("Could not write file: " + path.string());
+            out.flush();
+            if (!out) throw std::runtime_error("Could not flush file: " + path.string());
+            out.close();
+            if (!out) throw std::runtime_error("Could not close file: " + path.string());
         }
         if (private_file) std::filesystem::permissions(temporary, std::filesystem::perms::owner_read |
             std::filesystem::perms::owner_write, std::filesystem::perm_options::replace);
@@ -206,6 +210,9 @@ Config load_config(const std::filesystem::path& path) {
         } else if (key == "advanced_debug") {
             if (!value.is_bool) throw std::runtime_error("Config advanced_debug must be a boolean");
             config.advanced_debug = value.value == "true";
+        } else if (key == "moondream_analytics") {
+            if (!value.is_bool) throw std::runtime_error("Config moondream_analytics must be a boolean");
+            config.moondream_analytics = value.value == "true";
         } else if (key == "auto_insert") {
             if (!value.is_bool) throw std::runtime_error("Config auto_insert must be a boolean");
             config.auto_insert = value.value == "true";
@@ -358,6 +365,15 @@ bool save_bool_option(const std::filesystem::path& path, std::string_view key, b
 } // namespace
 bool save_advanced_debug(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "advanced_debug", enabled);
+}
+bool save_moondream_analytics(const std::filesystem::path& path, bool enabled) noexcept {
+    return save_bool_option(path, "moondream_analytics", enabled);
+}
+bool apply_moondream_analytics(Config& config, const std::filesystem::path& path, bool enabled) noexcept {
+    if (!enabled) config.moondream_analytics = false;
+    const bool saved = save_moondream_analytics(path, enabled);
+    if (saved) config.moondream_analytics = enabled;
+    return saved;
 }
 bool save_auto_insert(const std::filesystem::path& path, bool enabled) noexcept {
     return save_bool_option(path, "auto_insert", enabled);

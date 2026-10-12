@@ -2,6 +2,7 @@
   "font": "",
   "input_priority": "normal",
   "advanced_debug": false,
+  "moondream_analytics": false,
   "auto_insert": false,
   "close_mic_when_idle": false,
   "backend": "redux",

@@ -6,7 +6,8 @@ supply the optional `backend`, `manifest_dir`, `root` arguments for the manifest
 dispatcher. Poll until `ready()`, then `submit(id, pcm)` and poll for one
 `WorkerReply` (text or privacy-safe per-request error). One request at a time;
 no queue, no capture and no input injection. `stop()` discards pending audio,
-terminates/reaps **only its direct child** (TERM, bounded 500 ms, then KILL),
+terminates/reaps its direct child (TERM, bounded 500 ms, then KILL),
+and kills remaining processes in its dedicated owned worker group,
 and is safe to repeat. Destruction stops it. `start()` returns without waiting
 for model load; `poll()` reports warmup/load/crash/timeout/protocol errors by
 throwing, then stops. Launch uses `posix_spawn`, safe with the host's OpenVR/SDL
@@ -35,7 +36,7 @@ The private pipes use unsigned LE32 payload lengths (1..65536), a one-byte
 message type and, for requests/replies, unsigned LE64 request ID. `T` + ID
 requests reading the fixed clip; `Y` means ready; `F` means load failure
 (`M` for missing/mismatched pinned model or private clip directory, `I` for a
-missing Python dependency, `D` for runtime/model load failure); `R` + ID + UTF-8
+missing Python dependency, `P` for unavailable telemetry protection, `D` for runtime/model load failure); `R` + ID + UTF-8
 text and `E` + ID + privacy-safe UTF-8 error are replies. Text is at most 4096
 bytes. An unexpected or duplicate reply, wrong ID, extra frame, closed pipe
 or oversized frame stops the worker. A correlated `E` reply or an invalid
@@ -85,6 +86,61 @@ Native-only archives do not bundle the runtime; the explicit
 (see [packaging](packaging.md) and [third-party notes](third-party.md)). No public runtime bundle has been released.
 Limited ARM64 measurements were taken during development; they are not a claim
 of complete headset acceptance.
+
+## Moondream analytics
+
+The persistent `moondream_analytics` boolean defaults to false, including when
+absent from existing config. Settings requires a rendered disclosure and Confirm
+Enable before saving true; failed enabling saves leave it off. Disabling takes
+effect in-session even if saving fails, with an explicit next-launch warning and
+retry control. The native controller passes the effective setting before its first
+warmup and every restart. It overwrites inherited `FRAMEYAP_MOONDREAM_ANALYTICS`;
+the manifest dispatcher forwards opt-in only to the known Redux Python launcher.
+Direct worker invocation treats only environment value `1` as enabled; missing
+or malformed values are off. Manual config edits are read on application restart.
+
+With analytics off, the worker verifies moondream 2.4.0 and Kestrel 0.8.0 and the
+private reporter coroutine interface, then replaces `PhotonReporter._flush_window`
+with an async no-op before engine construction. Startup, periodic, shutdown and
+nonrotating authentication-retry uploads share that method. It returns no account
+standing, disabling cloud finetune authentication; FrameYap only uses the local
+base Redux model. Incompatible versions/interfaces emit `F/P` and do not start
+inference. Missing packages retain the existing `F/I` error. Enabled analytics
+leave upstream behavior untouched, including its allowlisted API-base override
+(`https://api-staging.moondream.ai`) and use of an inherited `MOONDREAM_API_KEY`
+authentication header if present. FrameYap's local model needs no API key.
+No installed package files are changed.
+
+OFF persistence is deferred until after the old worker is stopped; a slow or
+failed config write cannot keep the old enabled reporter running. Enabling
+requires successful write, flush, close and rename before becoming effective.
+
+Changing analytics cancels audio/review/queued delivery and immediately kills the
+owned worker process group before closing its pipes, without graceful telemetry
+hooks. The direct worker is reaped before replacement starts with the new choice.
+Already sent/in-flight network requests cannot be recalled. Normal shutdown still
+uses the existing bounded TERM/KILL cleanup. This is worker-scoped protection,
+not an OS network sandbox or a guarantee about all native/transitive dependencies.
+
+Audit source: [Kestrel 0.8.0](https://pypi.org/project/kestrel/0.8.0/) wheel
+`kestrel/photon.py`, `kestrel/engine/core.py`, and
+[moondream 2.4.0](https://pypi.org/project/moondream/2.4.0/) `moondream/photon_vl.py`.
+The Kestrel wheel SHA-256 is
+`15c65bf12983d347330082838d4c6a9678a7f00c0f32ae089d9ccad7482e62bd`.
+Re-audit before changing the allowed versions: metadata/interface checks do not
+detect a locally modified package retaining its original version.
+
+Default offline tests cover config migration/persistence/failures, rendered opt-in
+consent and cancellation, initial worker policy, toggles during pending work,
+restart/cleanup, and version/interface failures. An optional exact-wheel test
+executes only the upstream reporter with fake HTTP/runtime modules, checking
+startup, idle periodic, shutdown and authentication retries in both states. It
+never uploads, loads a model, or downloads dependencies:
+
+```sh
+FRAMEYAP_TEST_KESTREL_WHEEL=/path/to/kestrel-0.8.0-py3-none-any.whl \
+  python3 -m unittest discover -s tests -p test_telemetry.py -v
+```
 
 ## Advanced debugging
 

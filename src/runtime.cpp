@@ -51,15 +51,15 @@ public:
         backend_ = std::move(backend); model_ = std::move(model);
         manifest_ = std::move(manifest); root_ = std::move(root);
     }
-    void start(bool advanced_debug) override {
+    void start(bool advanced_debug, bool moondream_analytics) override {
         const std::string script = backend_.empty() ? options_.worker : root_ + "/python/frameyap/backend_worker.py";
         worker_.start(options_.python, script, backend_.empty() ? options_.model : model_, options_.threads,
-                      advanced_debug, backend_, manifest_, root_);
+                      advanced_debug, backend_, manifest_, root_, moondream_analytics);
     }
     bool ready() const override { return worker_.ready(); }
     void submit(uint64_t id, const std::vector<float>& pcm) override { worker_.submit(id, pcm); }
     std::optional<WorkerReply> poll() override { return worker_.poll(); }
-    void stop() override { worker_.stop(); }
+    void stop(bool immediate = false) override { worker_.stop(immediate); }
 private:
     const Options& options_;
     Worker worker_;
@@ -139,7 +139,7 @@ int run(const Options& options) {
     paced.set_trace([&trace](const std::string& line) { trace(line); });
     Controller controller(audio, worker, acquire, [&trace] { return std::make_unique<NativeFocus>(trace); },
                           overlay.quick_inputs(), overlay.auto_insert(), overlay.advanced_debug(),
-                          overlay.close_mic_when_idle(), &paced);
+                          overlay.close_mic_when_idle(), &paced, overlay.moondream_analytics());
     namespace fs = std::filesystem;
     const auto root = asset_root(options.assets);
     const auto manifest = options.manifest_dir.empty() ? root / "assets/backends" : fs::path(options.manifest_dir);
@@ -164,6 +164,7 @@ int run(const Options& options) {
         controller.backend_changed(false, "Checking installed models offline. Recording unavailable until verified.");
     } else controller.initialize();
     bool previous_debug = overlay.advanced_debug();
+    bool previous_analytics = overlay.moondream_analytics();
     while (!controller.quitting() && !interrupted) {
         if (models) {
             models->poll();
@@ -197,6 +198,16 @@ int run(const Options& options) {
         overlay.draw(panel);
         auto actions = overlay.poll();
         const auto model_actions = overlay.take_model_actions();
+        const bool debug_changed = overlay.advanced_debug() != previous_debug;
+        const bool analytics_changed = overlay.moondream_analytics() != previous_analytics;
+        trace.set_enabled(overlay.advanced_debug());
+        // Apply privacy changes before any model action can restart a worker,
+        // including a settings/model click received in the same event batch.
+        controller.settings(overlay.auto_insert(), overlay.advanced_debug(), overlay.close_mic_when_idle(),
+                            overlay.moondream_analytics());
+        // Revocation must stop the old reporter before any potentially slow
+        // filesystem operation persists OFF. Enabling was saved before opt-in.
+        overlay.flush_pending_analytics_save();
         // A model-row click revokes the current clip/review even when it targets
         // the selected row, is rejected while busy, or carries stale consent.
         // Do not dispatch the Cancel/EndRecord generated when the overlay resets
@@ -232,11 +243,8 @@ int run(const Options& options) {
             controller.backend_changed(verified, verified ? "" :
                 "Selected model unavailable or being checked. Recording disabled until offline verification.");
         }
-        bool debug_changed = overlay.advanced_debug() != previous_debug;
-        trace.set_enabled(overlay.advanced_debug());
-        controller.settings(overlay.auto_insert(), overlay.advanced_debug(), overlay.close_mic_when_idle());
-        // Debug consent and model actions cancel work before any stale input.
-        if (debug_changed || !model_actions.empty()) {
+        // Privacy/debug consent and model actions cancel work before stale input.
+        if (debug_changed || analytics_changed || !model_actions.empty()) {
             for (auto action : actions) if (action == UiAction::Quit) controller.action(action);
         } else {
             for (auto action : actions) {
@@ -245,6 +253,7 @@ int run(const Options& options) {
             }
         }
         previous_debug = overlay.advanced_debug();
+        previous_analytics = overlay.moondream_analytics();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     controller.shutdown();

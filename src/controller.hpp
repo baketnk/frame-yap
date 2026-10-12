@@ -25,11 +25,11 @@ public:
 class ControllerWorker {
 public:
     virtual ~ControllerWorker() = default;
-    virtual void start(bool advanced_debug) = 0;
+    virtual void start(bool advanced_debug, bool moondream_analytics) = 0;
     virtual bool ready() const = 0;
     virtual void submit(uint64_t id, const std::vector<float>& pcm) = 0;
     virtual std::optional<WorkerReply> poll() = 0;
-    virtual void stop() = 0;
+    virtual void stop(bool immediate = false) = 0;
 };
 class ControllerFocus {
 public:
@@ -46,7 +46,7 @@ public:
                DeliveryFactory delivery, FocusFactory focus,
                std::vector<std::string> quick_inputs, bool auto_insert = false,
                bool advanced_debug = false, bool close_mic_when_idle = false,
-               PacedDelivery* paced = nullptr);
+               PacedDelivery* paced = nullptr, bool moondream_analytics = false);
     // Called explicitly by runtime, after setting up the UI. A failure is shown
     // in Panel and can be retried with Record.
     void initialize();
@@ -55,13 +55,14 @@ public:
     void backend_changed(bool verified, std::string detail = {});
     void tick(); // nonblocking poll of focus, worker, microphone; no UI or hardware setup
     Panel panel() const;
-    void settings(bool auto_insert, bool advanced_debug, bool close_mic_when_idle);
+    void settings(bool auto_insert, bool advanced_debug, bool close_mic_when_idle,
+                  bool moondream_analytics = false);
     void action(UiAction action);
     bool quitting() const { return quit_; }
     void shutdown(); // releases only injected resources; safe to call repeatedly
     State state() const { return session_.state(); }
 private:
-    void warm();
+    void warm(bool immediate = false);
     void start_record();
     void stop_record();
     void request_failed(const std::string& error);
@@ -81,7 +82,7 @@ private:
     std::string detail_, status_note_;
     bool quit_ = false, quick_open_ = false;
     size_t quick_selected_ = 0;
-    bool auto_insert_, advanced_debug_, close_mic_when_idle_;
+    bool auto_insert_, advanced_debug_, close_mic_when_idle_, moondream_analytics_;
     bool backend_available_ = true;
 };
 } // namespace frameyap

@@ -23,17 +23,18 @@ std::string state_label(State state) {
 Controller::Controller(ControllerAudio& audio, ControllerWorker& worker,
                        DeliveryFactory delivery, FocusFactory focus,
                        std::vector<std::string> quick_inputs, bool auto_insert,
-                       bool advanced_debug, bool close_mic_when_idle, PacedDelivery* paced)
+                       bool advanced_debug, bool close_mic_when_idle, PacedDelivery* paced,
+                       bool moondream_analytics)
     : audio_(audio), worker_(worker), delivery_(std::move(delivery)), paced_(paced),
       focus_factory_(std::move(focus)), quick_inputs_(std::move(quick_inputs)),
       auto_insert_(auto_insert), advanced_debug_(advanced_debug),
-      close_mic_when_idle_(close_mic_when_idle) {}
+      close_mic_when_idle_(close_mic_when_idle), moondream_analytics_(moondream_analytics) {}
 
-void Controller::warm() {
+void Controller::warm(bool immediate) {
     if (paced_) paced_->cancel();
     status_note_.clear(); quick_open_ = false;
-    armed_focus_.reset(); audio_.close(); worker_.stop(); session_ = Session{};
-    worker_.start(advanced_debug_);
+    armed_focus_.reset(); audio_.close(); worker_.stop(immediate); session_ = Session{};
+    worker_.start(advanced_debug_, moondream_analytics_);
     detail_ = "Loading local model; microphone closed. Record again when Ready.";
 }
 void Controller::initialize() {
@@ -258,8 +259,12 @@ Panel Controller::panel() const {
     if (result.recording) result.status += " - " + std::to_string(audio_.seconds()) + " / 20s";
     return result;
 }
-void Controller::settings(bool auto_insert, bool advanced_debug, bool close_mic_when_idle) {
-    const bool delivery_setting_changed = auto_insert_ != auto_insert || advanced_debug_ != advanced_debug;
+void Controller::settings(bool auto_insert, bool advanced_debug, bool close_mic_when_idle,
+                          bool moondream_analytics) {
+    const bool analytics_changed = moondream_analytics_ != moondream_analytics;
+    const bool worker_setting_changed = advanced_debug_ != advanced_debug ||
+                                        analytics_changed;
+    const bool delivery_setting_changed = auto_insert_ != auto_insert || worker_setting_changed;
     const bool was_partial = delivery_setting_changed && paced_ && paced_->began();
     if (auto_insert_ != auto_insert) {
         const bool partial = paced_ && paced_->began();
@@ -279,13 +284,20 @@ void Controller::settings(bool auto_insert, bool advanced_debug, bool close_mic_
         detail_ = close_mic_when_idle_ ? "Mic closes between clips. Opening on PTT may delay or clip speech." :
                                         "Mic stays open while idle; samples are discarded. Other apps may still hear you.";
     }
-    if (advanced_debug_ != advanced_debug) {
+    if (worker_setting_changed) {
         const bool partial = paced_ && paced_->began();
         advanced_debug_ = advanced_debug;
+        moondream_analytics_ = moondream_analytics;
+        // Revoke the current clip/review/delivery before starting with the new
+        // policy. warm() synchronously stops and reaps the previous worker.
         if (backend_available_) {
-            try { warm(); }
+            try { warm(analytics_changed); }
             catch (const std::exception& e) { session_.fail(); detail_ = e.what(); }
-        } else { if (paced_) paced_->cancel(); armed_focus_.reset(); audio_.close(); worker_.stop(); session_.fail(); }
+        } else {
+            if (paced_) paced_->cancel();
+            armed_focus_.reset(); audio_.close(); worker_.stop(analytics_changed); session_.fail();
+            quick_open_ = false; status_note_.clear();
+        }
         if (partial) {
             status_note_ = "Input stopped - partial delivery uncertain";
             detail_ += " Earlier input may have queued; remainder and Enter dropped.";
