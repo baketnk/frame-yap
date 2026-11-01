@@ -24,6 +24,19 @@ separately on the user's machine; they are not redistributed in the archive.
 | FreeType 2 | <https://freetype.org> | FreeType Project License (FTL) or GPL-2.0; FrameYap uses FTL |
 | Vulkan loader and drivers | System | Vary by vendor |
 
+## Runtime setup tools (separate explicit download)
+
+| Component | Upstream | License pointers |
+| --- | --- | --- |
+| uv | <https://github.com/astral-sh/uv> | MIT OR Apache-2.0; upstream `LICENSE-MIT` and `LICENSE-APACHE` |
+| uv-managed CPython 3.12 builds | [Astral python-build-standalone](https://github.com/astral-sh/python-build-standalone), [CPython](https://github.com/python/cpython) | [CPython license and history](https://docs.python.org/3.12/license.html); see the build project's licensing documentation and bundled third-party notices for additional libraries |
+
+Only explicit runtime consent authorizes this setup: reuse the user's uv or
+install it via <https://astral.sh/uv/install.sh>, then download managed Python.
+These tools/builds are not redistributed in FrameYap's archive. uv and exact
+Python bootstrap builds are not app-pinned; shared installations/caches are left
+in place on failure or uninstall. See [setup and trust details](packaging.md#speech-runtime).
+
 ## Voice recognition runtime (fetched by the user's install)
 
 | Component | Where | License |
@@ -37,8 +50,10 @@ separately on the user's machine; they are not redistributed in the archive.
 
 Versions seen working on Frame (ARM64, Python 3.12.3): moondream 2.4.0, kestrel
 0.8.0, kestrel-kernels 0.7.0, native 0.1.8, Torch 2.8.0+cpu. These are observed
-versions, not tested minimums. An unconstrained `pip install moondream` resolved
-CUDA-enabled Torch and NVIDIA wheels, so the CPU Torch wheel must be selected
-explicitly.
+versions, not tested minimums. This is historical pip-based installation evidence,
+not validation of the new uv path; real ARM64/Frame uv verification is pending.
+An unconstrained `pip install moondream` resolved CUDA-enabled Torch and NVIDIA
+wheels, so runtime setup explicitly selects CPU Torch before moondream (with
+Torch constrained), using `uv pip install` and binary wheels only.
 
 Model weights are downloaded only on an explicit request and are never committed.

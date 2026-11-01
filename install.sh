@@ -80,12 +80,18 @@ CONFIG_DEFAULTS = {
 RUNTIME_TORCH = "torch==2.8.0"
 RUNTIME_TORCH_INDEX = "https://download.pytorch.org/whl/cpu"
 RUNTIME_REQUIREMENT = "moondream==2.4.0"
-RUNTIME_DOWNLOAD = "about 200 MB of prebuilt wheels (CPU Torch is about 100 MB), roughly 1-1.5 GB on disk; no compilation"
-RUNTIME_PYTHON_RANGE = ((3, 10), (3, 14))  # moondream allows <3.15; CPU Torch 2.8.0 wheels stop at 3.13
+RUNTIME_PYTHON = "3.12"  # uv manages this independently of the installer's system Python.
+UV_INSTALLER_URL = "https://astral.sh/uv/install.sh"
+RUNTIME_DOWNLOAD = ("about 200 MB of prebuilt wheels, roughly 1-1.5 GB for the speech environment; "
+                    "also downloads uv from astral.sh and managed Python 3.12 if needed; no compilation")
 RUNTIME_NAME_RE = re.compile(r"cpu-[0-9]{14}\Z")
 RUNTIME_VERIFY = (
-    "import importlib.metadata as m, torch\n"
+    "import sys, importlib.metadata as m, torch\n"
+    "assert sys.version_info[:2] == (3, 12), 'Python 3.12 required'\n"
     "assert torch.version.cuda is None, 'CUDA Torch was installed; CPU build required'\n"
+    "assert m.version('torch').split('+')[0] == '2.8.0', 'unexpected Torch version'\n"
+    "assert m.version('moondream') == '2.4.0', 'unexpected moondream version'\n"
+    "assert m.version('kestrel') == '0.8.0', 'unexpected Kestrel version'\n"
     "import moondream\n"
     "print('moondream', m.version('moondream'), 'kestrel', m.version('kestrel'), 'torch', torch.__version__)\n")
 COLOR_RE = re.compile(r"#[0-9a-fA-F]{6}\Z")
@@ -294,10 +300,11 @@ def release_name(version):
 
 
 def download(url, destination):
-    subprocess.run(["curl", "--fail", "--silent", "--show-error", "--location", "--proto", "=https",
+    # Keep user curl write-out/config and interactive input out of the JSON protocol.
+    subprocess.run(["curl", "--disable", "--fail", "--silent", "--show-error", "--location", "--proto", "=https",
                     "--proto-redir", "=https", "--tlsv1.2", "--max-filesize",
                     str(4096 if url.endswith(".sha256") else ARCHIVE_LIMIT),
-                    "--output", str(destination), url], check=True)
+                    "--output", str(destination), url], check=True, stdout=sys.stderr, stdin=subprocess.DEVNULL)
 
 
 def verify_members(archive):
@@ -692,38 +699,93 @@ def install_model(args, root):
         print(f"Backend {backend.id} model verified at {dest}; license {backend.license_id}.")
 
 
-def runtime_step(args, name, command):
+def runtime_step(args, name, command, *, env=None):
     if args.json:
         print(json.dumps({"ok": True, "event": "runtime_step", "step": name}), flush=True)
     else:
         print(f"[runtime] {name}", flush=True)
     # Tool output goes to stderr so --json stdout stays one event per line.
-    subprocess.run(command, check=True, stdout=sys.stderr, stdin=subprocess.DEVNULL)
+    subprocess.run(command, check=True, stdout=sys.stderr, stdin=subprocess.DEVNULL, env=env)
+
+
+def uv_install_dir():
+    # Match Astral's normal Unix installer destination, not a FrameYap-private copy.
+    explicit = os.environ.get("UV_INSTALL_DIR") or os.environ.get("XDG_BIN_HOME")
+    if explicit:
+        return Path(os.path.abspath(os.path.expanduser(explicit)))
+    data = os.environ.get("XDG_DATA_HOME")
+    return (Path(os.path.abspath(data)).parent / "bin" if data else Path.home() / ".local/bin")
+
+
+def find_uv():
+    found = shutil.which("uv")
+    if not found:
+        # A desktop terminal may not yet have sourced the user's uv PATH addition.
+        for directory in (uv_install_dir(), Path.home() / ".local/bin", Path.home() / ".cargo/bin"):
+            found = shutil.which("uv", path=str(directory))
+            if found:
+                break
+    return str(Path(found).absolute()) if found else None
+
+
+def uv_environment():
+    # Keep shared storage (including the user's location overrides), but do not let
+    # ambient resolver/index/venv options change the selected CPU runtime or target.
+    storage = {"UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_CACHE_DIR"}
+    return {key: value for key, value in os.environ.items()
+            if (not key.startswith(("UV_", "PIP_", "PYTHON")) or key in storage)
+            and key not in ("VIRTUAL_ENV", "CONDA_PREFIX")}
+
+
+def ensure_uv(args, env):
+    uv = find_uv()
+    if uv:
+        return uv
+    directory = uv_install_dir()
+    destination = directory / "uv"
+    if destination.exists() or destination.is_symlink():
+        fail(f"uv is not executable at {destination}; repair it before installing the runtime")
+    # Only called under --install-runtime --yes and the install lock. The ordinary
+    # upstream installer owns uv/uvx and its shell setup; we never remove them.
+    with tempfile.TemporaryDirectory(prefix="frameyap-uv-") as temporary:
+        script = Path(temporary) / "install.sh"
+        download(UV_INSTALLER_URL, script)
+        bootstrap_env = {**env, "UV_INSTALL_DIR": str(directory)}
+        if "UV_NO_MODIFY_PATH" in os.environ:
+            bootstrap_env["UV_NO_MODIFY_PATH"] = os.environ["UV_NO_MODIFY_PATH"]
+        runtime_step(args, "install uv for your user", ["sh", str(script)], env=bootstrap_env)
+    uv = shutil.which("uv", path=str(directory))
+    if not uv:
+        fail(f"uv installation did not provide {destination}; install uv and retry --install-runtime --yes")
+    return str(Path(uv).absolute())
 
 
 def install_runtime(args, root):
-    low, high = RUNTIME_PYTHON_RANGE
-    if not low <= sys.version_info[:2] < high:
-        fail("the runtime needs Python 3.10-3.13 (CPU Torch 2.8.0 wheels); found " + platform.python_version())
-    if importlib.util.find_spec("venv") is None or importlib.util.find_spec("ensurepip") is None:
-        fail("python3 cannot create a virtual environment (venv/ensurepip missing); no packages installed")
     runtimes = root / "runtimes"
     owned_dir(runtimes)
     target = runtimes / datetime.now().strftime("cpu-%Y%m%d%H%M%S")
     if target.exists() or target.is_symlink():
         fail(f"runtime directory already exists: {target}")
     python = target / "bin/python3"
-    # --isolated ignores user pip config/env indexes; binary-only avoids compilers.
-    pip = [str(python), "-m", "pip", "--isolated", "--disable-pip-version-check", "--no-input",
-           "install", "--only-binary=:all:"]
+    env = uv_environment()
     try:
         with model_download_cancellation("runtime installation cancelled"):
-            runtime_step(args, "create virtual environment", [sys.executable, "-m", "venv", str(target)])
-            runtime_step(args, "install CPU Torch", pip + ["--index-url", RUNTIME_TORCH_INDEX, RUNTIME_TORCH])
+            uv = ensure_uv(args, env)
+            runtime_step(args, "create Python 3.12 virtual environment",
+                         [uv, "--no-config", "venv", "--no-project", "--managed-python",
+                          "--python", RUNTIME_PYTHON, str(target)], env=env)
+            # Explicit target, indexes and binary-only installs; uv's normal shared
+            # Python store/cache remain outside this venv and survive its removal.
+            pip = [uv, "--no-config", "pip", "install", "--python", str(python),
+                   "--no-python-downloads", "--only-binary=:all:"]
+            runtime_step(args, "install CPU Torch",
+                         pip + ["--index-url", RUNTIME_TORCH_INDEX, RUNTIME_TORCH], env=env)
             constraints = target / "frameyap-constraints.txt"
             constraints.write_text(RUNTIME_TORCH + "\n")
-            runtime_step(args, "install moondream/Kestrel", pip + ["--constraint", str(constraints), RUNTIME_REQUIREMENT])
-            runtime_step(args, "verify CPU runtime imports", [str(python), "-c", RUNTIME_VERIFY])
+            runtime_step(args, "install moondream/Kestrel",
+                         pip + ["--index-url", "https://pypi.org/simple", "--constraint",
+                                str(constraints), RUNTIME_REQUIREMENT], env=env)
+            runtime_step(args, "verify CPU runtime imports", [str(python), "-I", "-c", RUNTIME_VERIFY], env=env)
     except BaseException:
         shutil.rmtree(target, ignore_errors=True)
         raise
@@ -948,7 +1010,7 @@ def resolve_args(argv):
     action.add_argument("--uninstall", action="store_true")
     action.add_argument("--install-model", action="store_true", help="explicit model provisioning for installed backend")
     action.add_argument("--install-runtime", action="store_true",
-                        help="explicit pip install of the pinned CPU Python runtime into a user-local venv")
+                        help="install the CPU runtime with uv and managed Python 3.12 (installs user-level uv if missing)")
     parser.add_argument("--mode", choices=("binary", "source"), default="binary")
     parser.add_argument("--source", help="explicit local FrameYap source tree (source mode only)")
     parser.add_argument("--openvr-root", help="local OpenVR SDK root (source mode)")
@@ -1046,8 +1108,11 @@ def main(argv=None):
                           installed_manifest_sha256=manifest_sha)
         if args.install_runtime:
             data = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share").expanduser().absolute()
-            result.update(runtime_dir=str(data / "frameyap/runtimes"), base_python=sys.executable,
-                          base_python_version=platform.python_version(),
+            result.update(runtime_dir=str(data / "frameyap/runtimes"), bootstrap_python=sys.executable,
+                          bootstrap_python_version=platform.python_version(),
+                          runtime_python=RUNTIME_PYTHON, python_provider="uv-managed",
+                          uv=find_uv(), uv_install_dir=str(uv_install_dir()), uv_installer_url=UV_INSTALLER_URL,
+                          uv_install_if_missing=True, uv_storage="shared user Python store and package cache",
                           packages=[RUNTIME_TORCH + " from " + RUNTIME_TORCH_INDEX, RUNTIME_REQUIREMENT + " from PyPI"],
                           download=RUNTIME_DOWNLOAD, paths_config=str(paths_config_path()))
         if args.json:
@@ -1160,7 +1225,7 @@ def optional_steps(steps):
     # Each download is described and separately approved; nothing is fetched on a default.
     if ask_yes_no("Download the Parakeet Redux speech model (about 180 MB, CC-BY-4.0) from Hugging Face?"):
         steps.append(["--install-model", "--backend", "redux", "--yes"])
-    if ask_yes_no("Install the CPU Python runtime with pip (" + RUNTIME_DOWNLOAD + ")?"):
+    if ask_yes_no("Install the CPU Python runtime with uv (" + RUNTIME_DOWNLOAD + ")?"):
         steps.append(["--install-runtime", "--yes"])
     print("Equivalent commands:")
     for step in steps:

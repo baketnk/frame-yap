@@ -54,9 +54,9 @@ else
     printf '%s\n' 'Git: missing (not required for a release install)'
 fi
 if command -v uv >/dev/null 2>&1; then
-    printf '%s\n' 'uv: found (not required for a bundled runtime)'
+    printf '%s\n' 'uv: found on PATH (optional at preflight; explicit runtime setup reuses it)'
 else
-    printf '%s\n' 'uv: missing (not required for a bundled runtime)'
+    printf '%s\n' 'uv: not on PATH (optional at preflight; runtime setup checks user bin, then installs shared uv if needed)'
 fi
 
 if command -v python3 >/dev/null 2>&1; then

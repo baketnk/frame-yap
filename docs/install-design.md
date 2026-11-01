@@ -8,16 +8,19 @@ runs the attended flow. A clean-install check on Frame is the remaining gate.
 The local installer has binary-archive and explicitly provisioned source-build
 modes, machine-readable plans/results and an attended TTY path. The native-only
 artifact does not include an ASR runtime; a separate explicit
-`--install-runtime --yes` step pip-installs the pinned CPU runtime into a
-user-local venv. Install, model and runtime are still three commands. See [packaging](packaging.md) for exact
-flags and [third-party notes](third-party.md).
+`--install-runtime --yes` step uses shared user-level uv and uv-managed CPython
+3.12 to install the pinned CPU speech packages into a dedicated FrameYap venv.
+App, model and runtime installs remain separate consented steps. See
+[packaging](packaging.md) for exact flags and [third-party notes](third-party.md).
 
 `scripts/install-preflight.sh` is a read-only Linux ARM64/glibc/bootstrap check;
 `--source` adds toolchain/library checks. It does not download, install, register,
 or certify model/runtime compatibility or a minimum libc version. Its report of
-Python/Git/uv availability is not a runtime guarantee: `install.sh` currently
-needs Python 3.12+ **for its bootstrap**, while native-only voice inference needs
-a separately provisioned compatible CPU Python environment and pinned weights.
+Python/Git/uv availability is not a runtime guarantee: the installer and updater
+need system Python 3.12+ **for their bootstrap**, while voice inference uses a
+separately provisioned CPU environment and pinned weights. uv is optional at
+preflight: explicit runtime setup reuses it from `PATH` or the normal user bin,
+or installs it if missing. Preflight itself never bootstraps uv or Python.
 
 ## OpenVR identity
 
@@ -56,9 +59,24 @@ already be available for registration; never start/restart it for installation.
   second **Confirm Install** click; the installed/native UI route still needs
   clean-target and headset acceptance. `--without-model` permits an
   archive install without bundled model files. Neither operation installs Torch,
-  moondream or Kestrel; only `--install-runtime --yes` does (see packaging). Launch paths to an independently
-  authorized runtime/model can be set in `paths.conf`.
-- **Noninteractive**: supply flags and `--yes` for network/model consent.
+  moondream or Kestrel. Launch paths to an independently authorized runtime/model
+  can be set in `paths.conf`.
+- **Runtime**: only explicit `--install-runtime --yes` (or attended runtime
+  consent) provisions speech packages. If uv is missing, setup downloads/runs
+  <https://astral.sh/uv/install.sh> for standard shared user-level uv; the script
+  may modify shell profiles unless `UV_NO_MODIFY_PATH=1` is set. `uv venv` uses
+  managed CPython 3.12 under `$XDG_DATA_HOME/frameyap/runtimes/cpu-TIMESTAMP`;
+  `uv pip install` selects `torch==2.8.0` from the CPU index, then
+  `moondream==2.4.0` from PyPI with Torch constrained, binary wheels only and no
+  pip fallback. The prompt/read-only plan disclose additional uv/Python downloads
+  alongside about 200 MB of wheels and a roughly 1–1.5 GB speech environment;
+  those estimates are not a total for the bootstrap/shared storage. uv and exact
+  Python builds are not app-pinned; speech top-level pins are unchanged and
+  other transitives still float. See [runtime details](packaging.md#speech-runtime)
+  for trust, storage overrides, verification and cleanup behavior. **Real
+  ARM64/Frame verification of this uv path is pending**; historical pip-based
+  installation evidence does not validate it.
+- **Noninteractive**: supply flags and `--yes` for network/model/runtime consent.
   `--print-plan` is read-only; `--json` provides structured results/errors and
   progress events for a model download. No prompt reads answers from a pipe.
   A bare terminal invocation, including `curl … | sh`, prompts on the real
@@ -71,10 +89,16 @@ shared with the app. No OS package changes, udev rule, root service, Steam store
 listing, unrelated application dependency, microphone recording, input injection
 or automatic update daemon. Hashes detect accidental/unauthorized alteration
 of a downloaded artifact but do not authenticate a compromised publisher;
-release metadata needs independent trust. No installer operation silently runs
-pip or launches inference; pip runs only under explicit `--install-runtime --yes`. Native-only archives support overlay checks but need
-an externally provisioned runtime/weights before voice typing. Selecting an
-uninstalled backend does not authorize a download or supply its inference engine.
+release metadata needs independent trust. No installer operation silently
+provisions speech dependencies or launches inference. Launch and native updates
+never bootstrap uv/Python or install speech packages; existing working speech
+environments are untouched by native updates. An older install can update its
+native release first, then run the **new**
+`current/bin/install.sh --install-runtime --yes` if repair is needed. Shared uv,
+Python storage and package caches are retained on failure and uninstall.
+Native-only archives support overlay checks but need a provisioned runtime/model
+before voice typing. Selecting an uninstalled backend does not authorize a
+download or supply its inference engine.
 
 ## Gate before publishing the goal as fulfilled
 

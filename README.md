@@ -18,9 +18,9 @@ On-device voice typing for Steam Frame. Hold a button, speak, check the text, an
 3. Answer **y** to the three questions:
    - install FrameYap,
    - download the speech model (about 180 MB),
-   - install the speech runtime (about 200 MB download, roughly 1–1.5 GB on disk).
+   - download managed Python (and uv if missing) and install the speech runtime (about 200 MB of wheels; roughly 1–1.5 GB for the speech environment).
 
-   The downloads can take a few minutes with little output; that is normal.
+   The downloads can take a few minutes with little output; that is normal. Runtime setup uses shared user-level uv; see [setup details and validation status](docs/packaging.md#speech-runtime).
 
 Everything installs into your home folder. No sudo, no compiler, no Steam store page. Prefer to read the script first? Download [`install.sh`](https://github.com/baketnk/frame-yap/releases/latest/download/install.sh) and open it; it is a single file.
 
@@ -44,7 +44,7 @@ The header shows battery levels for your controllers and headset. The **Buttons 
 
 ## Troubleshooting
 
-- **Panel says Unavailable, or shows an error while loading:** the speech model or runtime is missing (for example, you answered **n** during install). Run these, then restart FrameYap:
+- **Panel says Unavailable, or shows an error while loading:** the speech model or runtime is missing (for example, you answered **n** during install). On an older install, update FrameYap first (see below) so these commands use its new installer. Run these, then restart FrameYap:
 
   ```sh
   sh ~/.local/share/frameyap/current/bin/install.sh --install-model --backend redux --yes
@@ -63,14 +63,14 @@ Changing the setting restarts recognition and discards current recording, review
 
 Kestrel 0.8.0 has no supported opt-out, so OFF uses a narrow in-process monkey-patch for **moondream 2.4.0 / Kestrel 0.8.0**. It does not edit installed dependency files or affect other programs. With OFF selected, an unknown version or changed reporter interface stops recognition with **Telemetry protection unavailable** rather than silently allowing analytics. Quit FrameYap, then restore the pinned runtime using the `--install-runtime --yes` command in Troubleshooting; upgrades need a fresh compatibility review. ON does not apply that patch or its version guard. This is not a network sandbox for every third-party library. Earlier releases without this setting did not suppress Kestrel telemetry. See [worker implementation and verification](docs/worker.md#moondream-analytics).
 
-The installer downloads FrameYap from GitHub, the model from Hugging Face and the Python packages (moondream, Kestrel, CPU Torch) from PyPI and PyTorch. **Check for updates** contacts GitHub when pressed. Once installed, recognition can run offline. By default the microphone stays open while FrameYap is running and idle audio is thrown away; turn on **Settings → Close mic when idle** to close it between recordings (it may clip the first syllable). Recordings and transcripts are not kept, unless you turn on **Advanced debug**, whose logs may contain speech.
+The installer downloads FrameYap from GitHub, the model from Hugging Face and the Python packages (moondream, Kestrel, CPU Torch) from PyPI and PyTorch. Explicit runtime setup also downloads uv if missing and uv-managed Python from Astral's releases. **Check for updates** contacts GitHub when pressed. Once installed, recognition can run offline. By default the microphone stays open while FrameYap is running and idle audio is thrown away; turn on **Settings → Close mic when idle** to close it between recordings (it may clip the first syllable). Recordings and transcripts are not kept, unless you turn on **Advanced debug**, whose logs may contain speech.
 
 ## Update and uninstall
 
-- **Update:** run the install command again and answer **y** to FrameYap. Answer **n** to the model and runtime questions unless the release notes say they changed.
+- **Update:** run the install command again and answer **y** to FrameYap. Answer **n** to the model and runtime questions unless the release notes say they changed. Native updates leave working speech environments untouched.
 - **Check for updates:** Settings → scroll to **Check for updates**. FrameYap contacts GitHub only when you press it. If a newer published release is available, **Install update...** opens a desktop terminal; quit FrameYap and press Enter there to install. Nothing is downloaded by the check itself.
 - **Settings:** Animated background is off by default; Settings → **Animated background** turns it on and saves your choice. `~/.config/frameyap/config.json` holds Quick phrases, theme and placement; restart FrameYap after manual edits.
-- **Uninstall:** `sh ~/.local/share/frameyap/current/bin/install.sh --uninstall --unregistered`. Your settings and downloaded model are kept. Delete `~/.local/share/frameyap` and `~/.config/frameyap` to remove everything.
+- **Uninstall:** `sh ~/.local/share/frameyap/current/bin/install.sh --uninstall --unregistered`. Your settings and downloaded model are kept. Delete `~/.local/share/frameyap` and `~/.config/frameyap` to remove FrameYap's remaining data. Shared uv, managed Python and package caches are left alone.
 
 ## More
 

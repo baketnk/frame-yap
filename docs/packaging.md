@@ -106,25 +106,66 @@ the fingerprint; only the second Confirm Install click passes that fingerprint
 through the backend helper to the installer. Model installation does not
 provision a CPU Python runtime; no in-panel flow has been accepted on Frame.
 
-`sh install.sh --install-runtime --yes` explicitly creates a user-local venv
-under `$XDG_DATA_HOME/frameyap/runtimes/` from the invoking `python3` (3.10–3.13),
-pip-installs `torch==2.8.0` from PyTorch's CPU index, then `moondream==2.4.0`
-(which pins kestrel 0.8.0, kestrel-native 0.1.8, kestrel-kernels 0.7.0) from PyPI
-with Torch constrained, binary wheels only and `pip --isolated`. It verifies the
-imports and that Torch has no CUDA, then sets `python=` in `paths.conf` (other
-lines kept) and removes superseded FrameYap-managed runtimes. A failure removes
-only the new venv and leaves `paths.conf` unchanged. `--print-plan --json` shows
-the packages, index and size (about 200 MB of wheels, roughly 1–1.5 GB on disk)
-without touching anything. The app must be closed (install lock). Transitive
-dependencies are not pinned. Validated end to end on x86-64 Python 3.12
-(2026-09-25); the owner also reported a successful fresh Frame model/runtime
-installation from v0.1.202609251524. Later upgrade tests preserve that runtime.
+### Speech runtime
+
+Only `sh install.sh --install-runtime --yes` (or the separate attended runtime
+consent) provisions speech dependencies. The installer and updater still run on
+system Python 3.12+; they do not replace or bootstrap that Python.
+The app must be closed (install lock).
+
+Runtime setup reuses `uv` from `PATH` or the normal user bin directory. If absent,
+it downloads and runs the official <https://astral.sh/uv/install.sh> to install
+standard shared user-level uv, normally in `~/.local/bin`, **not** an app-private
+copy. That upstream script may update shell profiles by default;
+`UV_NO_MODIFY_PATH=1` opts out. This is an additional trust boundary: the official
+bootstrap script and uv version are not pinned by FrameYap. Inspect the script
+and upstream release sources if needed before consenting.
+
+`uv venv` uses uv-managed CPython 3.12 to create a dedicated environment at
+`$XDG_DATA_HOME/frameyap/runtimes/cpu-TIMESTAMP` (default data home:
+`~/.local/share`). Python builds come from Astral's python-build-standalone
+releases by default; the exact 3.12 patch/build is not app-pinned. uv's shared
+Python store and package cache are retained, honoring storage overrides such as
+`UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR`. `uv pip install` installs
+`torch==2.8.0` from `https://download.pytorch.org/whl/cpu`, then
+`moondream==2.4.0` from PyPI with Torch constrained. moondream pins kestrel 0.8.0,
+kestrel-native 0.1.8 and kestrel-kernels 0.7.0; other transitive dependencies
+still float. Both install steps require binary wheels; there is no pip fallback.
+Runtime commands ignore uv configuration files and resolver/environment overrides
+while preserving `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON_CACHE_DIR` and
+standard XDG storage locations. They always target FrameYap's venv, not an active
+environment or system site-packages.
+
+Python/package-version, import and CPU-only verification must succeed before
+activating `python=` in `paths.conf` (other lines kept). Success prunes superseded
+FrameYap-managed venvs as before. Failure during uv setup, venv creation, package
+installation or verification removes only the new venv and leaves `paths.conf`
+unchanged. Neither failure nor uninstall removes shared uv, managed Python
+installations or package caches. Native app updates and launches
+never bootstrap uv/Python or install speech packages, and updates leave working
+environments untouched. An older installation can first update the native
+release, then use the **new** `current/bin/install.sh --install-runtime --yes`
+if runtime repair is needed.
+
+The runtime prompt and read-only `--install-runtime --print-plan --json` disclose
+uv (if missing) and managed Python downloads in addition to about 200 MB of
+speech wheels and roughly 1–1.5 GB for the speech environment. These are not a
+total including the additional bootstrap downloads/shared storage. **The new uv
+path is pending real ARM64/Frame verification.** Historical system-Python/pip
+installation passed on x86-64 Python 3.12 (2026-09-25), and the owner reported a
+fresh Frame install from v0.1.202609251524; neither validates this uv path.
+Later native-upgrade tests preserved that older runtime.
+
+### Model verification
+
 In the source tree, `python3 scripts/model-status.py --list-models` or
 `--check-model redux --model-dir /absolute/model` hash-checks local files;
 the native `frameyap --list-models` / `--check-model` entry points use the
 adjacent installed verifier script; verify this in a staged archive before release. Manifest schema,
 source, size/hash and attribution live in `assets/backends/redux.json` and are
 validated by `python/frameyap/model_files.py`.
+
+### Source installation and attended flow
 
 For an explicit local **source** install, e.g.:
 
@@ -145,8 +186,8 @@ also stream file events), and `--yes` authorizes network downloads.
 A bare invocation with a terminal on stdout (including `curl … | sh`) runs
 the attended flow: it first notes that the user can press Ctrl+C and read the
 script, asks for the install choices, then separately asks y/n before the
-speech-model download (about 180 MB) and the pip runtime install, and runs the
-chosen steps in order, stopping at the first failure. Answers come from the real
+speech-model download (about 180 MB) and the uv/managed-Python speech setup,
+and runs the chosen steps in order, stopping at the first failure. Answers come from the real
 terminal (stdin if it is one, else `/dev/tty`); piped data is never read as an
 answer, and with no controlling terminal nothing prompts. It prints the
 equivalent flag commands for automation. Attended mode does not offer OpenVR
@@ -154,6 +195,8 @@ registration: the desktop entry is the launch path.
 Runs with flags, or without a terminal, never prompt. `--autolaunch`/`--no-autolaunch` are explicit
 OpenVR registration choices, off by default; do not pass either during an inert
 install if a running SteamVR session must remain untouched.
+
+### Launcher configuration
 
 The installed launcher defaults to `--run` and forwards explicit run flags
 (including `--backend ID`, `--model-store /absolute/store` and
@@ -175,8 +218,8 @@ The launcher reads these as **literal absolute paths**, not shell code, and does
 not follow a symlink to the config file. Environment variables override either
 setting for an explicit launch. This `paths.conf` survives upgrade/uninstall;
 only `--install-runtime` writes its `python=` line, and no runtime is bundled. No
-pip/bootstrap/model download or fallback is invoked by the launcher. Without
-paths, the native-only artifact cannot perform voice inference; its default
+uv/Python bootstrap, package/model download or fallback is invoked by the
+launcher. Without paths, the native-only artifact cannot perform voice inference; its default
 runtime and model locations do not exist. A new installer accepts only the exact
 previous managed launcher bytes for migration; a modified launcher is refused.
 The current managed launcher leaves `--font` unset so `config.json` can choose it.
@@ -269,6 +312,8 @@ Before uninstall, explicitly `frameyap --unregister /absolute/manifest/path` and
 verify success, then run `sh install.sh --uninstall --unregistered`. The latter is
 an acknowledgement, not a hidden SteamVR edit. Only owned files are removed;
 config stays, models move to `saved-models/VERSION`, conflicts/untracked files abort.
+The `runtimes/` directory is preserved; shared uv, managed Python and uv caches
+are never removed by FrameYap's uninstaller.
 
 Offline tests: `python3 -m unittest discover -s tests -p test_installer.py`.
 They use temporary homes/local fixtures. When editing the Python helper,

@@ -1274,27 +1274,183 @@ with patch.object(module, "check_host"), patch.object(module.urllib.request, "ur
             fetch.assert_called_once()
             self.assertEqual(card.read_bytes(), new)
 
-    def test_runtime_install_is_explicit_cpu_pinned_and_updates_only_python_path(self):
-        # subprocess is mocked: no venv, pip or network is touched.
+    def test_runtime_plan_and_consent_never_provision_uv(self):
         root = self.data / "frameyap"
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            self.assertEqual(installer.cli(["--install-runtime", "--print-plan", "--json"]), 0)
-        plan = json.loads(output.getvalue())
-        self.assertEqual((plan["operation"], plan["network"]), ("install-runtime", True))
-        self.assertIn("torch==2.8.0 from https://download.pytorch.org/whl/cpu", plan["packages"])
-        self.assertFalse(root.exists())
-        for extra in (["--version", "0.1.202609241530"], ["--backend", "other"], ["--without-model"]):
-            output = io.StringIO()
+        with patch.object(installer, "find_uv", return_value=None), \
+             patch.object(installer, "ensure_uv") as provision, \
+             patch.object(installer, "download") as download, \
+             patch.object(installer.subprocess, "run") as run:
             with contextlib.redirect_stdout(output):
-                self.assertEqual(installer.cli(["--install-runtime", "--json"] + extra), 2)
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), patch.object(installer.subprocess, "run") as run:
-            self.assertEqual(installer.cli(["--install-runtime", "--json"]), 1)
+                self.assertEqual(installer.cli(["--install-runtime", "--print-plan", "--json"]), 0)
+            plan = json.loads(output.getvalue())
+            self.assertEqual((plan["operation"], plan["network"]), ("install-runtime", True))
+            self.assertEqual((plan["runtime_python"], plan["python_provider"]), ("3.12", "uv-managed"))
+            self.assertIsNone(plan["uv"])
+            self.assertTrue(plan["uv_install_if_missing"])
+            self.assertEqual(plan["uv_installer_url"], "https://astral.sh/uv/install.sh")
+            self.assertIn("shared", plan["uv_storage"])
+            self.assertIn("torch==2.8.0 from https://download.pytorch.org/whl/cpu", plan["packages"])
+            self.assertFalse(root.exists())
+            for extra in (["--version", "0.1.202609241530"], ["--backend", "other"], ["--without-model"]):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(installer.cli(["--install-runtime", "--json"] + extra), 2)
+            with contextlib.redirect_stdout(io.StringIO()) as denied:
+                self.assertEqual(installer.cli(["--install-runtime", "--json"]), 1)
+            self.assertIn("--yes", json.loads(denied.getvalue())["message"])
+            provision.assert_not_called()
+            download.assert_not_called()
             run.assert_not_called()
-        self.assertIn("--yes", json.loads(output.getvalue())["message"])
         self.assertFalse((root / "runtimes").exists())
 
+    def test_runtime_provisioning_obeys_install_lock(self):
+        root = self.data / "frameyap"
+        root.mkdir(parents=True)
+        with (root / ".lock").open("w") as lock, \
+             patch.object(installer, "ensure_uv") as provision, \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 1)
+            provision.assert_not_called()
+        self.assertIn(".lock held", json.loads(output.getvalue())["message"])
+
+    def test_native_update_preserves_runtime_without_uv(self):
+        shutil.rmtree(self.stage / "runtime")
+        first, digest = self.package("0.1.202609241530", "--external-runtime")
+        with patch.object(installer, "ensure_uv") as provision:
+            self.install("0.1.202609241530", first, digest)
+            config = self.home / ".config/frameyap/paths.conf"
+            config.write_text("python=/existing/runtime/bin/python3\nmodel=/existing/model\n")
+            second, second_digest = self.package("0.1.202609241531", "--external-runtime")
+            self.install("0.1.202609241531", second, second_digest)
+            self.assertEqual(config.read_text(),
+                             "python=/existing/runtime/bin/python3\nmodel=/existing/model\n")
+            self.assertEqual((self.data / "frameyap/current/bin/install.sh").read_bytes(),
+                             (REPO / "install.sh").read_bytes())
+            provision.assert_not_called()
+
+    def test_uv_discovery_and_normal_install_locations(self):
+        with patch.dict(os.environ, {"HOME": str(self.home), "PATH": ""}, clear=True):
+            self.assertEqual(installer.uv_install_dir(), self.home / ".local/bin")
+            self.assertIsNone(installer.find_uv())
+            user_uv = self.home / ".local/bin/uv"
+            user_uv.parent.mkdir(parents=True)
+            user_uv.write_text("#!/bin/sh\nexit 0\n")
+            user_uv.chmod(0o700)
+            self.assertEqual(installer.find_uv(), str(user_uv))
+            with patch.dict(os.environ, {"XDG_DATA_HOME": str(self.data)}):
+                self.assertEqual(installer.uv_install_dir(), self.data.parent / "bin")
+                with patch.dict(os.environ, {"XDG_BIN_HOME": str(self.base / "user-bin")}):
+                    self.assertEqual(installer.uv_install_dir(), self.base / "user-bin")
+                    with patch.dict(os.environ, {"UV_INSTALL_DIR": str(self.base / "custom-bin")}):
+                        self.assertEqual(installer.uv_install_dir(), self.base / "custom-bin")
+            path_uv = self.base / "path-bin/uv"
+            path_uv.parent.mkdir()
+            path_uv.write_text("#!/bin/sh\nexit 0\n")
+            path_uv.chmod(0o700)
+            with patch.dict(os.environ, {"PATH": str(path_uv.parent)}):
+                self.assertEqual(installer.find_uv(), str(path_uv))
+                with patch.object(installer, "download") as download, \
+                     patch.object(installer.subprocess, "run") as run:
+                    self.assertEqual(installer.ensure_uv(SimpleNamespace(json=True), {}), str(path_uv))
+                    download.assert_not_called()
+                    run.assert_not_called()
+
+    def test_missing_uv_installs_for_user_and_is_usable_without_path_reload(self):
+        # Both download and execution are fakes; no actual installer is fetched/run.
+        args = SimpleNamespace(json=True)
+        bin_dir = self.base / "user bin"
+        commands = []
+
+        def download(url, destination):
+            self.assertEqual(url, "https://astral.sh/uv/install.sh")
+            destination.write_text("# fixture, never executed\n")
+
+        def install(command, **kwargs):
+            commands.append(command)
+            self.assertEqual(command[0], "sh")
+            self.assertTrue(Path(command[1]).is_file())
+            self.assertEqual(kwargs["env"]["UV_INSTALL_DIR"], str(bin_dir))
+            self.assertEqual(kwargs["env"]["UV_NO_MODIFY_PATH"], "1")
+            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertIs(kwargs["stdout"], sys.stderr)
+            bin_dir.mkdir()
+            (bin_dir / "uv").write_text("# fixture, never executed\n")
+            (bin_dir / "uv").chmod(0o700)
+            return SimpleNamespace(returncode=0)
+
+        with patch.dict(os.environ, {"HOME": str(self.home), "PATH": "", "XDG_BIN_HOME": str(bin_dir),
+                                     "UV_NO_MODIFY_PATH": "1"}, clear=True), \
+             patch.object(installer, "download", side_effect=download) as fetch, \
+             patch.object(installer.subprocess, "run", side_effect=install), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            uv = installer.ensure_uv(args, installer.uv_environment())
+            self.assertEqual(uv, str(bin_dir / "uv"))
+            self.assertEqual(installer.ensure_uv(args, installer.uv_environment()), uv)
+            fetch.assert_called_once()
+        self.assertEqual(len(commands), 1)
+        self.assertFalse(Path(commands[0][1]).exists())  # temporary script removed
+        self.assertEqual(json.loads(output.getvalue())["step"], "install uv for your user")
+
+    def test_uv_bootstrap_download_keeps_json_stdout_and_stdin_clean(self):
+        with patch.object(installer.subprocess, "run") as run:
+            installer.download(installer.UV_INSTALLER_URL, self.base / "uv-install.sh")
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ["curl", "--disable"])
+        self.assertEqual(command[-3:], ["--output", str(self.base / "uv-install.sh"),
+                                       "https://astral.sh/uv/install.sh"])
+        self.assertIs(run.call_args.kwargs["stdout"], sys.stderr)
+        self.assertEqual(run.call_args.kwargs["stdin"], subprocess.DEVNULL)
+        self.assertTrue(run.call_args.kwargs["check"])
+
+    def test_uv_bootstrap_failure_has_no_pip_fallback(self):
+        config = self.home / ".config/frameyap/paths.conf"
+        config.parent.mkdir(parents=True)
+        config.write_text("python=/old/python\nmodel=/keep/model\n")
+        root = self.data / "frameyap"
+        old = root / "runtimes/cpu-20260101000000"
+        old.mkdir(parents=True)
+        # Download failure, installer failure, and successful script without uv.
+        for failure in ("download", "install", "missing-binary"):
+            with self.subTest(failure=failure), \
+                 patch.object(installer, "find_uv", return_value=None), \
+                 patch.object(installer, "uv_install_dir", return_value=self.base / "absent-bin"), \
+                 patch.object(installer, "download") as download, \
+                 patch.object(installer.subprocess, "run") as run, \
+                 contextlib.redirect_stdout(io.StringIO()) as output:
+                if failure == "download":
+                    download.side_effect = OSError("download failed")
+                elif failure == "install":
+                    run.side_effect = subprocess.CalledProcessError(1, ["sh", "install.sh"])
+                self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 1)
+                self.assertFalse(json.loads(output.getvalue().splitlines()[-1])["ok"])
+                if failure == "download":
+                    run.assert_not_called()
+                else:
+                    self.assertEqual(run.call_count, 1)
+                    self.assertEqual(run.call_args.args[0][0], "sh")
+                self.assertEqual(config.read_text(), "python=/old/python\nmodel=/keep/model\n")
+                self.assertEqual(list((root / "runtimes").iterdir()), [old])
+
+    def test_runtime_uv_environment_preserves_shared_storage_not_resolver_overrides(self):
+        values = {"HOME": str(self.home), "PATH": "/usr/bin", "XDG_DATA_HOME": str(self.data),
+                  "XDG_CACHE_HOME": str(self.base / "cache"), "UV_CACHE_DIR": "/shared/wheels",
+                  "UV_PYTHON_INSTALL_DIR": "/shared/python", "UV_PYTHON_CACHE_DIR": "/shared/downloads",
+                  "UV_INDEX_URL": "https://wrong.invalid", "UV_EXTRA_INDEX_URL": "https://wrong.invalid",
+                  "UV_CONFIG_FILE": "/wrong/config", "UV_PYTHON": "/wrong/python", "UV_NO_MANAGED_PYTHON": "1",
+                  "UV_VENV_CLEAR": "1", "UV_LINK_MODE": "symlink", "UV_SYSTEM_PYTHON": "1",
+                  "UV_TARGET": "/wrong/target", "UV_NO_CACHE": "1", "UV_NO_BINARY": ":all:",
+                  "PIP_INDEX_URL": "https://wrong.invalid", "PYTHONPATH": "/wrong/imports",
+                  "PYTHONHOME": "/wrong/home", "VIRTUAL_ENV": "/unrelated/venv", "CONDA_PREFIX": "/unrelated/conda"}
+        with patch.dict(os.environ, values, clear=True):
+            env = installer.uv_environment()
+        self.assertEqual(env, {key: values[key] for key in
+                              ("HOME", "PATH", "XDG_DATA_HOME", "XDG_CACHE_HOME", "UV_CACHE_DIR",
+                               "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_CACHE_DIR")})
+
+    def test_runtime_install_is_explicit_cpu_pinned_and_updates_only_python_path(self):
+        # All subprocesses are mocked: no uv, Python installation or network access.
+        root = self.data / "frameyap"
         config = self.home / ".config/frameyap/paths.conf"
         config.parent.mkdir(parents=True)
         config.write_text("# mine\npython=/opt/old/bin/python3\nmodel=/opt/model\n")
@@ -1303,62 +1459,76 @@ with patch.object(module, "check_host"), patch.object(module.urllib.request, "ur
         foreign = root / "runtimes/keep-me"
         foreign.mkdir()
         commands = []
+        uv = "/normal user/bin/uv"
+        shared = self.base / "shared-uv"
+        shared.mkdir()
+        (shared / "keep").write_text("shared Python and cache")
 
         def fake(command, **kwargs):
             commands.append(command)
-            if command[1:3] == ["-m", "venv"]:
-                python = Path(command[3]) / "bin/python3"
+            self.assertEqual(kwargs["env"]["UV_CACHE_DIR"], str(shared))
+            self.assertEqual(kwargs["env"]["UV_PYTHON_INSTALL_DIR"], str(shared))
+            self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
+            self.assertIs(kwargs["stdout"], sys.stderr)
+            if command[1:3] == ["--no-config", "venv"]:
+                python = Path(command[-1]) / "bin/python3"
                 python.parent.mkdir(parents=True)
                 python.write_text("")
             return SimpleNamespace(returncode=0)
 
-        with patch.object(installer, "RUNTIME_PYTHON_RANGE", ((3, 0), (3, 1))), \
-             patch.object(installer.subprocess, "run") as run:
-            with contextlib.redirect_stdout(io.StringIO()) as unsupported:
-                self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 1)
-            self.assertIn("Python 3.10-3.13", json.loads(unsupported.getvalue())["message"])
-            run.assert_not_called()
-        self.env_range = patch.object(installer, "RUNTIME_PYTHON_RANGE", ((3, 0), (4, 0)))
-        self.env_range.start()
-        self.addCleanup(self.env_range.stop)
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), patch.object(installer.subprocess, "run", side_effect=fake):
-            self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 0)
-        events = [json.loads(line) for line in output.getvalue().splitlines()]
-        self.assertEqual([e.get("step") for e in events if e["event"] == "runtime_step"],
-                         ["create virtual environment", "install CPU Torch", "install moondream/Kestrel",
-                          "verify CPU runtime imports"])
-        self.assertEqual(events[-1]["event"], "complete")
-        torch, packages = commands[1], commands[2]
-        for command in (torch, packages):
-            self.assertIn("--isolated", command)
-            self.assertIn("--only-binary=:all:", command)
-        self.assertEqual(torch[-3:], ["--index-url", "https://download.pytorch.org/whl/cpu", "torch==2.8.0"])
-        self.assertEqual(packages[-1], "moondream==2.4.0")
-        self.assertIn("--constraint", packages)
-        runtimes = [item for item in (root / "runtimes").iterdir() if item.name.startswith("cpu-")]
-        self.assertEqual(len(runtimes), 1)
-        self.assertNotEqual(runtimes[0], old)
-        self.assertTrue(foreign.is_dir())
-        self.assertEqual(config.read_text(),
-                         f"# mine\nmodel=/opt/model\npython={runtimes[0]}/bin/python3\n")
+        with patch.object(installer, "find_uv", return_value=uv), \
+             patch.dict(os.environ, {"UV_CACHE_DIR": str(shared), "UV_PYTHON_INSTALL_DIR": str(shared)}), \
+             patch.object(installer, "download") as download:
+            output = io.StringIO()
+            # A newer installer interpreter no longer decides the speech Python.
+            with contextlib.redirect_stdout(output), patch.object(installer.subprocess, "run", side_effect=fake), \
+                 patch.object(installer.sys, "version_info", (3, 15, 2)):
+                self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 0)
+            events = [json.loads(line) for line in output.getvalue().splitlines()]
+            self.assertEqual([e.get("step") for e in events if e["event"] == "runtime_step"],
+                             ["create Python 3.12 virtual environment", "install CPU Torch", "install moondream/Kestrel",
+                              "verify CPU runtime imports"])
+            self.assertEqual(events[-1]["event"], "complete")
+            runtimes = [item for item in (root / "runtimes").iterdir() if item.name.startswith("cpu-")]
+            self.assertEqual(len(runtimes), 1)
+            self.assertNotEqual(runtimes[0], old)
+            python = str(runtimes[0] / "bin/python3")
+            self.assertEqual(commands[0], [uv, "--no-config", "venv", "--no-project", "--managed-python",
+                                          "--python", "3.12", str(runtimes[0])])
+            torch, packages = commands[1], commands[2]
+            for command in (torch, packages):
+                self.assertEqual(command[:6], [uv, "--no-config", "pip", "install", "--python", python])
+                self.assertIn("--no-python-downloads", command)
+                self.assertIn("--only-binary=:all:", command)
+                self.assertNotIn("--no-cache", command)
+            self.assertEqual(torch[-3:], ["--index-url", "https://download.pytorch.org/whl/cpu", "torch==2.8.0"])
+            self.assertEqual(packages[-5:], ["--index-url", "https://pypi.org/simple", "--constraint",
+                                             str(runtimes[0] / "frameyap-constraints.txt"), "moondream==2.4.0"])
+            self.assertEqual((runtimes[0] / "frameyap-constraints.txt").read_text(), "torch==2.8.0\n")
+            self.assertEqual(commands[3], [python, "-I", "-c", installer.RUNTIME_VERIFY])
+            self.assertTrue(foreign.is_dir())
+            self.assertEqual(config.read_text(), f"# mine\nmodel=/opt/model\npython={python}\n")
+            self.assertEqual((shared / "keep").read_text(), "shared Python and cache")
 
-        # A failed pip step removes only its own new venv and leaves paths.conf alone.
-        before = config.read_text()
+            # Every pre-activation failure preserves the selection/shared uv storage.
+            before = config.read_text()
+            for failure in ("venv", "torch==2.8.0", "moondream==2.4.0", installer.RUNTIME_VERIFY):
+                def failing(command, **kwargs):
+                    result = fake(command, **kwargs)
+                    if failure in command:
+                        raise subprocess.CalledProcessError(1, command)
+                    return result
 
-        def failing(command, **kwargs):
-            if "moondream==2.4.0" in command:
-                raise subprocess.CalledProcessError(1, command)
-            return fake(command, **kwargs)
-
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), patch.object(installer.subprocess, "run", side_effect=failing), \
-             patch.object(installer, "datetime") as clock:
-            clock.now.return_value.strftime.return_value = "cpu-20991231235959"
-            self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 1)
-        self.assertFalse((root / "runtimes/cpu-20991231235959").exists())
-        self.assertTrue(runtimes[0].is_dir())
-        self.assertEqual(config.read_text(), before)
+                with self.subTest(failure=failure), contextlib.redirect_stdout(io.StringIO()), \
+                     patch.object(installer.subprocess, "run", side_effect=failing), \
+                     patch.object(installer, "datetime") as clock:
+                    clock.now.return_value.strftime.return_value = "cpu-20991231235959"
+                    self.assertEqual(installer.cli(["--install-runtime", "--yes", "--json"]), 1)
+                self.assertFalse((root / "runtimes/cpu-20991231235959").exists())
+                self.assertTrue(runtimes[0].is_dir())
+                self.assertEqual(config.read_text(), before)
+                self.assertEqual((shared / "keep").read_text(), "shared Python and cache")
+            download.assert_not_called()
 
 
 if __name__ == "__main__":

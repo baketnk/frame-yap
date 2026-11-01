@@ -31,7 +31,7 @@ check() {
 }
 
 check 0 'Git: missing (not required' /usr/bin/env
-check 0 'uv: missing (not required' /usr/bin/env
+check 0 'uv: not on PATH (optional at preflight' /usr/bin/env
 check 0 'Preflight passed' /usr/bin/env
 check 1 'older than 3.12' /usr/bin/env MOCK_PYTHON='Python 3.11.9'
 for dep in cmake c++ pkg-config wayland-scanner; do
