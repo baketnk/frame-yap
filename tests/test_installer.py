@@ -72,6 +72,29 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(wrapper.split("<<'PY'\n", 1)[1].removesuffix("\nPY\n"),
                          (REPO / "scripts/install_payload.py").read_text())
 
+    def test_package_installer_tracks_version_and_matches_archive(self):
+        source = (REPO / "install.sh").read_bytes()
+        for version in ("0.1.202611031200", "0.1.202611031201"):
+            archive, _ = self.package(version)
+            standalone = self.output / f"install-{version}.sh"
+            self.assertIn(f'RELEASE_VERSION = "{version}"'.encode(), standalone.read_bytes())
+            self.assertTrue(os.access(standalone, os.X_OK))
+            with tarfile.open(archive) as tar:
+                self.assertEqual(tar.extractfile("bin/install.sh").read(), standalone.read_bytes())
+            result = subprocess.run(["sh", str(standalone), "--print-plan", "--json"],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(version, result.stdout)
+        self.assertEqual((REPO / "install.sh").read_bytes(), source)
+        self.assertEqual((self.stage / "bin/install.sh").read_bytes(), source)
+
+    def test_package_rejects_stale_staged_installer(self):
+        with (self.stage / "bin/install.sh").open("a") as stream:
+            stream.write("# stale staged copy\n")
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.package("0.1.202611031200")
+        self.assertEqual(list(self.output.iterdir()), [])
+
     def test_install_idempotence_upgrade_rollback_uninstall(self):
         a1, h1 = self.package("0.1.202609241530")
         self.install("0.1.202609241530", a1, h1)
@@ -95,7 +118,7 @@ class InstallTests(unittest.TestCase):
         self.assertTrue(os.access(root / "versions/0.1.202609241530/runtime/bin/helper", os.X_OK))
         self.assertTrue(os.access(root / "versions/0.1.202609241530/lib/libtest.so", os.X_OK))
         managed_installer = root / "current/bin/install.sh"
-        self.assertEqual(managed_installer.read_bytes(), (REPO / "install.sh").read_bytes())
+        self.assertEqual(managed_installer.read_bytes(), (self.output / "install-0.1.202609241530.sh").read_bytes())
         self.assertTrue(os.access(managed_installer, os.X_OK))
         self.assertTrue((root / "current/scripts/backend-service.py").is_file())
         manifest = json.loads((root / "frameyap.vrmanifest").read_text())
@@ -392,6 +415,7 @@ class InstallTests(unittest.TestCase):
             self.install("0.1.202609241530", a, "0" * 64)
         a.unlink()
         (self.output / (a.name + ".sha256")).unlink()
+        (self.output / "install-0.1.202609241530.sh").unlink()
         (self.stage / "bin/frameyap").write_text("changed")
         a, h2 = self.package("0.1.202609241530")
         with self.assertRaisesRegex(ValueError, "different archive digest"):
@@ -1326,7 +1350,7 @@ with patch.object(module, "check_host"), patch.object(module.urllib.request, "ur
             self.assertEqual(config.read_text(),
                              "python=/existing/runtime/bin/python3\nmodel=/existing/model\n")
             self.assertEqual((self.data / "frameyap/current/bin/install.sh").read_bytes(),
-                             (REPO / "install.sh").read_bytes())
+                             (self.output / "install-0.1.202609241531.sh").read_bytes())
             provision.assert_not_called()
 
     def test_uv_discovery_and_normal_install_locations(self):

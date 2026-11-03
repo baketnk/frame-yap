@@ -69,6 +69,36 @@ links/special files, duplicate members, oversized metadata/payloads and invalid
 layout. Checksums detect corruption, not a malicious/compromised publisher;
 authenticate release metadata independently. No packaging/installation model fetch.
 
+### Keep release assets aligned
+
+`package-release.py` now generates `install-VERSION.sh` alongside the archive
+and checksum. It stamps that installer with `--version` and embeds the exact
+same bytes in the archive's `bin/install.sh`. The source and staging tree are
+not modified. Packaging refuses stale embedded or staged installer copies;
+run `python3 scripts/sync-installer.py` and restage after editing the payload.
+Do not manually maintain a release pin in the development checkout.
+
+After the exact native build passes the Frame acceptance checks, publish all
+three generated files together under the vetted `vVERSION` tag. With GitHub CLI,
+the installer asset must be named `install.sh` for the README bootstrap URL:
+
+```sh
+# Publication is a separate, deliberate step after device validation.
+cp /path/to/out/install-VERSION.sh /path/to/out/install.sh
+gh release create vVERSION --verify-tag \
+  /path/to/out/frameyap-VERSION-linux-aarch64.tar.gz \
+  /path/to/out/frameyap-VERSION-linux-aarch64.tar.gz.sha256 \
+  /path/to/out/install.sh
+```
+
+Use the real version in each path. Do not upload the unversioned repository
+`install.sh`, which requires an explicit version in development. Each published
+installer remains pinned to its matching archive; a main-branch change alone
+neither publishes a release nor updates existing installations. The README URL
+selects the newest published release, not untested HEAD. Offline CI checks
+installer parity and packaging on pushes and pull requests; it does not publish
+or replace the device-validation gate.
+
 ## Consumer
 
 Bootstrap for a binary archive: Linux ARM64/glibc, Python 3.12+ (installer

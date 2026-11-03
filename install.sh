@@ -43,9 +43,9 @@ from urllib.parse import quote
 import urllib.request
 
 KEY = "local.frameyap.overlay"
-# The pinned release this installer belongs to (set in the release commit that
-# is tagged vRELEASE_VERSION); empty in a development tree.
-RELEASE_VERSION = "0.1.202610050210"
+# Stamped by package-release.py in both standalone and archived installers.
+# Development checkouts require an explicit version rather than a stale pin.
+RELEASE_VERSION = ""
 MARKER = "# FrameYap managed launcher v1\n"
 ARCHIVE_LIMIT = 12 * 1024**3
 MEMBER_LIMIT = 50000

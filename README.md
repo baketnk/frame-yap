@@ -22,6 +22,9 @@ On-device voice typing for Steam Frame. Hold a button, speak, check the text, an
 
    The downloads can take a few minutes with little output; that is normal. Runtime setup uses shared user-level uv; see [setup details and validation status](docs/packaging.md#speech-runtime).
 
+The command installs the latest **published release**, not the main branch.
+Changes on main reach it after a tested release is published.
+
 Everything installs into your home folder. No sudo, no compiler, no Steam store page. Prefer to read the script first? Download [`install.sh`](https://github.com/baketnk/frame-yap/releases/latest/download/install.sh) and open it; it is a single file.
 
 ## Launch

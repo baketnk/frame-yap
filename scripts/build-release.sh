@@ -5,7 +5,8 @@
 #
 # Downloads the pinned SDL3 and OpenVR SDK sources into WORKDIR (SHA-256
 # checked), builds audio-only SDL3 and FrameYap, runs the tests, then stages
-# and packages WORKDIR/out/frameyap-VERSION-linux-aarch64.tar.gz(.sha256).
+# and packages WORKDIR/out/frameyap-VERSION-linux-aarch64.tar.gz(.sha256)
+# plus install-VERSION.sh (upload under the release asset name install.sh).
 # No ASR runtime, model, Kestrel or Torch is downloaded or bundled.
 set -eu
 

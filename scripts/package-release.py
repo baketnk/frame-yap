@@ -82,6 +82,24 @@ def main(argv=None):
     sidecar = args.output / (name + ".sha256")
     if target.exists() or sidecar.exists() or target.is_symlink() or sidecar.is_symlink():
         p.error("release output exists; refusing to replace it")
+    # Generate both installers from the same validated source. Never ship the
+    # checkout's historical release pin alongside a newly versioned archive.
+    root = Path(__file__).resolve().parents[1]
+    wrapper = (root / "install.sh").read_bytes()
+    payload = (root / "scripts/install_payload.py").read_bytes()
+    if wrapper.split(b"<<'PY'\n", 1)[-1] != payload + b"\nPY\n":
+        p.error("embedded installer is stale; run python3 scripts/sync-installer.py")
+    if (stage / "bin/install.sh").read_bytes() != wrapper:
+        p.error("staged installer differs from source; restage before packaging")
+    release_installer, count = re.subn(
+        rb'^RELEASE_VERSION = "[^"\n]*"$',
+        ('RELEASE_VERSION = "' + args.version + '"').encode(), wrapper,
+        flags=re.MULTILINE)
+    if count != 1:
+        p.error("installer must contain exactly one RELEASE_VERSION assignment")
+    standalone = args.output / f"install-{args.version}.sh"
+    if standalone.exists() or standalone.is_symlink():
+        p.error("release installer output exists; refusing to replace it")
     meta = {"schema": 1, "version": args.version, "arch": ARCH,
             "runtime": "external-authorized-python" if args.external_runtime else "bundled-cpu-python", "model_revision": args.model_revision,
             "includes_model": (stage / "model").is_dir()}
@@ -95,14 +113,23 @@ def main(argv=None):
             info.mode = 0o600
             tar.addfile(info, io.BytesIO(payload))
             for entry in entries:
-                tar.add(entry, arcname=entry.relative_to(stage).as_posix(), recursive=False)
+                member = entry.relative_to(stage).as_posix()
+                if member == "bin/install.sh":
+                    info = tar.gettarinfo(str(entry), arcname=member)
+                    info.size = len(release_installer)
+                    tar.addfile(info, io.BytesIO(release_installer))
+                else:
+                    tar.add(entry, arcname=member, recursive=False)
         digest = hashlib.sha256()
         with open(temp, "rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
         os.replace(temp, target)
         sidecar.write_text(f"{digest.hexdigest()}  {name}\n")
-        print(f"Wrote {target} and {sidecar}")
+        with standalone.open("xb") as stream:
+            stream.write(release_installer)
+        standalone.chmod(0o755)
+        print(f"Wrote {target}, {sidecar} and {standalone} (publish as install.sh)")
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
